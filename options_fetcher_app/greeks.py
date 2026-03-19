@@ -3,7 +3,7 @@ from scipy.stats import norm
 
 
 def compute_greeks(df, underlying_price, risk_free_rate):
-    """Compute Black-Scholes Greeks for rows with valid pricing inputs."""
+    """Compute Black-Scholes Greeks and ITM probabilities for valid rows."""
     strike = df["strike"].to_numpy(dtype=float)
     time_to_expiration = df["time_to_expiration_years"].to_numpy(dtype=float)
     sigma = df["implied_volatility"].replace(0, np.nan).fillna(0.3).to_numpy(dtype=float)
@@ -32,6 +32,10 @@ def compute_greeks(df, underlying_price, risk_free_rate):
     delta[valid_calls] = cdf_d1[valid_calls]
     delta[valid_puts] = cdf_d1[valid_puts] - 1
 
+    probability_itm = np.full(len(df), np.nan)
+    probability_itm[valid_calls] = cdf_d2[valid_calls]
+    probability_itm[valid_puts] = norm.cdf(-d2[valid_puts])
+
     gamma = np.full(len(df), np.nan)
     gamma[valid] = pdf_d1[valid] / (underlying_price * sigma[valid] * np.sqrt(time_to_expiration[valid]))
 
@@ -58,6 +62,7 @@ def compute_greeks(df, underlying_price, risk_free_rate):
 
     df["delta"] = delta
     df["delta_abs"] = np.abs(delta)
+    df["probability_itm"] = probability_itm
     df["gamma"] = gamma
     df["vega"] = vega
     df["theta"] = theta / 365

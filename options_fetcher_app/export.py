@@ -55,6 +55,7 @@ COLUMN_ORDER = [
     "delta",
     "delta_abs",
     "delta_itm_proxy",
+    "probability_itm",
     "gamma",
     "vega",
     "vega_per_day",

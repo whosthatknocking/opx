@@ -14,7 +14,7 @@ The output is designed to be data-focused rather than decision-focused. It does 
 - Limits expirations to a rolling three-month window
 - Normalizes vendor fields into a stable CSV schema
 - Adds quote quality, freshness, liquidity, and pricing metrics
-- Computes Black-Scholes `delta`, `gamma`, `vega`, and `theta`
+- Computes Black-Scholes `delta`, true ITM probability, `gamma`, `vega`, and `theta`
 - Exports a timestamped CSV file for each run
 
 ## Requirements
@@ -128,6 +128,7 @@ The exported CSV contains both raw option data and derived fields. Some values m
 - `delta`: Black-Scholes delta. Use it as an estimate of directional sensitivity and a rough probability proxy.
 - `delta_abs`: Absolute value of delta. Use it when you only care about magnitude, not call-versus-put sign.
 - `delta_itm_proxy`: Delta normalized so higher values mean more in-the-money for both calls and puts. Use it for side-agnostic moneyness ranking.
+- `probability_itm`: Black-Scholes probability of finishing in the money, derived from `d2` rather than delta. Use it when you want the model-based ITM probability instead of the delta approximation.
 - `gamma`: Black-Scholes gamma. Use it to measure how quickly delta changes as the stock moves.
 - `vega`: Black-Scholes vega. Use it to measure sensitivity to implied volatility changes.
 - `vega_per_day`: Vega divided by days to expiration. Use it to compare vol sensitivity across expiries on a per-day basis.
