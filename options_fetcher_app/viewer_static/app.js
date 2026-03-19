@@ -5,7 +5,6 @@ const state = {
   selectedFile: null,
   sortColumn: null,
   sortDirection: 'asc',
-  searchTerm: '',
   columnFilters: {},
   activeFilterColumn: null,
   filterSearchTerm: '',
@@ -19,7 +18,7 @@ const elements = {
   fileSelect: document.getElementById('fileSelect'),
   rowCount: document.getElementById('rowCount'),
   pageSizeSelect: document.getElementById('pageSizeSelect'),
-  searchInput: document.getElementById('searchInput'),
+  freshnessSummary: document.getElementById('freshnessSummary'),
   dataTable: document.getElementById('dataTable'),
   tableHead: document.querySelector('#dataTable thead'),
   tableBody: document.querySelector('#dataTable tbody'),
@@ -29,7 +28,11 @@ const elements = {
   pageInfo: document.getElementById('pageInfo'),
   filterPopover: document.getElementById('filterPopover'),
   filterPopoverTitle: document.getElementById('filterPopoverTitle'),
+  filterSearchWrap: document.getElementById('filterSearchWrap'),
   filterValueSearch: document.getElementById('filterValueSearch'),
+  filterRangeWrap: document.getElementById('filterRangeWrap'),
+  filterMinValue: document.getElementById('filterMinValue'),
+  filterMaxValue: document.getElementById('filterMaxValue'),
   filterOptionList: document.getElementById('filterOptionList'),
   clearFilterButton: document.getElementById('clearFilterButton'),
   rowModal: document.getElementById('rowModal'),
@@ -66,8 +69,64 @@ function compareValues(left, right) {
   return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true, sensitivity: 'base' });
 }
 
+function formatDuration(seconds) {
+  if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) return '—';
+  const value = Math.max(0, Math.round(Number(seconds)));
+  if (value < 60) return `${value}s`;
+  if (value < 3600) return `${Math.round(value / 60)}m`;
+  if (value < 86400) return `${Math.round(value / 3600)}h`;
+  return `${Math.round(value / 86400)}d`;
+}
+
+function renderFreshnessSummary(summary) {
+  if (!summary) {
+    elements.freshnessSummary.innerHTML = '';
+    return;
+  }
+
+  elements.freshnessSummary.innerHTML = `
+    <article class="freshness-card">
+      <span class="freshness-label">File Age</span>
+      <strong>${escapeHtml(formatDuration(summary.file_age_seconds))}</strong>
+    </article>
+    <article class="freshness-card">
+      <span class="freshness-label">Option Quotes</span>
+      <strong>${escapeHtml(formatDuration(summary.option_quote_age_median_seconds))}</strong>
+      <span class="freshness-detail">median · max ${escapeHtml(formatDuration(summary.option_quote_age_max_seconds))}</span>
+    </article>
+    <article class="freshness-card">
+      <span class="freshness-label">Underlying</span>
+      <strong>${escapeHtml(formatDuration(summary.underlying_quote_age_median_seconds))}</strong>
+      <span class="freshness-detail">median · max ${escapeHtml(formatDuration(summary.underlying_quote_age_max_seconds))}</span>
+    </article>
+  `;
+}
+
 function normalizeFilterValue(value) {
   return value === null || value === undefined || value === '' ? '—' : String(value);
+}
+
+function parseFilterNumber(value) {
+  if (value === '' || value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getColumnDefinition(columnName) {
+  return state.columns.find((column) => column.name === columnName) || null;
+}
+
+function isRangeFilter(columnName) {
+  return getColumnDefinition(columnName)?.is_numeric === true;
+}
+
+function hasActiveColumnFilter(columnName) {
+  const filter = state.columnFilters[columnName];
+  if (!filter) return false;
+  if (filter.type === 'range') {
+    return filter.min !== null || filter.max !== null;
+  }
+  return filter.values.size > 0;
 }
 
 function getColumnFilterValues(columnName) {
@@ -77,20 +136,26 @@ function getColumnFilterValues(columnName) {
 }
 
 function getFilteredRows() {
-  const term = state.searchTerm.trim().toLowerCase();
   let rows = state.rows.slice();
 
-  Object.entries(state.columnFilters).forEach(([columnName, selectedValues]) => {
-    if (selectedValues.size > 0) {
-      rows = rows.filter((row) => selectedValues.has(normalizeFilterValue(row[columnName])));
+  Object.entries(state.columnFilters).forEach(([columnName, filter]) => {
+    if (filter.type === 'range') {
+      if (filter.min !== null || filter.max !== null) {
+        rows = rows.filter((row) => {
+          const value = Number(row[columnName]);
+          if (!Number.isFinite(value)) return false;
+          if (filter.min !== null && value < filter.min) return false;
+          if (filter.max !== null && value > filter.max) return false;
+          return true;
+        });
+      }
+      return;
+    }
+
+    if (filter.values.size > 0) {
+      rows = rows.filter((row) => filter.values.has(normalizeFilterValue(row[columnName])));
     }
   });
-
-  if (term) {
-    rows = rows.filter((row) =>
-      Object.values(row).some((value) => String(value ?? '').toLowerCase().includes(term))
-    );
-  }
 
   if (state.sortColumn) {
     rows.sort((a, b) => {
@@ -111,7 +176,13 @@ function closeFilterPopover() {
 
 function renderFilterOptions() {
   if (!state.activeFilterColumn) return;
-  const selectedValues = state.columnFilters[state.activeFilterColumn] || new Set();
+  if (isRangeFilter(state.activeFilterColumn)) {
+    elements.filterOptionList.innerHTML = '';
+    return;
+  }
+
+  const activeFilter = state.columnFilters[state.activeFilterColumn];
+  const selectedValues = activeFilter?.type === 'set' ? activeFilter.values : new Set();
   const values = getColumnFilterValues(state.activeFilterColumn).filter((value) =>
     value.toLowerCase().includes(state.filterSearchTerm.toLowerCase())
   );
@@ -132,14 +203,14 @@ function renderFilterOptions() {
     checkbox.type = 'checkbox';
     checkbox.checked = selectedValues.has(value);
     checkbox.addEventListener('change', () => {
-      if (!state.columnFilters[state.activeFilterColumn]) {
-        state.columnFilters[state.activeFilterColumn] = new Set();
+      if (!state.columnFilters[state.activeFilterColumn] || state.columnFilters[state.activeFilterColumn].type !== 'set') {
+        state.columnFilters[state.activeFilterColumn] = { type: 'set', values: new Set() };
       }
       if (checkbox.checked) {
-        state.columnFilters[state.activeFilterColumn].add(value);
+        state.columnFilters[state.activeFilterColumn].values.add(value);
       } else {
-        state.columnFilters[state.activeFilterColumn].delete(value);
-        if (state.columnFilters[state.activeFilterColumn].size === 0) {
+        state.columnFilters[state.activeFilterColumn].values.delete(value);
+        if (state.columnFilters[state.activeFilterColumn].values.size === 0) {
           delete state.columnFilters[state.activeFilterColumn];
         }
       }
@@ -160,6 +231,17 @@ function openFilterPopover(columnName, anchor) {
   state.filterSearchTerm = '';
   elements.filterPopoverTitle.textContent = `${columnName} filter`;
   elements.filterValueSearch.value = '';
+  elements.filterSearchWrap.hidden = isRangeFilter(columnName);
+  elements.filterRangeWrap.hidden = !isRangeFilter(columnName);
+
+  if (isRangeFilter(columnName)) {
+    const filter = state.columnFilters[columnName];
+    elements.filterMinValue.placeholder = `Min ${columnName}`;
+    elements.filterMaxValue.placeholder = `Max ${columnName}`;
+    elements.filterMinValue.value = filter?.type === 'range' && filter.min !== null ? String(filter.min) : '';
+    elements.filterMaxValue.value = filter?.type === 'range' && filter.max !== null ? String(filter.max) : '';
+  }
+
   renderFilterOptions();
 
   const rect = anchor.getBoundingClientRect();
@@ -167,10 +249,22 @@ function openFilterPopover(columnName, anchor) {
   elements.filterPopover.style.left = `${Math.max(8, window.scrollX + rect.left - 180 + rect.width)}px`;
   elements.filterPopover.classList.add('open');
   elements.filterPopover.setAttribute('aria-hidden', 'false');
-  elements.filterValueSearch.focus();
+  if (isRangeFilter(columnName)) {
+    elements.filterMinValue.focus();
+  } else {
+    elements.filterValueSearch.focus();
+  }
 }
 
 function getPagedRows(rows) {
+  if (state.pageSize === 'all') {
+    state.currentPage = 1;
+    return {
+      rows,
+      totalPages: 1,
+    };
+  }
+
   const totalPages = Math.max(1, Math.ceil(rows.length / state.pageSize));
   state.currentPage = Math.min(state.currentPage, totalPages);
   const start = (state.currentPage - 1) * state.pageSize;
@@ -247,10 +341,10 @@ function renderTable() {
     });
     const filterButton = document.createElement('button');
     filterButton.type = 'button';
-    filterButton.className = `header-filter-button ${state.columnFilters[column.name]?.size ? 'active' : ''}`;
+    filterButton.className = `header-filter-button ${hasActiveColumnFilter(column.name) ? 'active' : ''}`;
     filterButton.title = `Filter ${column.name}`;
-    filterButton.setAttribute('aria-label', state.columnFilters[column.name]?.size
-      ? `Filter ${column.name}, ${state.columnFilters[column.name].size} values selected`
+    filterButton.setAttribute('aria-label', hasActiveColumnFilter(column.name)
+      ? `Filter ${column.name}, active`
       : `Filter ${column.name}`);
     const filterIcon = document.createElement('span');
     filterIcon.className = 'header-filter-icon';
@@ -261,10 +355,14 @@ function renderTable() {
       </svg>
     `;
     filterButton.appendChild(filterIcon);
-    if (state.columnFilters[column.name]?.size) {
+    if (hasActiveColumnFilter(column.name)) {
       const filterCount = document.createElement('span');
       filterCount.className = 'header-filter-count';
-      filterCount.textContent = String(state.columnFilters[column.name].size);
+      if (isRangeFilter(column.name)) {
+        filterCount.textContent = 'R';
+      } else {
+        filterCount.textContent = String(state.columnFilters[column.name].values.size);
+      }
       filterButton.appendChild(filterCount);
     }
     filterButton.addEventListener('click', (event) => {
@@ -308,13 +406,19 @@ function renderTable() {
     elements.tableBody.appendChild(tr);
   });
 
-  const pageStart = filteredRows.length === 0 ? 0 : ((state.currentPage - 1) * state.pageSize) + 1;
-  const pageEnd = Math.min(state.currentPage * state.pageSize, filteredRows.length);
+  const pageStart = filteredRows.length === 0 ? 0 : (
+    state.pageSize === 'all' ? 1 : ((state.currentPage - 1) * state.pageSize) + 1
+  );
+  const pageEnd = state.pageSize === 'all'
+    ? filteredRows.length
+    : Math.min(state.currentPage * state.pageSize, filteredRows.length);
   elements.tableStatus.textContent =
     `${state.selectedFile} · showing ${pageStart.toLocaleString()}-${pageEnd.toLocaleString()} of ${filteredRows.length.toLocaleString()} filtered rows`;
-  elements.pageInfo.textContent = `Page ${state.currentPage} of ${totalPages}`;
-  elements.prevPageButton.disabled = state.currentPage <= 1;
-  elements.nextPageButton.disabled = state.currentPage >= totalPages;
+  elements.pageInfo.textContent = state.pageSize === 'all'
+    ? 'All rows'
+    : `Page ${state.currentPage} of ${totalPages}`;
+  elements.prevPageButton.disabled = state.pageSize === 'all' || state.currentPage <= 1;
+  elements.nextPageButton.disabled = state.pageSize === 'all' || state.currentPage >= totalPages;
 }
 
 function openRowModal(row) {
@@ -462,6 +566,7 @@ async function loadData(fileName) {
   state.currentPage = 1;
   state.columnWidths = {};
   elements.fileSelect.value = state.selectedFile;
+  renderFreshnessSummary(payload.freshness_summary);
   renderTable();
 }
 
@@ -501,14 +606,8 @@ async function initialize() {
     await loadData(event.target.value);
   });
 
-  elements.searchInput.addEventListener('input', (event) => {
-    state.searchTerm = event.target.value;
-    state.currentPage = 1;
-    renderTable();
-  });
-
   elements.pageSizeSelect.addEventListener('change', (event) => {
-    state.pageSize = Number(event.target.value);
+    state.pageSize = event.target.value === 'all' ? 'all' : Number(event.target.value);
     state.currentPage = 1;
     renderTable();
   });
@@ -530,9 +629,27 @@ async function initialize() {
     renderFilterOptions();
   });
 
+  const applyRangeFilter = () => {
+    if (!state.activeFilterColumn || !isRangeFilter(state.activeFilterColumn)) return;
+    const min = parseFilterNumber(elements.filterMinValue.value);
+    const max = parseFilterNumber(elements.filterMaxValue.value);
+    if (min === null && max === null) {
+      delete state.columnFilters[state.activeFilterColumn];
+    } else {
+      state.columnFilters[state.activeFilterColumn] = { type: 'range', min, max };
+    }
+    state.currentPage = 1;
+    renderTable();
+  };
+
+  elements.filterMinValue.addEventListener('input', applyRangeFilter);
+  elements.filterMaxValue.addEventListener('input', applyRangeFilter);
+
   elements.clearFilterButton.addEventListener('click', () => {
     if (state.activeFilterColumn) {
       delete state.columnFilters[state.activeFilterColumn];
+      elements.filterMinValue.value = '';
+      elements.filterMaxValue.value = '';
       state.currentPage = 1;
       renderTable();
       renderFilterOptions();

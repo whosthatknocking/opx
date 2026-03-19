@@ -29,9 +29,12 @@
     <main>
       <section id="tableTab" class="tab-panel active">
         <div class="toolbar">
-          <div class="stat-card">
-            <span class="stat-label">Rows</span>
-            <strong id="rowCount">0</strong>
+          <div class="toolbar-stats">
+            <div class="stat-card freshness-card">
+              <span class="stat-label freshness-label">Rows</span>
+              <strong id="rowCount">0</strong>
+            </div>
+            <div id="freshnessSummary" class="freshness-summary" aria-label="Data freshness"></div>
           </div>
           <label class="select-wrap compact-wrap">
             <span>Rows Per Page</span>
@@ -40,11 +43,8 @@
               <option value="100" selected>100</option>
               <option value="250">250</option>
               <option value="500">500</option>
+              <option value="all">All</option>
             </select>
-          </label>
-          <label class="search-wrap">
-            <span>Filter Rows</span>
-            <input id="searchInput" type="search" placeholder="Search any field">
           </label>
         </div>
 
@@ -90,10 +90,20 @@
       <strong id="filterPopoverTitle">Filter</strong>
       <button id="clearFilterButton" class="filter-clear-button" type="button">Clear</button>
     </div>
-    <label class="filter-search-wrap">
+    <label id="filterSearchWrap" class="filter-search-wrap">
       <span>Search Values</span>
       <input id="filterValueSearch" type="search" placeholder="Filter values">
     </label>
+    <div id="filterRangeWrap" class="filter-range-wrap" hidden>
+      <label class="filter-range-field">
+        <span>Min</span>
+        <input id="filterMinValue" type="number" inputmode="decimal" placeholder="Min strike">
+      </label>
+      <label class="filter-range-field">
+        <span>Max</span>
+        <input id="filterMaxValue" type="number" inputmode="decimal" placeholder="Max strike">
+      </label>
+    </div>
     <div id="filterOptionList" class="filter-option-list"></div>
   </div>
 

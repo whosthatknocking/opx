@@ -221,6 +221,52 @@ input,
   padding: 8px 10px;
   border-radius: 6px;
   margin-bottom: 6px;
+  gap: 8px;
+}
+
+.toolbar-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.freshness-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.freshness-card {
+  min-width: 110px;
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-strong);
+}
+
+.freshness-label {
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.freshness-card strong {
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.freshness-detail {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
 
 .filter-popover {
@@ -270,9 +316,33 @@ input,
   font-size: 0.68rem;
 }
 
+.filter-search-wrap[hidden],
+.filter-range-wrap[hidden] {
+  display: none !important;
+}
+
 .filter-search-wrap input {
   min-height: 30px;
   border-radius: 6px;
+}
+
+.filter-range-wrap {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.filter-range-field {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.filter-range-field input {
+  min-height: 30px;
+  border-radius: 6px;
+  width: 100%;
 }
 
 .filter-option-list {
@@ -299,18 +369,15 @@ input,
 }
 
 .stat-card {
-  display: grid;
-  gap: 2px;
+  min-width: 110px;
 }
 
 .stat-label {
   color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.stat-card strong {
-  font-size: 1.15rem;
-  font-variant-numeric: tabular-nums;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .table-card,
@@ -713,6 +780,19 @@ body.is-resizing .column-resizer::after {
   .toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .toolbar-stats {
+    width: 100%;
+  }
+
+  .freshness-summary {
+    width: 100%;
+  }
+
+  .freshness-card {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
   }
 
   select,

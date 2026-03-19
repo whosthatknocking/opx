@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 from functools import lru_cache
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -8,6 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
+from pandas.api.types import is_bool_dtype, is_numeric_dtype
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -73,9 +75,34 @@ def normalize_value(value):
     return value.item() if hasattr(value, "item") else value
 
 
+def build_freshness_summary(frame, csv_path):
+    option_quote_ages = pd.to_numeric(frame.get("quote_age_seconds"), errors="coerce").dropna()
+    underlying_quote_ages = pd.to_numeric(frame.get("underlying_price_age_seconds"), errors="coerce").dropna()
+    now = time.time()
+
+    summary = {
+        "file_age_seconds": max(0.0, now - csv_path.stat().st_mtime),
+        "option_quote_age_median_seconds": None,
+        "option_quote_age_max_seconds": None,
+        "underlying_quote_age_median_seconds": None,
+        "underlying_quote_age_max_seconds": None,
+    }
+
+    if not option_quote_ages.empty:
+        summary["option_quote_age_median_seconds"] = float(option_quote_ages.median())
+        summary["option_quote_age_max_seconds"] = float(option_quote_ages.max())
+
+    if not underlying_quote_ages.empty:
+        summary["underlying_quote_age_median_seconds"] = float(underlying_quote_ages.median())
+        summary["underlying_quote_age_max_seconds"] = float(underlying_quote_ages.max())
+
+    return summary
+
+
 def load_csv_payload(csv_name=None):
     csv_path = resolve_csv_path(csv_name)
     frame = pd.read_csv(csv_path)
+    freshness_summary = build_freshness_summary(frame, csv_path)
     visible_columns = [column for column in frame.columns if column not in HIDDEN_COLUMNS]
     frame = frame[visible_columns]
     rows = [
@@ -87,6 +114,7 @@ def load_csv_payload(csv_name=None):
         {
             "name": column,
             "description": descriptions.get(column, "No README description available for this field."),
+            "is_numeric": bool(is_numeric_dtype(frame[column]) and not is_bool_dtype(frame[column])),
         }
         for column in frame.columns
     ]
@@ -95,6 +123,7 @@ def load_csv_payload(csv_name=None):
         "row_count": len(rows),
         "columns": columns,
         "rows": rows,
+        "freshness_summary": freshness_summary,
     }
 
 
