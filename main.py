@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from options_fetcher_app.config import MAX_EXPIRATION, TICKERS, today
 from options_fetcher_app.export import write_options_csv
 from options_fetcher_app.fetch import fetch_ticker_option_chain
@@ -18,8 +20,10 @@ def main():
         print("No data fetched.")
         raise SystemExit(0)
 
-    write_options_csv(ticker_frames, output_path="options_engine_output.csv")
-    print("\nSaved: options_engine_output.csv")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = f"options_engine_output_{timestamp}.csv"
+    write_options_csv(ticker_frames, output_path=output_path)
+    print(f"\nSaved: {output_path}")
 
 
 if __name__ == "__main__":
