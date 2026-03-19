@@ -6,6 +6,9 @@ const state = {
   sortColumn: null,
   sortDirection: 'asc',
   searchTerm: '',
+  columnFilters: {},
+  activeFilterColumn: null,
+  filterSearchTerm: '',
   currentPage: 1,
   pageSize: 100,
   columnWidths: {},
@@ -24,6 +27,11 @@ const elements = {
   prevPageButton: document.getElementById('prevPageButton'),
   nextPageButton: document.getElementById('nextPageButton'),
   pageInfo: document.getElementById('pageInfo'),
+  filterPopover: document.getElementById('filterPopover'),
+  filterPopoverTitle: document.getElementById('filterPopoverTitle'),
+  filterValueSearch: document.getElementById('filterValueSearch'),
+  filterOptionList: document.getElementById('filterOptionList'),
+  clearFilterButton: document.getElementById('clearFilterButton'),
   rowModal: document.getElementById('rowModal'),
   rowModalMeta: document.getElementById('rowModalMeta'),
   rowDetailGrid: document.getElementById('rowDetailGrid'),
@@ -58,9 +66,25 @@ function compareValues(left, right) {
   return String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true, sensitivity: 'base' });
 }
 
+function normalizeFilterValue(value) {
+  return value === null || value === undefined || value === '' ? '—' : String(value);
+}
+
+function getColumnFilterValues(columnName) {
+  const values = new Set();
+  state.rows.forEach((row) => values.add(normalizeFilterValue(row[columnName])));
+  return [...values].sort((left, right) => compareValues(left, right));
+}
+
 function getFilteredRows() {
   const term = state.searchTerm.trim().toLowerCase();
   let rows = state.rows.slice();
+
+  Object.entries(state.columnFilters).forEach(([columnName, selectedValues]) => {
+    if (selectedValues.size > 0) {
+      rows = rows.filter((row) => selectedValues.has(normalizeFilterValue(row[columnName])));
+    }
+  });
 
   if (term) {
     rows = rows.filter((row) =>
@@ -76,6 +100,74 @@ function getFilteredRows() {
   }
 
   return rows;
+}
+
+function closeFilterPopover() {
+  state.activeFilterColumn = null;
+  state.filterSearchTerm = '';
+  elements.filterPopover.classList.remove('open');
+  elements.filterPopover.setAttribute('aria-hidden', 'true');
+}
+
+function renderFilterOptions() {
+  if (!state.activeFilterColumn) return;
+  const selectedValues = state.columnFilters[state.activeFilterColumn] || new Set();
+  const values = getColumnFilterValues(state.activeFilterColumn).filter((value) =>
+    value.toLowerCase().includes(state.filterSearchTerm.toLowerCase())
+  );
+  elements.filterOptionList.innerHTML = '';
+
+  if (values.length === 0) {
+    const emptyState = document.createElement('div');
+    emptyState.className = 'filter-option-empty';
+    emptyState.textContent = 'No matching values';
+    elements.filterOptionList.appendChild(emptyState);
+    return;
+  }
+
+  values.forEach((value) => {
+    const label = document.createElement('label');
+    label.className = 'filter-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = selectedValues.has(value);
+    checkbox.addEventListener('change', () => {
+      if (!state.columnFilters[state.activeFilterColumn]) {
+        state.columnFilters[state.activeFilterColumn] = new Set();
+      }
+      if (checkbox.checked) {
+        state.columnFilters[state.activeFilterColumn].add(value);
+      } else {
+        state.columnFilters[state.activeFilterColumn].delete(value);
+        if (state.columnFilters[state.activeFilterColumn].size === 0) {
+          delete state.columnFilters[state.activeFilterColumn];
+        }
+      }
+      state.currentPage = 1;
+      renderTable();
+      renderFilterOptions();
+    });
+    const text = document.createElement('span');
+    text.textContent = value;
+    label.appendChild(checkbox);
+    label.appendChild(text);
+    elements.filterOptionList.appendChild(label);
+  });
+}
+
+function openFilterPopover(columnName, anchor) {
+  state.activeFilterColumn = columnName;
+  state.filterSearchTerm = '';
+  elements.filterPopoverTitle.textContent = `${columnName} filter`;
+  elements.filterValueSearch.value = '';
+  renderFilterOptions();
+
+  const rect = anchor.getBoundingClientRect();
+  elements.filterPopover.style.top = `${window.scrollY + rect.bottom + 6}px`;
+  elements.filterPopover.style.left = `${Math.max(8, window.scrollX + rect.left - 180 + rect.width)}px`;
+  elements.filterPopover.classList.add('open');
+  elements.filterPopover.setAttribute('aria-hidden', 'false');
+  elements.filterValueSearch.focus();
 }
 
 function getPagedRows(rows) {
@@ -153,11 +245,43 @@ function renderTable() {
       }
       renderTable();
     });
+    const filterButton = document.createElement('button');
+    filterButton.type = 'button';
+    filterButton.className = `header-filter-button ${state.columnFilters[column.name]?.size ? 'active' : ''}`;
+    filterButton.title = `Filter ${column.name}`;
+    filterButton.setAttribute('aria-label', state.columnFilters[column.name]?.size
+      ? `Filter ${column.name}, ${state.columnFilters[column.name].size} values selected`
+      : `Filter ${column.name}`);
+    const filterIcon = document.createElement('span');
+    filterIcon.className = 'header-filter-icon';
+    filterIcon.setAttribute('aria-hidden', 'true');
+    filterIcon.innerHTML = `
+      <svg viewBox="0 0 16 16" focusable="false">
+        <path d="M2.5 3.5h11l-4.25 4.75v3.1l-2.5 1.45V8.25z"></path>
+      </svg>
+    `;
+    filterButton.appendChild(filterIcon);
+    if (state.columnFilters[column.name]?.size) {
+      const filterCount = document.createElement('span');
+      filterCount.className = 'header-filter-count';
+      filterCount.textContent = String(state.columnFilters[column.name].size);
+      filterButton.appendChild(filterCount);
+    }
+    filterButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      if (state.activeFilterColumn === column.name && elements.filterPopover.classList.contains('open')) {
+        closeFilterPopover();
+      } else {
+        openFilterPopover(column.name, filterButton);
+      }
+    });
     const resizer = document.createElement('span');
     resizer.className = 'column-resizer';
     resizer.title = `Resize ${column.name}`;
     resizer.addEventListener('pointerdown', (event) => startColumnResize(event, column.name));
     headerInner.appendChild(button);
+    headerInner.appendChild(filterButton);
     headerInner.appendChild(resizer);
     th.appendChild(headerInner);
     headerRow.appendChild(th);
@@ -334,6 +458,7 @@ async function loadData(fileName) {
   state.selectedFile = payload.selected_file;
   state.rows = payload.rows;
   state.columns = payload.columns;
+  state.columnFilters = {};
   state.currentPage = 1;
   state.columnWidths = {};
   elements.fileSelect.value = state.selectedFile;
@@ -398,6 +523,26 @@ async function initialize() {
   elements.nextPageButton.addEventListener('click', () => {
     state.currentPage += 1;
     renderTable();
+  });
+
+  elements.filterValueSearch.addEventListener('input', (event) => {
+    state.filterSearchTerm = event.target.value;
+    renderFilterOptions();
+  });
+
+  elements.clearFilterButton.addEventListener('click', () => {
+    if (state.activeFilterColumn) {
+      delete state.columnFilters[state.activeFilterColumn];
+      state.currentPage = 1;
+      renderTable();
+      renderFilterOptions();
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    if (elements.filterPopover.classList.contains('open') && !elements.filterPopover.contains(event.target)) {
+      closeFilterPopover();
+    }
   });
 
   elements.closeRowModalButton.addEventListener('click', closeRowModal);

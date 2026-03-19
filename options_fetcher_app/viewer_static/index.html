@@ -3,30 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Options CSV Browser</title>
+  <title>Browser</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <div class="page-shell">
     <header class="hero">
-      <div>
+      <div class="hero-title">
         <p class="eyebrow">Options Fetcher</p>
-        <h1>CSV Browser</h1>
-        <p class="hero-copy">Browse generated option-chain exports in a sortable table with README-backed field descriptions.</p>
+        <h1>Browser</h1>
       </div>
       <div class="hero-actions">
-        <label class="select-wrap">
+        <nav class="tabs" aria-label="Primary">
+          <button class="tab-button active" type="button" data-tab="table">Table</button>
+          <button class="tab-button" type="button" data-tab="readme">README</button>
+        </nav>
+        <label class="select-wrap header-select-wrap">
           <span>CSV File</span>
-          <select id="fileSelect"></select>
+          <select id="fileSelect" aria-label="CSV File"></select>
         </label>
         <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle dark and light mode">Toggle Theme</button>
       </div>
     </header>
-
-    <nav class="tabs" aria-label="Primary">
-      <button class="tab-button active" type="button" data-tab="table">Table</button>
-      <button class="tab-button" type="button" data-tab="readme">README</button>
-    </nav>
 
     <main>
       <section id="tableTab" class="tab-panel active">
@@ -85,6 +83,18 @@
       <div id="rowModalMeta" class="row-modal-meta"></div>
       <div id="rowDetailGrid" class="row-detail-grid"></div>
     </section>
+  </div>
+
+  <div id="filterPopover" class="filter-popover" aria-hidden="true">
+    <div class="filter-popover-header">
+      <strong id="filterPopoverTitle">Filter</strong>
+      <button id="clearFilterButton" class="filter-clear-button" type="button">Clear</button>
+    </div>
+    <label class="filter-search-wrap">
+      <span>Search Values</span>
+      <input id="filterValueSearch" type="search" placeholder="Filter values">
+    </label>
+    <div id="filterOptionList" class="filter-option-list"></div>
   </div>
 
   <script src="/app.js"></script>
