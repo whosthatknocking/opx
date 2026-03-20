@@ -92,6 +92,19 @@ def normalize_value(value):
     return value.item() if hasattr(value, "item") else value
 
 
+def is_truthy(value):
+    return str(value).strip().lower() in {"true", "1", "yes"}
+
+
+def coerce_number(series):
+    return pd.to_numeric(series, errors="coerce")
+
+
+def coerce_scalar_number(value):
+    number = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    return None if pd.isna(number) else float(number)
+
+
 def build_freshness_summary(frame, csv_path):
     option_quote_ages = pd.to_numeric(frame.get("quote_age_seconds"), errors="coerce").dropna()
     underlying_quote_ages = pd.to_numeric(frame.get("underlying_price_age_seconds"), errors="coerce").dropna()
@@ -114,6 +127,180 @@ def build_freshness_summary(frame, csv_path):
         summary["underlying_quote_age_max_seconds"] = float(underlying_quote_ages.max())
 
     return summary
+
+
+def format_percent(value):
+    return None if value is None else round(value * 100, 1)
+
+
+def normalize_opportunity(row):
+    if row is None:
+        return None
+    return {
+        "contract_symbol": row.get("contract_symbol"),
+        "option_type": row.get("option_type"),
+        "expiration_date": row.get("expiration_date"),
+        "strike": coerce_scalar_number(row.get("strike")),
+        "premium_reference_price": coerce_scalar_number(row.get("premium_reference_price")),
+        "return_on_margin_annualized_pct": format_percent(coerce_scalar_number(row.get("return_on_margin_annualized"))),
+        "probability_itm_pct": format_percent(coerce_scalar_number(row.get("probability_itm"))),
+        "delta_abs": coerce_scalar_number(row.get("delta_abs")),
+        "strike_distance_pct": format_percent(coerce_scalar_number(row.get("strike_distance_pct"))),
+        "quote_quality_score": coerce_scalar_number(row.get("quote_quality_score")),
+        "bid_ask_spread_pct_of_mid": format_percent(coerce_scalar_number(row.get("bid_ask_spread_pct_of_mid"))),
+        "summary": row.get("_summary"),
+    }
+
+
+def attach_opportunity_summary(frame):
+    frame = frame.copy()
+    frame["_summary"] = (
+        "ROM "
+        + (coerce_number(frame["return_on_margin_annualized"]).mul(100).round(1).astype("string").fillna("—"))
+        + "% · ITM "
+        + (coerce_number(frame["probability_itm"]).mul(100).round(1).astype("string").fillna("—"))
+        + "% · spread "
+        + (coerce_number(frame["bid_ask_spread_pct_of_mid"]).mul(100).round(1).astype("string").fillna("—"))
+        + "%"
+    )
+    return frame
+
+
+def pick_profitable_opportunity(frame):
+    if frame.empty:
+        return None
+    candidates = frame.copy()
+    if "passes_primary_screen" in candidates.columns:
+        screened = candidates[candidates["passes_primary_screen"].map(is_truthy)]
+        if not screened.empty:
+            candidates = screened
+    candidates = attach_opportunity_summary(candidates)
+    candidates["_rom"] = coerce_number(candidates.get("return_on_margin_annualized"))
+    candidates["_quality"] = coerce_number(candidates.get("quote_quality_score")).fillna(0)
+    candidates = candidates.sort_values(by=["_rom", "_quality"], ascending=[False, False], na_position="last")
+    return normalize_opportunity(candidates.iloc[0].to_dict()) if not candidates.empty else None
+
+
+def pick_moderate_risk_opportunity(frame):
+    if frame.empty:
+        return None
+    candidates = frame.copy()
+    if "passes_primary_screen" in candidates.columns:
+        screened = candidates[candidates["passes_primary_screen"].map(is_truthy)]
+        if not screened.empty:
+            candidates = screened
+    candidates["_itm"] = coerce_number(candidates.get("probability_itm"))
+    candidates["_rom"] = coerce_number(candidates.get("return_on_margin_annualized"))
+    candidates["_distance"] = coerce_number(candidates.get("strike_distance_pct"))
+    candidates["_spread"] = coerce_number(candidates.get("bid_ask_spread_pct_of_mid"))
+    moderate = candidates[
+        (candidates["_itm"].notna()) & (candidates["_itm"] <= 0.35)
+        & (candidates["_distance"].notna()) & (candidates["_distance"] >= 0.03)
+        & (candidates["_spread"].notna()) & (candidates["_spread"] < 0.20)
+    ]
+    if moderate.empty:
+        moderate = candidates[(candidates["_itm"].notna()) & (candidates["_itm"] <= 0.45)]
+    moderate = attach_opportunity_summary(moderate)
+    moderate = moderate.sort_values(by=["_rom", "_itm"], ascending=[False, True], na_position="last")
+    return normalize_opportunity(moderate.iloc[0].to_dict()) if not moderate.empty else None
+
+
+def build_market_context(ticker, underlying_price, day_change_pct):
+    if underlying_price is None and day_change_pct is None:
+        return f"{ticker} has no recent underlying snapshot in this file."
+    if day_change_pct is None:
+        return f"{ticker} last underlying price was {underlying_price:.2f}."
+    direction = "up" if day_change_pct >= 0 else "down"
+    return f"{ticker} last underlying price was {underlying_price:.2f}, {direction} {abs(day_change_pct) * 100:.1f}% versus previous close."
+
+
+def build_latest_status(day_change_pct, median_iv_pct, historical_volatility_pct):
+    if day_change_pct is None and median_iv_pct is None and historical_volatility_pct is None:
+        return "Snapshot unavailable"
+
+    status_parts = []
+    if day_change_pct is not None:
+        move_pct = day_change_pct * 100
+        if move_pct > 0.2:
+            status_parts.append(f"Up {move_pct:.1f}%")
+        elif move_pct < -0.2:
+            status_parts.append(f"Down {abs(move_pct):.1f}%")
+        else:
+            status_parts.append("Flat")
+
+    if median_iv_pct is not None and historical_volatility_pct is not None and historical_volatility_pct > 0:
+        iv_hv_ratio = median_iv_pct / historical_volatility_pct
+        if iv_hv_ratio >= 1.15:
+            status_parts.append("IV rich")
+        elif iv_hv_ratio <= 0.9:
+            status_parts.append("IV soft")
+        else:
+            status_parts.append("IV balanced")
+    elif median_iv_pct is not None:
+        status_parts.append("IV available")
+
+    return " · ".join(status_parts) if status_parts else "Snapshot available"
+
+
+def build_ticker_summary(ticker, frame):
+    underlying_price = coerce_number(frame.get("underlying_price")).dropna()
+    day_change = coerce_number(frame.get("underlying_day_change_pct")).dropna()
+    implied_volatility = coerce_number(frame.get("implied_volatility")).dropna()
+    hv = coerce_number(frame.get("historical_volatility")).dropna()
+    profitable = pick_profitable_opportunity(frame)
+    moderate = pick_moderate_risk_opportunity(frame)
+    underlying_price_value = None if underlying_price.empty else float(underlying_price.iloc[0])
+    day_change_value = None if day_change.empty else float(day_change.iloc[0])
+    median_iv_value = None if implied_volatility.empty else round(float(implied_volatility.median()) * 100, 1)
+    hv_value = None if hv.empty else round(float(hv.iloc[0]) * 100, 1)
+    return {
+        "ticker": ticker,
+        "row_count": int(len(frame.index)),
+        "call_count": int((frame.get("option_type") == "call").sum()),
+        "put_count": int((frame.get("option_type") == "put").sum()),
+        "expiration_count": int(frame.get("expiration_date").nunique()),
+        "underlying_price": underlying_price_value,
+        "underlying_day_change_pct": format_percent(day_change_value),
+        "median_implied_volatility_pct": median_iv_value,
+        "historical_volatility_pct": hv_value,
+        "iv_hv_ratio": None if median_iv_value is None or hv_value in (None, 0) else round(median_iv_value / hv_value, 2),
+        "latest_status": build_latest_status(day_change_value, median_iv_value, hv_value),
+        "market_context": build_market_context(ticker, underlying_price_value, day_change_value),
+        "profitable_opportunity": profitable,
+        "moderate_risk_opportunity": moderate,
+    }
+
+
+def build_summary_payload(csv_name=None):
+    csv_path = resolve_csv_path(csv_name)
+    frame = pd.read_csv(csv_path)
+    visible_columns = [column for column in frame.columns if column not in HIDDEN_COLUMNS]
+    frame = frame[visible_columns]
+    tickers = sorted(frame["underlying_symbol"].dropna().astype(str).unique())
+
+    ticker_summaries = []
+    for ticker in tickers:
+        ticker_frame = frame[frame["underlying_symbol"].astype(str) == ticker].copy()
+        ticker_summaries.append(build_ticker_summary(ticker, ticker_frame))
+
+    profitable_candidates = [item for item in ticker_summaries if item["profitable_opportunity"]]
+    moderate_candidates = [item for item in ticker_summaries if item["moderate_risk_opportunity"]]
+    profitable_candidates.sort(
+        key=lambda item: item["profitable_opportunity"]["return_on_margin_annualized_pct"] or -10**9,
+        reverse=True,
+    )
+    moderate_candidates.sort(
+        key=lambda item: item["moderate_risk_opportunity"]["return_on_margin_annualized_pct"] or -10**9,
+        reverse=True,
+    )
+    return {
+        "selected_file": csv_path.name,
+        "tickers": ticker_summaries,
+        "highlights": {
+            "most_profitable": profitable_candidates[0] if profitable_candidates else None,
+            "moderate_risk": moderate_candidates[0] if moderate_candidates else None,
+        },
+    }
 
 
 def load_csv_payload(csv_name=None):
@@ -174,6 +361,14 @@ class ViewerRequestHandler(SimpleHTTPRequestHandler):
             return self.respond_json(payload)
         if parsed.path == "/api/readme":
             return self.respond_json({"markdown": load_field_reference_markdown()})
+        if parsed.path == "/api/summary":
+            query = parse_qs(parsed.query)
+            csv_name = query.get("file", [None])[0]
+            try:
+                payload = build_summary_payload(csv_name)
+            except FileNotFoundError as exc:
+                return self.respond_json({"error": str(exc)}, status=HTTPStatus.NOT_FOUND)
+            return self.respond_json(payload)
         if parsed.path == "/":
             self.path = "/index.html"
         return super().do_GET()

@@ -15,14 +15,15 @@
       </div>
       <div class="hero-actions">
         <nav class="tabs" aria-label="Primary">
-          <button class="tab-button active" type="button" data-tab="table">Table</button>
-          <button class="tab-button" type="button" data-tab="readme">README</button>
+          <button class="tab-button active" type="button" data-tab="table">Option Chain</button>
+          <button class="tab-button" type="button" data-tab="summary">Summary</button>
+          <button class="tab-button" type="button" data-tab="readme">Readme</button>
         </nav>
         <label class="select-wrap header-select-wrap">
           <span>CSV File</span>
           <select id="fileSelect" aria-label="CSV File"></select>
         </label>
-        <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle dark and light mode">Toggle Theme</button>
+        <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle dark and light mode">Dark</button>
       </div>
     </header>
 
@@ -61,6 +62,14 @@
             <span id="pageInfo" class="page-info">Page 1 of 1</span>
             <button id="nextPageButton" class="pager-button" type="button">Next</button>
           </div>
+        </div>
+      </section>
+
+      <section id="summaryTab" class="tab-panel">
+        <div id="summaryContent" class="summary-shell">
+          <div id="summaryStatus" class="summary-status">Loading summary…</div>
+          <div id="summaryHighlights" class="summary-highlights"></div>
+          <div id="summaryTickerGrid" class="summary-ticker-grid"></div>
         </div>
       </section>
 

@@ -2,6 +2,7 @@ const state = {
   files: [],
   rows: [],
   columns: [],
+  summary: null,
   selectedFile: null,
   sortColumn: null,
   sortDirection: 'asc',
@@ -40,6 +41,11 @@ const elements = {
   rowDetailGrid: document.getElementById('rowDetailGrid'),
   closeRowModalButton: document.getElementById('closeRowModalButton'),
   tabButtons: [...document.querySelectorAll('.tab-button')],
+  summaryTab: document.getElementById('summaryTab'),
+  summaryContent: document.getElementById('summaryContent'),
+  summaryStatus: document.getElementById('summaryStatus'),
+  summaryHighlights: document.getElementById('summaryHighlights'),
+  summaryTickerGrid: document.getElementById('summaryTickerGrid'),
   tableTab: document.getElementById('tableTab'),
   readmeTab: document.getElementById('readmeTab'),
   readmeContent: document.getElementById('readmeContent'),
@@ -86,20 +92,170 @@ function renderFreshnessSummary(summary) {
 
   elements.freshnessSummary.innerHTML = `
     <article class="freshness-card">
-      <span class="freshness-label">File Age</span>
+      ${renderFieldLabel('File Age', 'freshness-label')}
       <strong>${escapeHtml(formatDuration(summary.file_age_seconds))}</strong>
     </article>
     <article class="freshness-card">
-      <span class="freshness-label">Option Quotes</span>
+      ${renderFieldLabel('Option Quotes', 'freshness-label')}
       <strong>${escapeHtml(formatDuration(summary.option_quote_age_median_seconds))}</strong>
       <span class="freshness-detail">median · max ${escapeHtml(formatDuration(summary.option_quote_age_max_seconds))}</span>
     </article>
     <article class="freshness-card">
-      <span class="freshness-label">Underlying</span>
+      ${renderFieldLabel('Underlying', 'freshness-label')}
       <strong>${escapeHtml(formatDuration(summary.underlying_quote_age_median_seconds))}</strong>
       <span class="freshness-detail">median · max ${escapeHtml(formatDuration(summary.underlying_quote_age_max_seconds))}</span>
     </article>
   `;
+}
+
+function formatNumber(value, digits = 1) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
+  return Number(value).toFixed(digits);
+}
+
+function formatSignedPercent(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
+  const number = Number(value);
+  const sign = number > 0 ? '+' : '';
+  return `${sign}${number.toFixed(1)}%`;
+}
+
+function getFieldDescription(label) {
+  const summaryDescriptions = {
+    'File Age': 'How long ago the selected CSV file was written.',
+    'Option Quotes': 'Age of option quotes in the file, shown as median and max quote_age_seconds.',
+    Underlying: 'Age of the underlying price snapshots in the file, shown as median and max underlying_price_age_seconds.',
+    Rows: 'Number of option records currently visible after active filters are applied.',
+    'Latest Status': 'Compact status derived from the latest underlying day move and the relationship between implied volatility and historical volatility.',
+    'IV / HV': 'Ratio of implied volatility to historical volatility. Values above 1 mean options are priced richer than recent realized volatility.',
+    'Best ROM': 'Highest return_on_margin_annualized among candidate contracts for this ticker.',
+    'Moderate ROM': 'return_on_margin_annualized for the selected moderate-risk candidate for this ticker.',
+    'Calls / Puts': 'Count of call and put option rows available for this underlying symbol.',
+    'Most Profitable': 'Heuristic pick for the highest annualized return on margin among candidate contracts.',
+    'Moderate Risk': 'Heuristic pick balancing return on margin with lower ITM probability, wider distance from spot, and tighter spread.',
+  };
+  const columnDescription = getColumnDefinition(label)?.description;
+  return columnDescription || summaryDescriptions[label] || '';
+}
+
+function renderFieldLabel(label, className = '') {
+  const description = getFieldDescription(label);
+  const titleAttribute = description ? ` title="${escapeHtml(description)}"` : '';
+  const cssClass = className ? `field-label-tooltip ${className}` : 'field-label-tooltip';
+  return `<span class="${cssClass}"${titleAttribute}>${escapeHtml(label)}</span>`;
+}
+
+function metricToneClass(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '';
+  return Number(value) < 0 ? 'negative' : 'positive';
+}
+
+function renderOpportunityCard(title, opportunity, tone = 'default') {
+  if (!opportunity) {
+    return `
+      <article class="opportunity-card opportunity-card-${tone}">
+        ${renderFieldLabel(title, 'opportunity-label')}
+        <strong>No candidate</strong>
+        <span class="opportunity-detail">No row matched the current heuristic.</span>
+      </article>
+    `;
+  }
+  return `
+    <article class="opportunity-card opportunity-card-${tone}">
+      ${renderFieldLabel(title, 'opportunity-label')}
+      <strong>${escapeHtml(`${opportunity.option_type} ${formatNumber(opportunity.strike, 2)} · ${opportunity.expiration_date}`)}</strong>
+      <span class="opportunity-detail">${escapeHtml(opportunity.summary || 'No summary available.')}</span>
+    </article>
+  `;
+}
+
+function renderSummaryHighlights(highlights) {
+  const cards = [];
+  const profitable = highlights?.most_profitable;
+  const moderate = highlights?.moderate_risk;
+  if (profitable?.profitable_opportunity) {
+    cards.push(`
+      <article class="summary-highlight-card">
+        <span class="summary-highlight-label">Most Profitable</span>
+        <strong>${escapeHtml(profitable.ticker)}</strong>
+        <span class="summary-highlight-detail">${escapeHtml(profitable.profitable_opportunity.summary || 'No summary available.')}</span>
+      </article>
+    `);
+  }
+  if (moderate?.moderate_risk_opportunity) {
+    cards.push(`
+      <article class="summary-highlight-card">
+        <span class="summary-highlight-label">Moderate Risk</span>
+        <strong>${escapeHtml(moderate.ticker)}</strong>
+        <span class="summary-highlight-detail">${escapeHtml(moderate.moderate_risk_opportunity.summary || 'No summary available.')}</span>
+      </article>
+    `);
+  }
+  elements.summaryHighlights.innerHTML = cards.join('');
+}
+
+function renderSummaryTickerGrid(tickers) {
+  elements.summaryTickerGrid.innerHTML = tickers.map((item) => `
+    <article class="ticker-summary-card">
+      <header class="ticker-summary-header">
+        <div class="ticker-summary-title-block">
+          <div>
+            <p class="ticker-summary-kicker">${renderFieldLabel('Underlying Symbol', 'ticker-summary-kicker')}</p>
+            <h2>${escapeHtml(item.ticker)}</h2>
+          </div>
+          <div class="ticker-summary-primary-metrics">
+            <div class="ticker-summary-spot">
+              ${renderFieldLabel('Underlying Price')}
+              <strong>${escapeHtml(formatNumber(item.underlying_price, 2))}</strong>
+            </div>
+            <span class="ticker-summary-status-pill" title="${escapeHtml(getFieldDescription('Latest Status'))}">${escapeHtml(item.latest_status || 'Snapshot available')}</span>
+          </div>
+        </div>
+      </header>
+      <div class="ticker-summary-stats">
+        <div class="ticker-summary-stat">
+          ${renderFieldLabel('Underlying Day Change %')}
+          <strong class="${metricToneClass(item.underlying_day_change_pct)}">${escapeHtml(formatSignedPercent(item.underlying_day_change_pct))}</strong>
+        </div>
+        <div class="ticker-summary-stat">
+          ${renderFieldLabel('Implied Volatility')}
+          <strong>${escapeHtml(formatNumber(item.median_implied_volatility_pct, 1))}%</strong>
+        </div>
+        <div class="ticker-summary-stat">
+          ${renderFieldLabel('Historical Volatility')}
+          <strong>${escapeHtml(formatNumber(item.historical_volatility_pct, 1))}%</strong>
+        </div>
+        <div class="ticker-summary-stat">
+          ${renderFieldLabel('IV / HV')}
+          <strong>${escapeHtml(formatNumber(item.iv_hv_ratio, 2))}</strong>
+        </div>
+        <div class="ticker-summary-stat">
+          ${renderFieldLabel('Best ROM')}
+          <strong>${escapeHtml(formatSignedPercent(item.profitable_opportunity?.return_on_margin_annualized_pct))}</strong>
+        </div>
+        <div class="ticker-summary-stat">
+          ${renderFieldLabel('Moderate ROM')}
+          <strong>${escapeHtml(formatSignedPercent(item.moderate_risk_opportunity?.return_on_margin_annualized_pct))}</strong>
+        </div>
+      </div>
+      <div class="opportunity-grid">
+        ${renderOpportunityCard('Most Profitable', item.profitable_opportunity, 'profit')}
+        ${renderOpportunityCard('Moderate Risk', item.moderate_risk_opportunity, 'moderate')}
+      </div>
+    </article>
+  `).join('');
+}
+
+function renderSummary(summary) {
+  if (!summary) {
+    elements.summaryStatus.textContent = 'No summary loaded.';
+    elements.summaryHighlights.innerHTML = '';
+    elements.summaryTickerGrid.innerHTML = '';
+    return;
+  }
+  elements.summaryStatus.textContent = `${summary.selected_file} · ${summary.tickers.length} tickers summarized`;
+  elements.summaryHighlights.innerHTML = '';
+  renderSummaryTickerGrid(summary.tickers);
 }
 
 function normalizeFilterValue(value) {
@@ -558,15 +714,30 @@ async function loadFiles() {
 }
 
 async function loadData(fileName) {
-  const payload = await fetchJson(`/api/data?file=${encodeURIComponent(fileName)}`);
+  const [dataResult, summaryResult] = await Promise.allSettled([
+    fetchJson(`/api/data?file=${encodeURIComponent(fileName)}`),
+    fetchJson(`/api/summary?file=${encodeURIComponent(fileName)}`),
+  ]);
+  if (dataResult.status !== 'fulfilled') {
+    throw dataResult.reason;
+  }
+  const payload = dataResult.value;
   state.selectedFile = payload.selected_file;
   state.rows = payload.rows;
   state.columns = payload.columns;
+  state.summary = summaryResult.status === 'fulfilled' ? summaryResult.value : null;
   state.columnFilters = {};
   state.currentPage = 1;
   state.columnWidths = {};
   elements.fileSelect.value = state.selectedFile;
   renderFreshnessSummary(payload.freshness_summary);
+  if (summaryResult.status === 'fulfilled') {
+    renderSummary(summaryResult.value);
+  } else {
+    elements.summaryStatus.textContent = `Summary unavailable: ${summaryResult.reason.message}`;
+    elements.summaryHighlights.innerHTML = '';
+    elements.summaryTickerGrid.innerHTML = '';
+  }
   renderTable();
 }
 
@@ -579,13 +750,19 @@ function activateTab(tabName) {
   elements.tabButtons.forEach((button) => {
     button.classList.toggle('active', button.dataset.tab === tabName);
   });
+  elements.summaryTab.classList.toggle('active', tabName === 'summary');
   elements.tableTab.classList.toggle('active', tabName === 'table');
   elements.readmeTab.classList.toggle('active', tabName === 'readme');
+}
+
+function updateThemeToggleLabel(theme) {
+  elements.themeToggle.textContent = theme === 'dark' ? 'Light' : 'Dark';
 }
 
 function setTheme(theme) {
   document.body.dataset.theme = theme;
   localStorage.setItem('options-fetcher-theme', theme);
+  updateThemeToggleLabel(theme);
 }
 
 function initializeTheme() {
