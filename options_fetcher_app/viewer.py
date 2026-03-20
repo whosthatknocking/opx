@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -7,6 +9,7 @@ from functools import lru_cache
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any, TypedDict
 from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
@@ -39,13 +42,87 @@ DATASET_CARD_COLUMNS = (
     "risk_free_rate_used",
     "data_source",
 )
+README_MISSING_DESCRIPTION = "No README description available for this field."
 
 
-def discover_csv_files():
+class FreshnessSummary(TypedDict):
+    file_age_seconds: float
+    file_modified_at: str
+    option_quote_age_median_seconds: float | None
+    option_quote_age_max_seconds: float | None
+    underlying_quote_age_median_seconds: float | None
+    underlying_quote_age_max_seconds: float | None
+
+
+class DatasetCard(TypedDict):
+    name: str
+    value: str
+    description: str
+
+
+class ColumnDefinition(TypedDict):
+    name: str
+    description: str
+    is_numeric: bool
+
+
+class OpportunitySummary(TypedDict):
+    contract_symbol: str | None
+    option_type: str | None
+    expiration_date: str | None
+    strike: float | None
+    premium_reference_price: float | None
+    return_on_margin_annualized_pct: float | None
+    probability_itm_pct: float | None
+    delta_abs: float | None
+    strike_distance_pct: float | None
+    quote_quality_score: float | None
+    bid_ask_spread_pct_of_mid: float | None
+    summary: str | None
+
+
+class TickerSummary(TypedDict):
+    ticker: str
+    row_count: int
+    call_count: int
+    put_count: int
+    expiration_count: int
+    underlying_price: float | None
+    underlying_day_change_pct: float | None
+    median_implied_volatility_pct: float | None
+    historical_volatility_pct: float | None
+    iv_hv_ratio: float | None
+    latest_status: str
+    market_context: str
+    profitable_opportunity: OpportunitySummary | None
+    moderate_risk_opportunity: OpportunitySummary | None
+
+
+class CsvPayload(TypedDict):
+    selected_file: str
+    row_count: int
+    columns: list[ColumnDefinition]
+    rows: list[dict[str, Any]]
+    freshness_summary: FreshnessSummary
+    dataset_cards: list[DatasetCard]
+
+
+class SummaryHighlights(TypedDict):
+    most_profitable: TickerSummary | None
+    moderate_risk: TickerSummary | None
+
+
+class SummaryPayload(TypedDict):
+    selected_file: str
+    tickers: list[TickerSummary]
+    highlights: SummaryHighlights
+
+
+def discover_csv_files() -> list[Path]:
     return sorted(REPO_ROOT.glob(CSV_PATTERN), key=lambda path: path.stat().st_mtime, reverse=True)
 
 
-def resolve_csv_path(csv_name=None):
+def resolve_csv_path(csv_name: str | None = None) -> Path:
     files = discover_csv_files()
     if not files:
         raise FileNotFoundError("No CSV files were found in the project root.")
@@ -61,12 +138,13 @@ def resolve_csv_path(csv_name=None):
 
 
 @lru_cache(maxsize=1)
-def load_readme_text():
+def load_readme_text() -> str:
     return README_PATH.read_text(encoding="utf-8")
 
 
 @lru_cache(maxsize=1)
-def load_field_reference_markdown():
+def load_field_reference_markdown() -> str:
+    """Return only the README section that documents exported CSV fields."""
     markdown = load_readme_text()
     start_marker = "## CSV Field Reference"
     start_index = markdown.find(start_marker)
@@ -83,8 +161,8 @@ def load_field_reference_markdown():
 
 
 @lru_cache(maxsize=1)
-def extract_field_descriptions():
-    descriptions = {}
+def extract_field_descriptions() -> dict[str, str]:
+    descriptions: dict[str, str] = {}
     pattern = re.compile(r"^- `([^`]+)`: (.+)$")
     for line in load_readme_text().splitlines():
         match = pattern.match(line.strip())
@@ -93,7 +171,7 @@ def extract_field_descriptions():
     return descriptions
 
 
-def normalize_value(value):
+def normalize_value(value: Any) -> Any:
     if pd.isna(value):
         return None
     if isinstance(value, (pd.Timestamp,)):
@@ -101,26 +179,27 @@ def normalize_value(value):
     return value.item() if hasattr(value, "item") else value
 
 
-def is_truthy(value):
+def is_truthy(value: Any) -> bool:
     return str(value).strip().lower() in {"true", "1", "yes"}
 
 
-def coerce_number(series):
+def coerce_number(series: Any) -> pd.Series:
     return pd.to_numeric(series, errors="coerce")
 
 
-def coerce_scalar_number(value):
+def coerce_scalar_number(value: Any) -> float | None:
     number = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
     return None if pd.isna(number) else float(number)
 
 
-def build_freshness_summary(frame, csv_path):
+def build_freshness_summary(frame: pd.DataFrame, csv_path: Path) -> FreshnessSummary:
+    """Build file-level freshness metadata for the current CSV snapshot."""
     option_quote_ages = pd.to_numeric(frame.get("quote_age_seconds"), errors="coerce").dropna()
     underlying_quote_ages = pd.to_numeric(frame.get("underlying_price_age_seconds"), errors="coerce").dropna()
     now = time.time()
     modified_at = csv_path.stat().st_mtime
 
-    summary = {
+    summary: FreshnessSummary = {
         "file_age_seconds": max(0.0, now - modified_at),
         "file_modified_at": datetime.fromtimestamp(modified_at).strftime("%Y-%m-%d %H:%M:%S"),
         "option_quote_age_median_seconds": None,
@@ -140,29 +219,35 @@ def build_freshness_summary(frame, csv_path):
     return summary
 
 
-def build_dataset_cards(frame, descriptions):
-    cards = []
+def get_single_value(frame: pd.DataFrame, column: str) -> str | None:
+    """Return a dataset-wide constant value when exactly one non-null value exists."""
+    if column not in frame.columns:
+        return None
+    values = frame[column].dropna().astype(str).unique().tolist()
+    return values[0] if len(values) == 1 else None
+
+
+def build_dataset_cards(frame: pd.DataFrame, descriptions: dict[str, str]) -> list[DatasetCard]:
+    cards: list[DatasetCard] = []
     for column in DATASET_CARD_COLUMNS:
-        if column not in frame.columns:
-            continue
-        values = frame[column].dropna().astype(str).unique().tolist()
-        if len(values) != 1:
+        value = get_single_value(frame, column)
+        if value is None:
             continue
         cards.append(
             {
                 "name": column,
-                "value": values[0],
-                "description": descriptions.get(column, "No README description available for this field."),
+                "value": value,
+                "description": descriptions.get(column, README_MISSING_DESCRIPTION),
             }
         )
     return cards
 
 
-def format_percent(value):
+def format_percent(value: float | None) -> float | None:
     return None if value is None else round(value * 100, 1)
 
 
-def normalize_opportunity(row):
+def normalize_opportunity(row: dict[str, Any] | None) -> OpportunitySummary | None:
     if row is None:
         return None
     return {
@@ -181,7 +266,7 @@ def normalize_opportunity(row):
     }
 
 
-def attach_opportunity_summary(frame):
+def attach_opportunity_summary(frame: pd.DataFrame) -> pd.DataFrame:
     frame = frame.copy()
     frame["_summary"] = (
         "ROM "
@@ -195,14 +280,19 @@ def attach_opportunity_summary(frame):
     return frame
 
 
-def pick_profitable_opportunity(frame):
+def screen_primary_candidates(frame: pd.DataFrame) -> pd.DataFrame:
+    """Prefer rows passing the primary screen when that flag exists."""
+    candidates = frame.copy()
+    if "passes_primary_screen" not in candidates.columns:
+        return candidates
+    screened = candidates[candidates["passes_primary_screen"].map(is_truthy)]
+    return screened if not screened.empty else candidates
+
+
+def pick_profitable_opportunity(frame: pd.DataFrame) -> OpportunitySummary | None:
     if frame.empty:
         return None
-    candidates = frame.copy()
-    if "passes_primary_screen" in candidates.columns:
-        screened = candidates[candidates["passes_primary_screen"].map(is_truthy)]
-        if not screened.empty:
-            candidates = screened
+    candidates = screen_primary_candidates(frame)
     candidates = attach_opportunity_summary(candidates)
     candidates["_rom"] = coerce_number(candidates.get("return_on_margin_annualized"))
     candidates["_quality"] = coerce_number(candidates.get("quote_quality_score")).fillna(0)
@@ -210,14 +300,10 @@ def pick_profitable_opportunity(frame):
     return normalize_opportunity(candidates.iloc[0].to_dict()) if not candidates.empty else None
 
 
-def pick_moderate_risk_opportunity(frame):
+def pick_moderate_risk_opportunity(frame: pd.DataFrame) -> OpportunitySummary | None:
     if frame.empty:
         return None
-    candidates = frame.copy()
-    if "passes_primary_screen" in candidates.columns:
-        screened = candidates[candidates["passes_primary_screen"].map(is_truthy)]
-        if not screened.empty:
-            candidates = screened
+    candidates = screen_primary_candidates(frame)
     candidates["_itm"] = coerce_number(candidates.get("probability_itm"))
     candidates["_rom"] = coerce_number(candidates.get("return_on_margin_annualized"))
     candidates["_distance"] = coerce_number(candidates.get("strike_distance_pct"))
@@ -234,7 +320,7 @@ def pick_moderate_risk_opportunity(frame):
     return normalize_opportunity(moderate.iloc[0].to_dict()) if not moderate.empty else None
 
 
-def build_market_context(ticker, underlying_price, day_change_pct):
+def build_market_context(ticker: str, underlying_price: float | None, day_change_pct: float | None) -> str:
     if underlying_price is None and day_change_pct is None:
         return f"{ticker} has no recent underlying snapshot in this file."
     if day_change_pct is None:
@@ -243,7 +329,11 @@ def build_market_context(ticker, underlying_price, day_change_pct):
     return f"{ticker} last underlying price was {underlying_price:.2f}, {direction} {abs(day_change_pct) * 100:.1f}% versus previous close."
 
 
-def build_latest_status(day_change_pct, median_iv_pct, historical_volatility_pct):
+def build_latest_status(
+    day_change_pct: float | None,
+    median_iv_pct: float | None,
+    historical_volatility_pct: float | None,
+) -> str:
     if day_change_pct is None and median_iv_pct is None and historical_volatility_pct is None:
         return "Snapshot unavailable"
 
@@ -271,7 +361,7 @@ def build_latest_status(day_change_pct, median_iv_pct, historical_volatility_pct
     return " · ".join(status_parts) if status_parts else "Snapshot available"
 
 
-def build_ticker_summary(ticker, frame):
+def build_ticker_summary(ticker: str, frame: pd.DataFrame) -> TickerSummary:
     underlying_price = coerce_number(frame.get("underlying_price")).dropna()
     day_change = coerce_number(frame.get("underlying_day_change_pct")).dropna()
     implied_volatility = coerce_number(frame.get("implied_volatility")).dropna()
@@ -300,28 +390,34 @@ def build_ticker_summary(ticker, frame):
     }
 
 
-def build_summary_payload(csv_name=None):
+def sort_ticker_candidates(
+    items: list[TickerSummary],
+    opportunity_key: str,
+) -> list[TickerSummary]:
+    return sorted(
+        items,
+        key=lambda item: (item[opportunity_key] or {}).get("return_on_margin_annualized_pct") or -10**9,
+        reverse=True,
+    )
+
+
+def build_summary_payload(csv_name: str | None = None) -> SummaryPayload:
+    """Build the compact per-ticker summary payload used by the Summary tab."""
     csv_path = resolve_csv_path(csv_name)
     frame = pd.read_csv(csv_path)
     visible_columns = [column for column in frame.columns if column not in HIDDEN_COLUMNS]
     frame = frame[visible_columns]
     tickers = sorted(frame["underlying_symbol"].dropna().astype(str).unique())
 
-    ticker_summaries = []
+    ticker_summaries: list[TickerSummary] = []
     for ticker in tickers:
         ticker_frame = frame[frame["underlying_symbol"].astype(str) == ticker].copy()
         ticker_summaries.append(build_ticker_summary(ticker, ticker_frame))
 
     profitable_candidates = [item for item in ticker_summaries if item["profitable_opportunity"]]
     moderate_candidates = [item for item in ticker_summaries if item["moderate_risk_opportunity"]]
-    profitable_candidates.sort(
-        key=lambda item: item["profitable_opportunity"]["return_on_margin_annualized_pct"] or -10**9,
-        reverse=True,
-    )
-    moderate_candidates.sort(
-        key=lambda item: item["moderate_risk_opportunity"]["return_on_margin_annualized_pct"] or -10**9,
-        reverse=True,
-    )
+    profitable_candidates = sort_ticker_candidates(profitable_candidates, "profitable_opportunity")
+    moderate_candidates = sort_ticker_candidates(moderate_candidates, "moderate_risk_opportunity")
     return {
         "selected_file": csv_path.name,
         "tickers": ticker_summaries,
@@ -332,7 +428,19 @@ def build_summary_payload(csv_name=None):
     }
 
 
-def load_csv_payload(csv_name=None):
+def build_column_definitions(frame: pd.DataFrame, descriptions: dict[str, str]) -> list[ColumnDefinition]:
+    return [
+        {
+            "name": column,
+            "description": descriptions.get(column, README_MISSING_DESCRIPTION),
+            "is_numeric": bool(is_numeric_dtype(frame[column]) and not is_bool_dtype(frame[column])),
+        }
+        for column in frame.columns
+    ]
+
+
+def load_csv_payload(csv_name: str | None = None) -> CsvPayload:
+    """Load the current CSV and serialize the table payload consumed by the browser."""
     csv_path = resolve_csv_path(csv_name)
     frame = pd.read_csv(csv_path)
     freshness_summary = build_freshness_summary(frame, csv_path)
@@ -344,14 +452,7 @@ def load_csv_payload(csv_name=None):
         {column: normalize_value(value) for column, value in record.items()}
         for record in frame.to_dict(orient="records")
     ]
-    columns = [
-        {
-            "name": column,
-            "description": descriptions.get(column, "No README description available for this field."),
-            "is_numeric": bool(is_numeric_dtype(frame[column]) and not is_bool_dtype(frame[column])),
-        }
-        for column in frame.columns
-    ]
+    columns = build_column_definitions(frame, descriptions)
     return {
         "selected_file": csv_path.name,
         "row_count": len(rows),
@@ -362,7 +463,7 @@ def load_csv_payload(csv_name=None):
     }
 
 
-def make_file_listing():
+def make_file_listing() -> list[dict[str, Any]]:
     files = discover_csv_files()
     return [
         {
@@ -384,7 +485,7 @@ class ViewerRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Expires", "0")
         super().end_headers()
 
-    def do_GET(self):
+    def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/files":
             return self.respond_json({"files": make_file_listing()})
@@ -410,7 +511,7 @@ class ViewerRequestHandler(SimpleHTTPRequestHandler):
             self.path = "/index.html"
         return super().do_GET()
 
-    def respond_json(self, payload, status=HTTPStatus.OK):
+    def respond_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
         encoded = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -418,13 +519,14 @@ class ViewerRequestHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
-    def log_message(self, format, *args):
+    def log_message(self, format: str, *args: Any) -> None:
         if os.environ.get("OPTIONS_FETCHER_VIEWER_QUIET") == "1":
             return
         super().log_message(format, *args)
 
 
-def serve(host="127.0.0.1", port=8000):
+def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
+    """Run the local viewer HTTP server."""
     server = ThreadingHTTPServer((host, port), ViewerRequestHandler)
     print(f"CSV viewer running at http://{host}:{port}")
     try:
@@ -435,7 +537,7 @@ def serve(host="127.0.0.1", port=8000):
         server.server_close()
 
 
-def main():
+def main() -> None:
     host = os.environ.get("OPTIONS_FETCHER_VIEWER_HOST", "127.0.0.1")
     port = int(os.environ.get("OPTIONS_FETCHER_VIEWER_PORT", "8000"))
     serve(host=host, port=port)
