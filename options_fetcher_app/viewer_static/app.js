@@ -37,6 +37,7 @@ const elements = {
   filterOptionList: document.getElementById('filterOptionList'),
   clearFilterButton: document.getElementById('clearFilterButton'),
   rowModal: document.getElementById('rowModal'),
+  rowModalTitle: document.getElementById('rowModalTitle'),
   rowModalMeta: document.getElementById('rowModalMeta'),
   rowDetailGrid: document.getElementById('rowDetailGrid'),
   closeRowModalButton: document.getElementById('closeRowModalButton'),
@@ -585,7 +586,9 @@ function openRowModal(row) {
     row.expiration_date,
     row.strike !== undefined && row.strike !== null ? `strike ${row.strike}` : null,
   ].filter(Boolean);
-  elements.rowModalMeta.textContent = identityParts.join(' · ');
+  const identityText = identityParts.join(' · ');
+  elements.rowModalTitle.textContent = identityText || 'Record';
+  elements.rowModalMeta.textContent = state.selectedFile ? `Source ${state.selectedFile}` : '';
   elements.rowDetailGrid.innerHTML = '';
 
   state.columns.forEach((column) => {

@@ -177,6 +177,14 @@ input,
   letter-spacing: 0.01em;
 }
 
+.theme-toggle:hover,
+.pager-button:hover,
+.row-modal-close:hover,
+.filter-clear-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .tabs {
   display: inline-flex;
   margin: 0;
@@ -202,7 +210,7 @@ input,
 
 .tab-button.active {
   background: var(--panel-strong);
-  color: var(--text);
+  color: var(--accent);
 }
 
 .tab-panel {
@@ -228,41 +236,44 @@ input,
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
-  gap: 4px;
+  gap: 6px;
 }
 
 .freshness-summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
 }
 
 .freshness-card {
-  min-width: 104px;
+  min-width: 118px;
   display: grid;
-  gap: 1px;
-  padding: 5px 7px;
+  gap: 2px;
+  padding: 7px 9px;
   border: 1px solid var(--line);
   border-radius: 3px;
-  background: var(--panel-strong);
+  background:
+    linear-gradient(180deg, var(--panel-strong), var(--panel) 24%),
+    var(--panel);
 }
 
 .freshness-label {
-  color: var(--muted);
+  color: var(--accent);
   font-size: 0.6rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .field-label-tooltip {
   display: inline-block;
-  border-bottom: 1px dotted var(--accent);
+  color: var(--accent);
+  border-bottom: 1px dotted rgba(15, 118, 110, 0.45);
 }
 
 .freshness-card strong {
   color: var(--text);
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
 }
@@ -272,6 +283,12 @@ input,
   font-size: 0.64rem;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
+}
+
+.summary-stat-card {
+  background:
+    linear-gradient(180deg, var(--panel-strong), var(--panel) 24%),
+    var(--panel);
 }
 
 .filter-popover {
@@ -301,6 +318,13 @@ input,
   font-size: 0.74rem;
 }
 
+.filter-popover-header strong {
+  color: var(--accent);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.6rem;
+}
+
 .filter-clear-button {
   border: 1px solid var(--line);
   background: var(--panel);
@@ -319,6 +343,15 @@ input,
   gap: 4px;
   color: var(--muted);
   font-size: 0.68rem;
+}
+
+.filter-search-wrap span,
+.filter-range-field span {
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.6rem;
+  font-weight: 700;
 }
 
 .filter-search-wrap[hidden],
@@ -378,10 +411,10 @@ input,
 }
 
 .stat-label {
-  color: var(--muted);
+  color: var(--accent);
   font-size: 0.64rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -604,6 +637,17 @@ input,
   font-variant-numeric: tabular-nums;
 }
 
+.table-status::before {
+  content: "Dataset";
+  display: block;
+  margin-bottom: 2px;
+  color: var(--accent);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .table-scroll {
   overflow: auto;
   flex: 1 1 auto;
@@ -810,9 +854,22 @@ body.is-resizing .column-resizer::after {
   font-variant-numeric: tabular-nums;
 }
 
+.page-info::before {
+  content: "Pagination";
+  display: block;
+  margin-bottom: 1px;
+  color: var(--accent);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .readme-card {
   padding: 10px;
-  background: var(--panel-strong);
+  background:
+    linear-gradient(180deg, var(--panel-strong), var(--panel) 18%),
+    var(--panel);
   max-height: none;
   overflow: auto;
 }
@@ -821,6 +878,7 @@ body.is-resizing .column-resizer::after {
 .readme-card h2,
 .readme-card h3 {
   margin-top: 1.2em;
+  color: var(--accent);
 }
 
 .readme-card h1:first-child,
@@ -868,8 +926,8 @@ body.is-resizing .column-resizer::after {
 .row-modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(7, 10, 14, 0.54);
-  backdrop-filter: blur(10px);
+  background: rgba(7, 10, 14, 0.64);
+  backdrop-filter: blur(6px);
 }
 
 .row-modal-panel {
@@ -879,92 +937,97 @@ body.is-resizing .column-resizer::after {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border-radius: 6px;
+  border-radius: 4px;
   border: 1px solid var(--line);
-  background: var(--panel-strong);
+  background:
+    linear-gradient(180deg, var(--panel-strong), var(--panel) 18%),
+    var(--panel);
   box-shadow: var(--shadow);
 }
 
 .row-modal-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 16px 10px;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px 10px;
   border-bottom: 1px solid var(--line);
 }
 
 .row-modal-kicker {
-  margin: 0 0 4px;
+  margin: 0 0 3px;
   color: var(--accent);
-  font-size: 0.68rem;
+  font-size: 0.6rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .row-modal-header h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.88rem;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
 }
 
 .row-modal-close {
-  min-height: 34px;
+  min-height: 30px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: transparent;
+  border-radius: 4px;
+  background: var(--panel-strong);
   color: var(--text);
-  padding: 0 10px;
+  padding: 0 9px;
   font: inherit;
   cursor: pointer;
+  font-size: 0.72rem;
 }
 
 .row-modal-meta {
-  padding: 10px 16px 0;
+  padding: 8px 14px 0;
   color: var(--muted);
-  font-size: 0.76rem;
+  font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
 }
 
 .row-detail-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 8px;
-  padding: 12px 14px 14px;
+  gap: 6px;
+  padding: 10px 12px 12px;
   overflow: auto;
 }
 
 .row-detail-item {
   border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--panel);
-  padding: 10px;
-  min-height: 98px;
+  border-radius: 3px;
+  background: var(--panel-strong);
+  padding: 8px 9px;
+  min-height: 90px;
 }
 
 .row-detail-label {
-  color: var(--muted);
-  font-size: 0.68rem;
+  color: var(--accent);
+  font-size: 0.6rem;
   font-weight: 700;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  margin-bottom: 6px;
+  margin-bottom: 5px;
 }
 
 .row-detail-value {
   color: var(--text);
-  font-size: 0.84rem;
+  font-size: 0.78rem;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1.35;
   word-break: break-word;
-  margin-bottom: 9px;
+  margin-bottom: 7px;
   font-variant-numeric: tabular-nums;
 }
 
 .row-detail-description {
   color: var(--muted);
-  font-size: 0.71rem;
-  line-height: 1.42;
+  font-size: 0.66rem;
+  line-height: 1.35;
 }
 
 @media (max-width: 840px) {

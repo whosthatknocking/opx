@@ -31,8 +31,8 @@
       <section id="tableTab" class="tab-panel active">
         <div class="toolbar">
           <div class="toolbar-stats">
-            <div class="stat-card freshness-card">
-              <span class="stat-label freshness-label">Rows</span>
+            <div class="stat-card freshness-card summary-stat-card">
+              <span class="stat-label freshness-label field-label-tooltip" title="Number of option records currently visible after active filters are applied.">Rows</span>
               <strong id="rowCount">0</strong>
             </div>
             <div id="freshnessSummary" class="freshness-summary" aria-label="Data freshness"></div>
@@ -85,7 +85,7 @@
       <header class="row-modal-header">
         <div>
           <p class="row-modal-kicker">Row Details</p>
-          <h2 id="rowModalTitle">Selected Record</h2>
+          <h2 id="rowModalTitle">Record</h2>
         </div>
         <button id="closeRowModalButton" class="row-modal-close" type="button" aria-label="Close row details">Close</button>
       </header>
