@@ -30,8 +30,15 @@ def main():
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = OUTPUTS_DIR / f"options_engine_output_{timestamp}.csv"
+    row_count = sum(len(frame) for frame in ticker_frames)
     write_options_csv(ticker_frames, output_path=output_path)
-    logger.info("run_finished output_path=%s ticker_frames=%s", output_path, len(ticker_frames))
+    logger.info(
+        "run_finished output_path=%s ticker_frames=%s rows_written=%s",
+        output_path,
+        len(ticker_frames),
+        row_count,
+    )
+    print(f"Rows written: {row_count}")
     print(f"\nSaved: {output_path}")
 
 
