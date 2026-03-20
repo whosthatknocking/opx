@@ -57,6 +57,23 @@ def load_readme_text():
 
 
 @lru_cache(maxsize=1)
+def load_field_reference_markdown():
+    markdown = load_readme_text()
+    start_marker = "## CSV Field Reference"
+    start_index = markdown.find(start_marker)
+    if start_index == -1:
+        return markdown
+
+    remaining = markdown[start_index:]
+    next_section_match = re.search(r"^## ", remaining[len(start_marker):], flags=re.MULTILINE)
+    if not next_section_match:
+        return remaining.strip()
+
+    end_index = len(start_marker) + next_section_match.start()
+    return remaining[:end_index].strip()
+
+
+@lru_cache(maxsize=1)
 def extract_field_descriptions():
     descriptions = {}
     pattern = re.compile(r"^- `([^`]+)`: (.+)$")
@@ -156,7 +173,7 @@ class ViewerRequestHandler(SimpleHTTPRequestHandler):
                 return self.respond_json({"error": str(exc)}, status=HTTPStatus.NOT_FOUND)
             return self.respond_json(payload)
         if parsed.path == "/api/readme":
-            return self.respond_json({"markdown": load_readme_text()})
+            return self.respond_json({"markdown": load_field_reference_markdown()})
         if parsed.path == "/":
             self.path = "/index.html"
         return super().do_GET()

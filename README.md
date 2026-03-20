@@ -8,6 +8,8 @@ The script fetches near-term option chains for a configured list of tickers, nor
 
 The output is designed to be data-focused rather than decision-focused. It does not decide whether to close, roll, or open positions. Instead, it produces a richer dataset that can support those decisions elsewhere.
 
+Warning: Yahoo Finance quote timestamps can lag, and the collected option, underlying, or VIX data may be stale. Always check the freshness fields in the CSV or browser before relying on the output for trading decisions.
+
 ## Features
 
 - Fetches call and put chains for configured tickers
@@ -43,12 +45,6 @@ Run the project from the repository root:
 
 ```bash
 python3 options_fetcher.py
-```
-
-You can also run the main entrypoint directly:
-
-```bash
-python3 main.py
 ```
 
 ## CSV Browser
