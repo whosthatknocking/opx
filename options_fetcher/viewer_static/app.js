@@ -730,6 +730,30 @@ function inlineMarkdown(text) {
     .replace(/`([^`]+)`/g, '<code>$1</code>');
 }
 
+function formatFileOptionLabel(fileName) {
+  const match = /^options_engine_output_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})\.csv$/.exec(fileName);
+  if (!match) return fileName;
+
+  const [, year, month, day, hour, minute, second] = match;
+  const parsedDate = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+  );
+  if (Number.isNaN(parsedDate.getTime())) return fileName;
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(parsedDate);
+}
+
 async function loadFiles() {
   const payload = await fetchJson('/api/files');
   state.files = payload.files;
@@ -738,7 +762,8 @@ async function loadFiles() {
   state.files.forEach((file) => {
     const option = document.createElement('option');
     option.value = file.name;
-    option.textContent = file.name;
+    option.textContent = formatFileOptionLabel(file.name);
+    option.title = file.name;
     elements.fileSelect.appendChild(option);
   });
 }
