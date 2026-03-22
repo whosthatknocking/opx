@@ -651,7 +651,7 @@ input,
   flex: 1 1 auto;
   min-height: 0;
   max-height: none;
-  padding: 6px 8px 8px;
+  padding: 6px 8px 0;
   background: transparent;
 }
 
@@ -823,11 +823,15 @@ body.is-resizing .column-resizer::after {
 
 .pagination-bar {
   display: flex;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
   padding: 5px 8px 8px;
   border-top: 1px solid var(--line);
+  background: var(--surface-fill);
 }
 
 .pager-button {
@@ -1180,6 +1184,7 @@ body {
 
 .page-shell {
   display: block;
+  height: 100vh;
   min-height: 100vh;
   padding: 0;
   background: var(--bg);
@@ -1223,6 +1228,7 @@ body {
 .workspace-shell {
   display: flex;
   flex-direction: column;
+  height: 100vh;
   min-width: 0;
   min-height: 100vh;
   padding: 24px;
@@ -1274,6 +1280,11 @@ body {
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
+}
+
+.tab-panel.active {
+  overflow: hidden;
 }
 
 .eyebrow,
@@ -1293,6 +1304,9 @@ body {
 .toolbar {
   padding: 12px;
   margin-bottom: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 3;
 }
 
 .toolbar-stats,

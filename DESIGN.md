@@ -60,6 +60,12 @@ Header contents:
 * **Overview tab:** ticker summary cards and opportunity cards
 * **Reference tab:** rendered documentation/readme content
 
+Dataset tab behavior:
+* The dataset pane is constrained to the viewport rather than growing indefinitely.
+* The table scrolls inside its card.
+* The toolbar stays accessible at the top of the dataset pane.
+* Pagination remains visible at the bottom of the table card.
+
 ### C. Responsive Behavior
 * Desktop-first layout
 * Header controls wrap into stacked rows on smaller viewports
@@ -73,6 +79,7 @@ Header contents:
 * Approximate 48px row height
 * Subtle hover state
 * Pill-style indicators for qualitative risk/status values when applicable
+* Internal scrolling region so paging controls remain reachable without scrolling past the entire page
 
 ### B. Cards
 * Flat 1px bordered surfaces
@@ -96,3 +103,4 @@ Avoid reintroducing older names such as `Ledger`, `Portfolio`, or `Equity Ledger
 * Maintain contrast of at least 4.5:1 for readable data text.
 * Preserve dark/light mode switching in the header.
 * Keep visual updates aligned with the existing viewer behavior rather than introducing extra presentation-only content.
+* Keep dataset navigation controls visible during analysis, especially `Rows Per Page`, `Previous`, and `Next`.
