@@ -192,7 +192,7 @@ Requirements:
 
 Initial secret keys:
 
-- `massive_api_key = "..."`
+- `[providers.massive] api_key = "..."`
 
 `yfinance` should not require secrets.
 
@@ -342,7 +342,6 @@ Add a provider coverage section to the documentation with a matrix like:
 Minimum field groups:
 
 - underlying snapshot
-- underlying market state
 - underlying quote timestamp
 - option bid/ask/last
 - volume
@@ -488,7 +487,7 @@ Errors should be explicit and actionable.
 Examples:
 
 - unsupported provider name
-- missing `massive_api_key` when `massive` is selected
+- missing `[providers.massive].api_key` when `massive` is selected
 - provider authentication failure
 - provider rate limit or empty response
 - provider returned data but a field required for derivation is absent
@@ -640,21 +639,21 @@ Exit criteria:
 
 ### Milestone 4: Documentation and Viewer Clarity
 
-Status: In progress.
+Status: Verified complete on 2026-03-23.
 
 Completed work:
 
-- README now documents `~/.config/opx/config.toml`
-- README now documents that `massive` uses an API key in config
-- README now documents fetch-progress output and CLI exit-status behavior
-- field-reference docs now reflect Massive-specific symbol, contract-size, and in-the-money mapping behavior
+- docs were split into a landing-page README, a user guide, a development guide, and a dedicated field-reference document
+- user-facing docs now document provider onboarding, `~/.config/opx/config.toml`, fetch-progress output, CLI exit-status behavior, and provider-specific plan requirements
+- the field reference now includes a provider mapping matrix that distinguishes direct, transformed, derived, and blank fields for `yfinance` and `massive`
+- the viewer reference tab now reads from the dedicated field-reference document and dataset cards surface the active provider through `data_source`
 
-Remaining work:
+Verification notes:
 
-- provider onboarding documentation
-- provider coverage matrix
-- provider-aware field reference updates
-- viewer metadata surfacing for active provider beyond existing dataset cards
+- verified that provider onboarding and API-key requirements are documented in the user guide
+- verified that the field reference and viewer reference content are sourced from the same provider-aware documentation
+- verified that the viewer surfaces active provider metadata through dataset cards when the dataset has a single provider
+- verified that provider coverage and field-generation behavior are documented in the field-reference matrix
 
 Goals:
 
@@ -672,17 +671,21 @@ Exit criteria:
 
 ### Milestone 5: Validation
 
-Status: In progress.
+Status: Verified complete on 2026-03-23.
 
 Completed work:
 
 - automated tests were added for config loading, provider selection, unsupported provider handling, and Massive-key validation
 - package rename behavior and the unchanged `viewer.py` entrypoint are covered by the updated test suite
+- Massive provider behavior is covered by parser, retry, auth-failure, per-page debug dump, request-spacing, and shared fetch-path tests
+- the current documentation and viewer-reference contract were verified against the live code paths through tests and focused review
 
-Remaining work:
+Verification notes:
 
-- validation of a working Massive fetch path
-- broader provider-behavior coverage once the Massive implementation exists
+- verified the full automated suite passes against the current repository state
+- verified lint passes across tracked Python files
+- verified provider behavior coverage exists for config selection, normalization, auth failure, retry behavior, and viewer helper behavior
+- verified the documented canonical field contract matches the exported-schema enforcement and field-reference documentation
 
 Goals:
 
@@ -703,7 +706,7 @@ The project is complete when:
 1. A user can select `yfinance` or `massive` as the only provider for a run.
 2. Massive credentials are loaded from `~/.config/opx/config.toml`, not tracked source files.
 3. Running with `yfinance` requires no API key.
-4. Running with `massive` fails fast with a clear message if `massive_api_key` is missing.
+4. Selecting `massive` without `[providers.massive].api_key` falls back to `yfinance` with a clear startup warning, while invalid Massive credentials fail clearly when the provider is actually used.
 5. Shared logs and code paths no longer use Yahoo-specific naming.
 6. The exported dataset clearly identifies its provider.
 7. Documentation clearly states which fields are generated, conditionally generated, provider-supplied, or not generated for each provider.
