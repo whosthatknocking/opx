@@ -27,7 +27,6 @@ class StubProvider:
         return {
             "underlying_price": 100.0,
             "underlying_price_time": pd.Timestamp("2026-03-20T13:45:00Z"),
-            "underlying_market_state": "REGULAR",
             "underlying_day_change_pct": 0.01,
             "historical_volatility": 0.2,
         }

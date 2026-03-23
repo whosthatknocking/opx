@@ -149,7 +149,6 @@ The exported CSV contains both provider-supplied and app-derived fields. Some va
 ### Underlying Snapshot Fields
 
 - `underlying_price`: Current underlying stock price used in calculations. Use it as the reference price for moneyness and Greeks.
-- `underlying_market_state`: Market session state from Yahoo Finance. Use it to judge whether prices are regular-session or extended-hours.
 - `underlying_day_change_pct`: Underlying percentage move versus previous close. Use it to add context to the option chain. Large absolute moves mean the underlying is already having an outsized session.
 - `historical_volatility`: Annualized realized volatility computed from the underlying's trailing 30 daily log returns. Use it to compare recent realized movement against option-implied pricing. Lower is calmer; higher means the stock has been moving more.
 - `underlying_price_time`: Timestamp of the underlying quote snapshot. Use it to compare timing with the option quote.

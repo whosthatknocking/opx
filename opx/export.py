@@ -14,7 +14,6 @@ COLUMN_ORDER = [
     "time_to_expiration_years",
     "strike",
     "underlying_price",
-    "underlying_market_state",
     "underlying_day_change_pct",
     "historical_volatility",
     "underlying_price_time",

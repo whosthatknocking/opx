@@ -13,20 +13,6 @@ from opx.providers.base import DataProvider, OptionChainFrames, normalize_provid
 from opx.utils import coerce_float, normalize_timestamp
 
 
-def normalize_market_state(value):
-    """Collapse duplicated vendor market-state strings such as POSTPOST -> POST."""
-    if value is None:
-        return None
-    normalized = str(value).strip()
-    if not normalized:
-        return None
-
-    half = len(normalized) // 2
-    if len(normalized) % 2 == 0 and normalized[:half] == normalized[half:]:
-        return normalized[:half]
-    return normalized
-
-
 def compute_historical_volatility(stock):  # pylint: disable=broad-exception-caught
     """Compute trailing annualized realized volatility from daily closes."""
     config = get_runtime_config()
@@ -85,7 +71,6 @@ class YFinanceProvider(DataProvider):
         return {
             "underlying_price": last_price,
             "underlying_price_time": normalize_timestamp(info.get("regularMarketTime")),
-            "underlying_market_state": normalize_market_state(info.get("marketState")),
             "underlying_day_change_pct": underlying_day_change_pct,
             "historical_volatility": compute_historical_volatility(stock),
         }

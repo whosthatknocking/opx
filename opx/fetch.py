@@ -22,7 +22,6 @@ def _emit_fetch_info(message, logger=None):
 def append_underlying_snapshot_fields(df, snapshot, fetched_at, stale_quote_seconds):
     """Add underlying snapshot metadata to each option row."""
     df["underlying_price_time"] = snapshot["underlying_price_time"]
-    df["underlying_market_state"] = snapshot["underlying_market_state"]
     df["underlying_day_change_pct"] = snapshot["underlying_day_change_pct"]
     df["historical_volatility"] = snapshot["historical_volatility"]
     df["underlying_price_age_seconds"] = (

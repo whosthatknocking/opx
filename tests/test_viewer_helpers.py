@@ -20,13 +20,11 @@ def test_build_dataset_cards_only_promotes_dataset_wide_constant_values():
     frame = pd.DataFrame(
         [
             {
-                "underlying_market_state": "POST",
                 "premium_reference_method": "mid",
                 "risk_free_rate_used": 0.045,
                 "data_source": "yfinance",
             },
             {
-                "underlying_market_state": "POST",
                 "premium_reference_method": "bid",
                 "risk_free_rate_used": 0.045,
                 "data_source": "yfinance",
@@ -37,7 +35,6 @@ def test_build_dataset_cards_only_promotes_dataset_wide_constant_values():
     cards = viewer.build_dataset_cards(frame, descriptions={"data_source": "Source label."})
     card_names = [card["name"] for card in cards]
 
-    assert "underlying_market_state" in card_names
     assert "risk_free_rate_used" in card_names
     assert "data_source" in card_names
     assert "premium_reference_method" not in card_names

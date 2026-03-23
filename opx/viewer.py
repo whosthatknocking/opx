@@ -28,7 +28,6 @@ HIDDEN_COLUMNS = {
     *UNWANTED_EXPORT_COLUMNS,
 }
 DATASET_CARD_COLUMNS = (
-    "underlying_market_state",
     "premium_reference_method",
     "risk_free_rate_used",
     "data_source",
