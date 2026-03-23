@@ -1,11 +1,13 @@
 """Fetch-path tests covering raw provider row-count logging."""
 
 import logging
+from pathlib import Path
 
 import pandas as pd
 
-from options_fetcher import fetch
-from options_fetcher.providers.base import OptionChainFrames
+from opx import fetch
+from opx.config import RuntimeConfig
+from opx.providers.base import OptionChainFrames
 
 
 def make_vendor_frame(rows):
@@ -119,16 +121,40 @@ class StubProvider:
         return frame
 
 
-def test_fetch_ticker_option_chain_logs_raw_yfinance_row_counts(monkeypatch, caplog):
-    """Log raw vendor counts before app-side filtering changes the row set."""
+def test_fetch_ticker_option_chain_logs_raw_provider_row_counts(monkeypatch, caplog):
+    """Log raw provider counts before app-side filtering changes the row set."""
     monkeypatch.setattr(fetch, "get_data_provider", StubProvider)
+    monkeypatch.setattr(
+        fetch,
+        "get_runtime_config",
+        lambda: RuntimeConfig(
+            tickers=("TEST",),
+            min_bid=0.5,
+            min_open_interest=100,
+            min_volume=10,
+            max_spread_pct_of_mid=0.25,
+            risk_free_rate=0.045,
+            hv_lookback_days=30,
+            trading_days_per_year=252,
+            data_provider="yfinance",
+            stale_quote_seconds=900,
+            max_strike_distance_pct=0.30,
+            max_expiration="2026-06-30",
+            today=pd.Timestamp("2026-03-20").date(),
+            massive_api_key=None,
+            config_path=Path("/tmp/opx.toml"),
+        ),
+    )
 
-    caplog.set_level("INFO", logger="options_fetcher.run")
-    logger = logging.getLogger("options_fetcher.run")
+    caplog.set_level("INFO", logger="opx.run")
+    logger = logging.getLogger("opx.run")
 
     result = fetch.fetch_ticker_option_chain("TEST", logger=logger)
 
     assert not result.empty
-    assert "status=raw_yfinance_rows call_rows=2 put_rows=1 total_rows=3" in caplog.text
+    assert (
+        "provider=stub expiration=2026-04-17 status=raw_provider_rows "
+        "call_rows=2 put_rows=1 total_rows=3"
+    ) in caplog.text
     assert "status=ok" in caplog.text
-    assert "raw_yfinance_rows=3 raw_expirations=1" in caplog.text
+    assert "raw_provider_rows=3 raw_expirations=1" in caplog.text

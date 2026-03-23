@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from options_fetcher import viewer
+from opx import viewer
 
 
 def test_extract_field_descriptions_reads_current_readme_entries():

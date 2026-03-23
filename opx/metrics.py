@@ -2,15 +2,8 @@
 
 import numpy as np
 
-from options_fetcher.config import (
-    MAX_SPREAD_PCT_OF_MID,
-    MIN_BID,
-    MIN_OPEN_INTEREST,
-    MIN_VOLUME,
-    RISK_FREE_RATE,
-    STALE_QUOTE_SECONDS,
-)
-from options_fetcher.greeks import compute_greeks
+from opx.config import get_runtime_config
+from opx.greeks import compute_greeks
 
 
 def classify_days_to_expiration_bucket(days_to_expiration):
@@ -71,6 +64,7 @@ def add_quote_quality_metrics(df, underlying_price):
 
 def add_derived_pricing_metrics(df, underlying_price):
     """Add premium, moneyness, break-even, and Black-Scholes-derived fields."""
+    config = get_runtime_config()
     df["strike_minus_spot"] = df["strike"] - underlying_price
     df["strike_vs_spot_pct"] = np.where(
         underlying_price > 0,
@@ -157,7 +151,7 @@ def add_derived_pricing_metrics(df, underlying_price):
         np.nan,
     )
 
-    df = compute_greeks(df, underlying_price, RISK_FREE_RATE)
+    df = compute_greeks(df, underlying_price, config.risk_free_rate)
 
     df["theta_to_premium_ratio"] = np.where(
         df["premium_reference_price"] > 0,
@@ -180,22 +174,25 @@ def add_derived_pricing_metrics(df, underlying_price):
 
 def add_screening_and_freshness_flags(df, fetched_at):
     """Mark stale quotes and tradability flags used by the viewer and screens."""
+    config = get_runtime_config()
     df["quote_age_seconds"] = (fetched_at - df["option_quote_time"]).dt.total_seconds()
     df["is_stale_quote"] = np.where(
         df["quote_age_seconds"].notna(),
-        df["quote_age_seconds"] > STALE_QUOTE_SECONDS,
+        df["quote_age_seconds"] > config.stale_quote_seconds,
         None,
     )
     df["days_bucket"] = df["days_to_expiration"].apply(classify_days_to_expiration_bucket)
     df["near_expiry_near_money_flag"] = (
         (df["days_to_expiration"] <= 14) & (df["strike_distance_pct"] <= 0.03)
     )
-    df["is_wide_market"] = df["bid_ask_spread_pct_of_mid"] > MAX_SPREAD_PCT_OF_MID
+    df["is_wide_market"] = (
+        df["bid_ask_spread_pct_of_mid"] > config.max_spread_pct_of_mid
+    )
     df["passes_primary_screen"] = (
-        (df["bid"] >= MIN_BID)
-        & (df["bid_ask_spread_pct_of_mid"] < MAX_SPREAD_PCT_OF_MID)
-        & (df["open_interest"] > MIN_OPEN_INTEREST)
-        & (df["volume"] > MIN_VOLUME)
+        (df["bid"] >= config.min_bid)
+        & (df["bid_ask_spread_pct_of_mid"] < config.max_spread_pct_of_mid)
+        & (df["open_interest"] > config.min_open_interest)
+        & (df["volume"] > config.min_volume)
     )
     df["quote_quality_score"] = (
         df["has_valid_quote"].astype(int)

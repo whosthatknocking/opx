@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
-from options_fetcher.export import UNWANTED_EXPORT_COLUMNS
+from opx.export import UNWANTED_EXPORT_COLUMNS
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

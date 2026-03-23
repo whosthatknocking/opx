@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from options_fetcher.normalize import (
+from opx.normalize import (
     filter_strikes_near_spot,
     filter_wide_spread_quotes,
     filter_zero_bid_quotes,

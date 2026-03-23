@@ -5,17 +5,13 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from options_fetcher.config import (
-    MAX_EXPIRATION,
-    STALE_QUOTE_SECONDS,
-    today,
-)
-from options_fetcher.metrics import add_expected_move_by_expiration
-from options_fetcher.normalize import enrich_option_frame
-from options_fetcher.providers import get_data_provider
+from opx.config import get_runtime_config
+from opx.metrics import add_expected_move_by_expiration
+from opx.normalize import enrich_option_frame
+from opx.providers import get_data_provider
 
 
-def append_underlying_snapshot_fields(df, snapshot, fetched_at):
+def append_underlying_snapshot_fields(df, snapshot, fetched_at, stale_quote_seconds):
     """Add underlying snapshot metadata to each option row."""
     df["underlying_price_time"] = snapshot["underlying_price_time"]
     df["underlying_market_state"] = snapshot["underlying_market_state"]
@@ -30,7 +26,7 @@ def append_underlying_snapshot_fields(df, snapshot, fetched_at):
     )
     df["is_stale_underlying_price"] = np.where(
         pd.notna(df["underlying_price_age_seconds"]),
-        df["underlying_price_age_seconds"] > STALE_QUOTE_SECONDS,
+        df["underlying_price_age_seconds"] > stale_quote_seconds,
         None,
     )
     return df
@@ -42,6 +38,7 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,broad-exceptio
 ):
     """Fetch and normalize all near-term option chains for one ticker."""
     try:
+        config = get_runtime_config()
         fetched_at = pd.Timestamp.now(tz=timezone.utc)
         provider = get_data_provider()
         snapshot = provider.load_underlying_snapshot(ticker)
@@ -59,11 +56,11 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,broad-exceptio
         raw_contract_count = 0
         raw_expiration_count = 0
         for expiration_date in provider.list_option_expirations(ticker):
-            if expiration_date > MAX_EXPIRATION:
+            if expiration_date > config.max_expiration:
                 continue
 
             exp_date = datetime.strptime(expiration_date, "%Y-%m-%d").date()
-            if (exp_date - today).days <= 0:
+            if (exp_date - config.today).days <= 0:
                 continue
 
             chain = provider.load_option_chain(ticker, expiration_date)
@@ -73,10 +70,11 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,broad-exceptio
             if logger:
                 logger.info(
                     (
-                        "ticker=%s expiration=%s status=raw_yfinance_rows "
+                        "ticker=%s provider=%s expiration=%s status=raw_provider_rows "
                         "call_rows=%s put_rows=%s total_rows=%s"
                     ),
                     ticker,
+                    provider.name,
                     expiration_date,
                     len(chain.calls),
                     len(chain.puts),
@@ -96,17 +94,23 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,broad-exceptio
                     fetched_at=fetched_at,
                 )
                 rows.append(
-                    append_underlying_snapshot_fields(normalized, snapshot, fetched_at)
+                    append_underlying_snapshot_fields(
+                        normalized,
+                        snapshot,
+                        fetched_at,
+                        config.stale_quote_seconds,
+                    )
                 )
 
         if not rows:
             if logger:
                 logger.warning(
                     (
-                        "ticker=%s status=ok rows=0 expirations=0 "
-                        "raw_yfinance_rows=%s raw_expirations=%s"
+                        "ticker=%s provider=%s status=ok rows=0 expirations=0 "
+                        "raw_provider_rows=%s raw_expirations=%s"
                     ),
                     ticker,
+                    provider.name,
                     raw_contract_count,
                     raw_expiration_count,
                 )
@@ -117,10 +121,11 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,broad-exceptio
         if logger:
             logger.info(
                 (
-                    "ticker=%s status=ok fetched_at=%s rows=%s expirations=%s "
-                    "raw_yfinance_rows=%s raw_expirations=%s"
+                    "ticker=%s provider=%s status=ok fetched_at=%s rows=%s expirations=%s "
+                    "raw_provider_rows=%s raw_expirations=%s"
                 ),
                 ticker,
+                provider.name,
                 fetched_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 len(combined),
                 combined["expiration_date"].nunique(),
