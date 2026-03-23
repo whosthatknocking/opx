@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -16,6 +16,19 @@ except ImportError:  # pragma: no cover
 SUPPORTED_PROVIDERS = frozenset({"yfinance", "massive"})
 SCRIPT_VERSION = "2026-03-23.2"
 DEFAULT_CONFIG_PATH = Path("~/.config/opx/config.toml").expanduser()
+DEFAULT_TICKERS = ("TSLA", "NVDA", "UBER", "MSFT", "GOOGL", "ORCL", "PLTR")
+DEFAULT_DATA_PROVIDER = "yfinance"
+DEFAULT_MIN_BID = 0.50
+DEFAULT_MIN_OPEN_INTEREST = 100
+DEFAULT_MIN_VOLUME = 10
+DEFAULT_MAX_SPREAD_PCT_OF_MID = 0.25
+DEFAULT_RISK_FREE_RATE = 0.045
+DEFAULT_HV_LOOKBACK_DAYS = 30
+DEFAULT_TRADING_DAYS_PER_YEAR = 252
+DEFAULT_STALE_QUOTE_SECONDS = 15 * 60
+DEFAULT_MAX_STRIKE_DISTANCE_PCT = 0.30
+DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT = 1000
+DEFAULT_MASSIVE_REQUEST_INTERVAL_SECONDS = 12.0
 
 
 class ConfigError(ValueError):
@@ -41,7 +54,10 @@ class RuntimeConfig:
     max_expiration: str
     today: date
     massive_api_key: str | None
+    massive_snapshot_page_limit: int
+    massive_request_interval_seconds: float
     config_path: Path
+    config_warnings: tuple[str, ...] = field(default_factory=tuple)
 
 
 def _default_max_expiration(today):
@@ -95,10 +111,13 @@ def _coerce_float(value, *, field_name):
 def _read_config_data(config_path: Path) -> dict:
     if not config_path.exists():
         return {}
-    with config_path.open("rb") as handle:
-        data = tomllib.load(handle)
+    try:
+        with config_path.open("rb") as handle:
+            data = tomllib.load(handle)
+    except tomllib.TOMLDecodeError:
+        return {}
     if not isinstance(data, dict):
-        raise ConfigError(f"Config file '{config_path}' must contain a TOML table.")
+        return {}
     return data
 
 
@@ -106,116 +125,179 @@ def _value_or_default(value, default):
     return default if value is None else value
 
 
+def _append_default_warning(warnings: list[str], field_name: str, default) -> None:
+    warnings.append(f"{field_name}: using default {default!r}.")
+
+
+def _resolve_config_value(  # pylint: disable=too-many-arguments
+    raw_value,
+    *,
+    field_name,
+    default,
+    coercer,
+    warnings,
+    validator=None,
+):
+    try:
+        value = _value_or_default(coercer(raw_value, field_name=field_name), default)
+    except ConfigError:
+        _append_default_warning(warnings, field_name, default)
+        return default
+    if validator is not None and not validator(value):
+        _append_default_warning(warnings, field_name, default)
+        return default
+    return value
+
+
+def _resolve_table(value, *, field_name, warnings):
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    _append_default_warning(warnings, field_name, {})
+    return {}
+
+
 def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:
     """Load runtime config from the user config file, falling back to defaults."""
     resolved_path = (config_path or DEFAULT_CONFIG_PATH).expanduser()
+    warnings: list[str] = []
     data = _read_config_data(resolved_path)
-    settings = data.get("settings", {})
-    providers = data.get("providers", {})
-    if settings is None:
-        settings = {}
-    if providers is None:
-        providers = {}
-    if not isinstance(settings, dict):
-        raise ConfigError("Config table 'settings' must be a TOML table.")
-    if not isinstance(providers, dict):
-        raise ConfigError("Config table 'providers' must be a TOML table.")
-    massive_settings = providers.get("massive", {})
-    if massive_settings is None:
-        massive_settings = {}
-    if not isinstance(massive_settings, dict):
-        raise ConfigError("Config table 'providers.massive' must be a TOML table.")
+    settings = _resolve_table(data.get("settings", {}), field_name="settings", warnings=warnings)
+    providers = _resolve_table(data.get("providers", {}), field_name="providers", warnings=warnings)
+    massive_settings = _resolve_table(
+        providers.get("massive", {}),
+        field_name="providers.massive",
+        warnings=warnings,
+    )
 
     today = datetime.today().date()
+    data_provider = _resolve_config_value(
+        settings.get("data_provider"),
+        field_name="settings.data_provider",
+        default=DEFAULT_DATA_PROVIDER,
+        coercer=_coerce_str,
+        warnings=warnings,
+        validator=lambda value: value in SUPPORTED_PROVIDERS,
+    )
+    massive_api_key = _resolve_config_value(
+        massive_settings.get("api_key"),
+        field_name="providers.massive.api_key",
+        default=None,
+        coercer=_coerce_str,
+        warnings=warnings,
+    )
+    if data_provider == "massive" and not massive_api_key:
+        warnings.append(
+            "providers.massive.api_key: using default None and falling back to 'yfinance'."
+        )
+        data_provider = DEFAULT_DATA_PROVIDER
+
     config = RuntimeConfig(
-        tickers=_value_or_default(
-            _coerce_list(settings.get("tickers"), field_name="settings.tickers"),
-            ("TSLA", "NVDA", "UBER", "MSFT", "GOOGL", "ORCL", "PLTR"),
+        tickers=_resolve_config_value(
+            settings.get("tickers"),
+            field_name="settings.tickers",
+            default=DEFAULT_TICKERS,
+            coercer=_coerce_list,
+            warnings=warnings,
         ),
-        min_bid=_value_or_default(
-            _coerce_float(settings.get("min_bid"), field_name="settings.min_bid"),
-            0.50,
+        min_bid=_resolve_config_value(
+            settings.get("min_bid"),
+            field_name="settings.min_bid",
+            default=DEFAULT_MIN_BID,
+            coercer=_coerce_float,
+            warnings=warnings,
         ),
-        min_open_interest=_value_or_default(
-            _coerce_int(
-                settings.get("min_open_interest"),
-                field_name="settings.min_open_interest",
-            ),
-            100,
+        min_open_interest=_resolve_config_value(
+            settings.get("min_open_interest"),
+            field_name="settings.min_open_interest",
+            default=DEFAULT_MIN_OPEN_INTEREST,
+            coercer=_coerce_int,
+            warnings=warnings,
         ),
-        min_volume=_value_or_default(
-            _coerce_int(settings.get("min_volume"), field_name="settings.min_volume"),
-            10,
+        min_volume=_resolve_config_value(
+            settings.get("min_volume"),
+            field_name="settings.min_volume",
+            default=DEFAULT_MIN_VOLUME,
+            coercer=_coerce_int,
+            warnings=warnings,
         ),
-        max_spread_pct_of_mid=_value_or_default(
-            _coerce_float(
-                settings.get("max_spread_pct_of_mid"),
-                field_name="settings.max_spread_pct_of_mid",
-            ),
-            0.25,
+        max_spread_pct_of_mid=_resolve_config_value(
+            settings.get("max_spread_pct_of_mid"),
+            field_name="settings.max_spread_pct_of_mid",
+            default=DEFAULT_MAX_SPREAD_PCT_OF_MID,
+            coercer=_coerce_float,
+            warnings=warnings,
         ),
-        risk_free_rate=_value_or_default(
-            _coerce_float(
-                settings.get("risk_free_rate"),
-                field_name="settings.risk_free_rate",
-            ),
-            0.045,
+        risk_free_rate=_resolve_config_value(
+            settings.get("risk_free_rate"),
+            field_name="settings.risk_free_rate",
+            default=DEFAULT_RISK_FREE_RATE,
+            coercer=_coerce_float,
+            warnings=warnings,
         ),
-        hv_lookback_days=_value_or_default(
-            _coerce_int(
-                settings.get("hv_lookback_days"),
-                field_name="settings.hv_lookback_days",
-            ),
-            30,
+        hv_lookback_days=_resolve_config_value(
+            settings.get("hv_lookback_days"),
+            field_name="settings.hv_lookback_days",
+            default=DEFAULT_HV_LOOKBACK_DAYS,
+            coercer=_coerce_int,
+            warnings=warnings,
         ),
-        trading_days_per_year=_value_or_default(
-            _coerce_int(
-                settings.get("trading_days_per_year"),
-                field_name="settings.trading_days_per_year",
-            ),
-            252,
+        trading_days_per_year=_resolve_config_value(
+            settings.get("trading_days_per_year"),
+            field_name="settings.trading_days_per_year",
+            default=DEFAULT_TRADING_DAYS_PER_YEAR,
+            coercer=_coerce_int,
+            warnings=warnings,
         ),
-        data_provider=_value_or_default(
-            _coerce_str(
-                settings.get("data_provider"),
-                field_name="settings.data_provider",
-            ),
-            "yfinance",
+        data_provider=data_provider,
+        stale_quote_seconds=_resolve_config_value(
+            settings.get("stale_quote_seconds"),
+            field_name="settings.stale_quote_seconds",
+            default=DEFAULT_STALE_QUOTE_SECONDS,
+            coercer=_coerce_int,
+            warnings=warnings,
         ),
-        stale_quote_seconds=_value_or_default(
-            _coerce_int(
-                settings.get("stale_quote_seconds"),
-                field_name="settings.stale_quote_seconds",
-            ),
-            15 * 60,
+        max_strike_distance_pct=_resolve_config_value(
+            settings.get("max_strike_distance_pct"),
+            field_name="settings.max_strike_distance_pct",
+            default=DEFAULT_MAX_STRIKE_DISTANCE_PCT,
+            coercer=_coerce_float,
+            warnings=warnings,
         ),
-        max_strike_distance_pct=_value_or_default(
-            _coerce_float(
-                settings.get("max_strike_distance_pct"),
-                field_name="settings.max_strike_distance_pct",
-            ),
-            0.30,
-        ),
-        max_expiration=_value_or_default(
-            _coerce_str(
-                settings.get("max_expiration"),
-                field_name="settings.max_expiration",
-            ),
-            _default_max_expiration(today),
+        max_expiration=_resolve_config_value(
+            settings.get("max_expiration"),
+            field_name="settings.max_expiration",
+            default=_default_max_expiration(today),
+            coercer=_coerce_str,
+            warnings=warnings,
         ),
         today=today,
-        massive_api_key=_coerce_str(
-            massive_settings.get("api_key"),
-            field_name="providers.massive.api_key",
+        massive_api_key=massive_api_key,
+        massive_snapshot_page_limit=_resolve_config_value(
+            massive_settings.get("snapshot_page_limit"),
+            field_name="providers.massive.snapshot_page_limit",
+            default=DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT,
+            coercer=_coerce_int,
+            warnings=warnings,
+            validator=lambda value: value > 0,
+        ),
+        massive_request_interval_seconds=_resolve_config_value(
+            massive_settings.get("request_interval_seconds"),
+            field_name="providers.massive.request_interval_seconds",
+            default=DEFAULT_MASSIVE_REQUEST_INTERVAL_SECONDS,
+            coercer=_coerce_float,
+            warnings=warnings,
+            validator=lambda value: value >= 0,
         ),
         config_path=resolved_path,
+        config_warnings=tuple(warnings),
     )
-    validate_runtime_config(config)
     return config
 
 
 def validate_runtime_config(config: RuntimeConfig) -> None:
-    """Validate provider selection and required credentials."""
+    """Validate runtime config built programmatically outside the loader."""
     if config.data_provider not in SUPPORTED_PROVIDERS:
         supported = ", ".join(sorted(SUPPORTED_PROVIDERS))
         raise ConfigError(
@@ -226,6 +308,12 @@ def validate_runtime_config(config: RuntimeConfig) -> None:
             "Missing Massive API key in "
             f"'{config.config_path}'. Set [providers.massive] api_key when using "
             "data_provider = 'massive'."
+        )
+    if config.massive_snapshot_page_limit <= 0:
+        raise ConfigError("Config field 'providers.massive.snapshot_page_limit' must be positive.")
+    if config.massive_request_interval_seconds < 0:
+        raise ConfigError(
+            "Config field 'providers.massive.request_interval_seconds' must be non-negative."
         )
 
 
@@ -246,3 +334,30 @@ def get_provider_credentials(provider_name: str) -> dict[str, str]:
     if provider_name == "massive" and config.massive_api_key:
         return {"api_key": config.massive_api_key}
     return {}
+
+
+def describe_runtime_config(config: RuntimeConfig) -> tuple[str, ...]:
+    """Return human-readable lines describing the resolved runtime configuration."""
+    masked_massive_key = "set" if config.massive_api_key else "not set"
+    return (
+        f"Config path: {config.config_path}",
+        f"Config file exists: {config.config_path.exists()}",
+        f"Applied provider: {config.data_provider}",
+        f"Applied tickers: {', '.join(config.tickers)}",
+        f"Applied min_bid: {config.min_bid}",
+        f"Applied min_open_interest: {config.min_open_interest}",
+        f"Applied min_volume: {config.min_volume}",
+        f"Applied max_spread_pct_of_mid: {config.max_spread_pct_of_mid}",
+        f"Applied max_strike_distance_pct: {config.max_strike_distance_pct}",
+        f"Applied risk_free_rate: {config.risk_free_rate}",
+        f"Applied hv_lookback_days: {config.hv_lookback_days}",
+        f"Applied trading_days_per_year: {config.trading_days_per_year}",
+        f"Applied stale_quote_seconds: {config.stale_quote_seconds}",
+        f"Applied max_expiration: {config.max_expiration}",
+        f"Applied providers.massive.api_key: {masked_massive_key}",
+        f"Applied providers.massive.snapshot_page_limit: {config.massive_snapshot_page_limit}",
+        (
+            "Applied providers.massive.request_interval_seconds: "
+            f"{config.massive_request_interval_seconds}"
+        ),
+    )

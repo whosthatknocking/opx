@@ -57,8 +57,40 @@ def test_main_prints_rows_written_after_saved(monkeypatch, capsys, tmp_path: Pat
     main.main()
 
     stdout = capsys.readouterr().out
+    assert "Resolved config:" in stdout
+    assert "Applied provider: yfinance" in stdout
     assert f"Saved: {written['path']}" in stdout
     assert "Rows written: 3 | File size: 2.0 KB" in stdout
     assert stdout.index(f"Saved: {written['path']}") < stdout.index(
         "Rows written: 3 | File size: 2.0 KB"
     )
+
+
+def test_main_prints_config_fallbacks(monkeypatch, capsys, tmp_path: Path):
+    """Config fallback warnings should be shown when defaults were applied."""
+    config = make_runtime_config(
+        config_warnings=(
+            "settings.min_bid: using default 0.5.",
+        ),
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main, "get_runtime_config", lambda: config)
+    monkeypatch.setattr(
+        main,
+        "create_run_logger",
+        lambda: (StubLogger(), Path("logs/run.log")),
+    )
+    monkeypatch.setattr(
+        main,
+        "fetch_ticker_option_chain",
+        lambda ticker, logger=None: pd.DataFrame(),
+    )
+
+    try:
+        main.main()
+    except SystemExit:
+        pass
+
+    stdout = capsys.readouterr().out
+    assert "Config fallbacks:" in stdout
+    assert "settings.min_bid: using default 0.5." in stdout
