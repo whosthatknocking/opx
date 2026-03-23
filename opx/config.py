@@ -26,6 +26,7 @@ DEFAULT_RISK_FREE_RATE = 0.045
 DEFAULT_HV_LOOKBACK_DAYS = 30
 DEFAULT_TRADING_DAYS_PER_YEAR = 252
 DEFAULT_STALE_QUOTE_SECONDS = 15 * 60
+DEFAULT_ENABLE_POST_DOWNLOAD_FILTERS = True
 DEFAULT_MAX_STRIKE_DISTANCE_PCT = 0.30
 MAX_MASSIVE_SNAPSHOT_PAGE_LIMIT = 250
 DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT = MAX_MASSIVE_SNAPSHOT_PAGE_LIMIT
@@ -51,6 +52,7 @@ class RuntimeConfig:
     trading_days_per_year: int
     data_provider: str
     stale_quote_seconds: int
+    enable_post_download_filters: bool
     max_strike_distance_pct: float
     max_expiration: str
     today: date
@@ -98,6 +100,14 @@ def _coerce_int(value, *, field_name):
         return None
     if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"Config field '{field_name}' must be an integer.")
+    return value
+
+
+def _coerce_bool(value, *, field_name):
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise ConfigError(f"Config field '{field_name}' must be true or false.")
     return value
 
 
@@ -273,6 +283,13 @@ def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:
             coercer=_coerce_int,
             warnings=warnings,
         ),
+        enable_post_download_filters=_resolve_config_value(
+            settings.get("enable_post_download_filters"),
+            field_name="settings.enable_post_download_filters",
+            default=DEFAULT_ENABLE_POST_DOWNLOAD_FILTERS,
+            coercer=_coerce_bool,
+            warnings=warnings,
+        ),
         max_strike_distance_pct=_resolve_config_value(
             settings.get("max_strike_distance_pct"),
             field_name="settings.max_strike_distance_pct",
@@ -369,6 +386,7 @@ def describe_runtime_config(config: RuntimeConfig) -> tuple[str, ...]:
         f"Applied hv_lookback_days: {config.hv_lookback_days}",
         f"Applied trading_days_per_year: {config.trading_days_per_year}",
         f"Applied stale_quote_seconds: {config.stale_quote_seconds}",
+        f"Applied enable_post_download_filters: {config.enable_post_download_filters}",
         f"Applied max_expiration: {config.max_expiration}",
         f"Applied providers.massive.api_key: {masked_massive_key}",
         f"Applied providers.massive.snapshot_page_limit: {config.massive_snapshot_page_limit}",
