@@ -54,9 +54,10 @@ def test_main_prints_rows_written_after_saved(monkeypatch, capsys, tmp_path: Pat
 
     monkeypatch.setattr(main, "write_options_csv", stub_write_options_csv)
 
-    main.main()
+    exit_code = main.main()
 
     stdout = capsys.readouterr().out
+    assert exit_code == 0
     assert "Resolved config:" in stdout
     assert "Applied provider: yfinance" in stdout
     assert f"Saved: {written['path']}" in stdout
@@ -86,11 +87,31 @@ def test_main_prints_config_fallbacks(monkeypatch, capsys, tmp_path: Path):
         lambda ticker, logger=None: pd.DataFrame(),
     )
 
-    try:
-        main.main()
-    except SystemExit:
-        pass
+    exit_code = main.main()
 
     stdout = capsys.readouterr().out
+    assert exit_code == 1
     assert "Config fallbacks:" in stdout
     assert "settings.min_bid: using default 0.5." in stdout
+
+
+def test_main_returns_failure_when_no_data_is_fetched(monkeypatch, tmp_path: Path):
+    """An empty run should return a non-zero exit status."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        main,
+        "get_runtime_config",
+        lambda: make_runtime_config(tickers=("AAA",)),
+    )
+    monkeypatch.setattr(
+        main,
+        "create_run_logger",
+        lambda: (StubLogger(), Path("logs/run.log")),
+    )
+    monkeypatch.setattr(
+        main,
+        "fetch_ticker_option_chain",
+        lambda ticker, logger=None: pd.DataFrame(),
+    )
+
+    assert main.main() == 1

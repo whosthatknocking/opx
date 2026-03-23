@@ -6,6 +6,8 @@ import pandas as pd
 
 from conftest import make_runtime_config
 from opx import fetch
+import opx.metrics
+import opx.normalize
 from opx.providers.base import OptionChainFrames
 
 
@@ -151,6 +153,52 @@ def test_fetch_ticker_option_chain_logs_raw_provider_row_counts(monkeypatch, cap
     ) in caplog.text
     assert "status=ok" in caplog.text
     assert "raw_provider_rows=3 raw_expirations=1" in caplog.text
+
+
+def test_fetch_ticker_option_chain_prints_stage_counts(monkeypatch, capsys):
+    """Console output should show per-stage fetch counts for each ticker."""
+    monkeypatch.setattr(fetch, "get_data_provider", StubProvider)
+    monkeypatch.setattr(
+        fetch,
+        "get_runtime_config",
+        lambda: make_runtime_config(today=pd.Timestamp("2026-03-20").date()),
+    )
+
+    result = fetch.fetch_ticker_option_chain("TEST")
+
+    stdout = capsys.readouterr().out
+    assert not result.empty
+    assert "TEST: fetch start provider=stub" in stdout
+    assert "TEST: expirations available=1 usable=1" in stdout
+    assert "TEST: expiration=2026-04-17 raw call_rows=2 put_rows=1 total_rows=3" in stdout
+    assert "TEST: expiration=2026-04-17 side=call normalized_rows=2 post_filter_rows=1" in stdout
+    assert "TEST: fetch complete rows=1 expirations=1 raw_provider_rows=3" in stdout
+
+
+def test_fetch_ticker_option_chain_explains_when_filters_remove_everything(monkeypatch, capsys):
+    """Console output should explain empty results after provider data is filtered out."""
+    monkeypatch.setattr(fetch, "get_data_provider", StubProvider)
+    def config_factory():
+        """Return a stricter runtime config that filters all quotes."""
+        return make_runtime_config(
+            today=pd.Timestamp("2026-03-20").date(),
+            max_spread_pct_of_mid=0.01,
+        )
+
+    monkeypatch.setattr(fetch, "get_runtime_config", config_factory)
+    monkeypatch.setattr(opx.normalize, "get_runtime_config", config_factory)
+    monkeypatch.setattr(opx.metrics, "get_runtime_config", config_factory)
+
+    result = fetch.fetch_ticker_option_chain("TEST")
+
+    stdout = capsys.readouterr().out
+    assert result.empty
+    assert "TEST: expiration=2026-04-17 raw call_rows=2 put_rows=1 total_rows=3" in stdout
+    assert "TEST: expiration=2026-04-17 side=call normalized_rows=2 post_filter_rows=0" in stdout
+    assert (
+        "TEST: all provider rows were filtered out by the shared normalization and "
+        "screening pipeline"
+    ) in stdout
 
 
 def test_fetch_ticker_option_chain_logs_provider_name_on_error(monkeypatch, caplog):

@@ -56,7 +56,7 @@ def main():
     if not ticker_frames:
         print("No data fetched.")
         logger.warning("run_finished no_data_fetched=true")
-        raise SystemExit(0)
+        return 1
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = OUTPUTS_DIR / f"options_engine_output_{timestamp}.csv"
@@ -72,7 +72,8 @@ def main():
     )
     print(f"\nSaved: {output_path}")
     print(f"Rows written: {row_count} | File size: {format_file_size(file_size_bytes)}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
