@@ -48,6 +48,17 @@ Then open `http://127.0.0.1:8000` in your browser.
 - Computes Black-Scholes `delta`, true ITM probability, `gamma`, `vega`, and `theta`
 - Exports a timestamped CSV file for each run
 
+## Provider Contract
+
+The runtime uses exactly one active provider per run. The selected provider is recorded in `data_source`, and shared code paths keep the exported CSV pinned to the canonical column set documented in this README.
+
+Provider rules:
+
+- provider-native values should populate canonical columns when the semantics match
+- derived app values should be used only when the provider does not supply the canonical field or cannot be mapped safely
+- provider-specific scratch or debug fields should not expand the CSV schema implicitly
+- mixed-provider rows should not appear in the same output file
+
 ## Requirements
 
 - Python 3.9+
@@ -100,16 +111,18 @@ logs/opx_runs.log
 
 The run log also records:
 
-- per-expiration raw row counts returned by `yfinance` before app-side filtering
+- per-expiration raw row counts returned by the active provider before app-side filtering
 - per-ticker raw contract totals and kept-row totals
-- yfinance-originated error messages routed into the same log file
+- provider-library error messages routed into the same log file when available
 - final CSV row count and file size after export
 
-These log entries are useful when a run returns fewer rows than expected, especially near the regular market open when Yahoo data may still be delayed, cached, thinly traded, or incomplete.
+These log entries are useful when a run returns fewer rows than expected, especially near the regular market open when the active provider may still be delayed, cached, thinly traded, or incomplete. In the current baseline, this is most common with `yfinance`.
 
 ## CSV Field Reference
 
-The exported CSV contains both raw option data and derived fields. Some values may be blank when Yahoo Finance does not provide enough data or when a calculation is not valid for that row.
+Schema note: the export is pinned to the canonical column set documented here. Provider-specific scratch fields or debug fields should not expand the CSV schema unless the spec is updated deliberately.
+
+The exported CSV contains both provider-supplied and app-derived fields. Some values may be blank when the active provider does not expose the required source data or when a calculation is not valid for that row.
 
 ### Contract and Expiration Fields
 
@@ -220,7 +233,7 @@ The exported CSV contains both raw option data and derived fields. Some values m
 
 ### Run Metadata Fields
 
-- `data_source`: Source name for the active provider, currently `yfinance`. Use it for lineage and auditability.
+- `data_source`: Source name for the active provider. Use it for lineage and auditability.
 - `risk_free_rate_used`: Risk-free rate used in Greek calculations. Use it to reproduce the Black-Scholes outputs.
 
 Execution details that are not row-specific are written to the append-only run log `logs/opx_runs.log`, including:

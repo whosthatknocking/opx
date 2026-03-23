@@ -37,6 +37,7 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,broad-exceptio
     logger=None,
 ):
     """Fetch and normalize all near-term option chains for one ticker."""
+    provider = None
     try:
         config = get_runtime_config()
         fetched_at = pd.Timestamp.now(tz=timezone.utc)
@@ -137,5 +138,10 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,broad-exceptio
     except Exception as exc:
         print(f"{ticker} error: {exc}")
         if logger:
-            logger.exception("ticker=%s status=error message=%s", ticker, exc)
+            logger.exception(
+                "ticker=%s provider=%s status=error message=%s",
+                ticker,
+                getattr(provider, "name", "unknown"),
+                exc,
+            )
         return pd.DataFrame()
