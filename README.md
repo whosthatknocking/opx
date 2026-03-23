@@ -19,7 +19,7 @@ The output is designed to be data-focused rather than decision-focused. It does 
 
 Warning: Yahoo Finance quote timestamps can lag, and the collected option, underlying, or VIX data may be stale. Sparse or empty option-chain results are especially common near the regular market open because Yahoo data is delayed and cached, option markets may not have fully formed yet, the `yfinance` API is scraping-based and can be unreliable, and immediate post-open liquidity is often thin. Always check the freshness fields in the CSV or browser before relying on the output for trading decisions.
 
-Warning: Massive free-plan access can impose practical limits on freshness, request volume, and endpoint coverage. Depending on the plan, option snapshots may be delayed, rate limits may be tighter, and some real-time or higher-throughput workflows may not be available. Always confirm what your Massive / Polygon plan actually includes before treating the output as real-time production data.
+Warning: Massive options support for this project requires a Massive account with an options plan that exposes the option snapshot data this fetch path uses. Per Massive's published options pricing, `Options Basic` does not expose the required access, and `Options Starter` is the minimum plan for delayed options data. Confirm your plan includes the option snapshot coverage you expect before treating the output as current market data.
 
 ## Quick Start
 
@@ -290,6 +290,7 @@ This section is for people changing the codebase, adding providers, or working o
 ## Configuration
 
 Runtime configuration lives in `~/.config/opx/config.toml`. If the file is absent, the app falls back to built-in defaults and uses `yfinance` as the active provider.
+If individual config values are missing, malformed, or out of range, the loader applies built-in defaults for those fields and the fetcher prints the resolved values plus any fallback warnings at startup.
 
 Example config:
 
@@ -309,6 +310,8 @@ stale_quote_seconds = 900
 
 [providers.massive]
 api_key = "replace-me"
+snapshot_page_limit = 1000
+request_interval_seconds = 12.0
 ```
 
 Current defaults:
@@ -324,6 +327,8 @@ Current defaults:
 - `TRADING_DAYS_PER_YEAR = 252`: annualization factor for volatility.
 - `STALE_QUOTE_SECONDS = 900`: staleness threshold for option and underlying quotes.
 - `data_provider = "yfinance"`: provider implementation used by the fetch pipeline.
+- `providers.massive.snapshot_page_limit = 1000`: per-request Massive snapshot page size used for the option-chain endpoint.
+- `providers.massive.request_interval_seconds = 12.0`: minimum delay between Massive HTTP requests. This default is conservative for delayed-plan usage.
 - `SCRIPT_VERSION = "2026-03-23.2"`: run-version string written to the append-only log.
 - `MAX_EXPIRATION`: computed dynamically as the last calendar day of the month four months from today, so the fetch window stays on a rolling roughly four-month horizon.
 
@@ -334,6 +339,13 @@ In practice:
 - Change the rate, lookback, trading-day, or staleness settings only if you want different modeling or freshness assumptions.
 - Switch `data_provider` when you want to use a different market-data implementation.
 - Add `[providers.massive].api_key` only when you select `massive`.
+- Raise or lower `snapshot_page_limit` and `request_interval_seconds` to match your Massive plan and tolerance for throttling.
+
+Startup output:
+
+- The fetcher prints the config path it read, whether the file exists, and the full set of resolved runtime values it will apply.
+- Secret values are redacted in that output. For example, the Massive API key is shown as `set` or `not set`, never in plaintext.
+- When a config value is invalid and a code default is used instead, the fetcher prints a `Config fallbacks:` block so the override is visible.
 
 ## Development Setup
 
@@ -349,6 +361,8 @@ python -m playwright install
 This installs both market-data client libraries used by the project, including the official `massive` client for Massive / Polygon access.
 
 `playwright` is optional for the fetch/export pipeline itself, but required if you want automated browser screenshots or browser-driven UI checks.
+
+For Massive / Polygon access, this project assumes you have an options-capable Massive account. The default `request_interval_seconds = 12.0` is intentionally conservative for delayed-plan usage, and you should adjust it in `~/.config/opx/config.toml` to match the actual rate limits and throughput your Massive options plan allows.
 
 ## Documentation Assets
 

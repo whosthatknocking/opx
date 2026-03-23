@@ -8,7 +8,8 @@ import pytest
 from opx import fetch
 from opx.greeks import compute_greeks
 from opx.config import reset_runtime_config
-from opx.providers.massive import MassiveProvider
+from opx.providers.base import ProviderAuthenticationError
+from opx.providers.massive import DEFAULT_SNAPSHOT_PAGE_LIMIT, MassiveProvider
 
 
 def make_snapshot_results():
@@ -142,10 +143,12 @@ def test_massive_provider_retries_rate_limits(monkeypatch):
     """Rate-limited Massive requests should retry with exponential backoff."""
     provider = MassiveProvider()
     attempts = {"count": 0}
+    seen_params = []
     sleeps = []
 
     def fake_list_snapshot_options_chain(_ticker, params=None):  # pylint: disable=unused-argument
         attempts["count"] += 1
+        seen_params.append(params)
         if attempts["count"] < 3:
             raise RuntimeError("429 rate limited")
         return []
@@ -170,7 +173,33 @@ def test_massive_provider_retries_rate_limits(monkeypatch):
 
     assert payload == ()
     assert attempts["count"] == 3
+    assert seen_params == [{"limit": DEFAULT_SNAPSHOT_PAGE_LIMIT}] * 3
     assert sleeps == [1.0, 2.0]
+
+
+def test_massive_provider_spaces_underlying_http_requests(monkeypatch):
+    """Configured request spacing should apply between paginated client HTTP calls."""
+    provider = MassiveProvider()
+    # pylint: disable=protected-access
+    provider._last_request_started_at = 100.0
+    monotonic_values = iter([105.0, 112.0])
+    sleeps = []
+    wrapped_calls = []
+
+    monkeypatch.setattr("opx.providers.massive.time.monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr("opx.providers.massive.time.sleep", sleeps.append)
+    monkeypatch.setattr(provider, "_request_interval_seconds", lambda: 12.0)
+
+    wrapped = provider._wrap_rate_limited_get(  # pylint: disable=protected-access
+        lambda *args, **kwargs: wrapped_calls.append((args, kwargs)) or "ok"
+    )
+
+    result = wrapped("/v3/snapshot/options/TSLA", params={"limit": 1000})
+
+    assert result == "ok"
+    assert sleeps == [7.0]
+    assert wrapped_calls == [(("/v3/snapshot/options/TSLA",), {"params": {"limit": 1000}})]
+    assert provider._last_request_started_at == 112.0
 
 
 def test_compute_greeks_preserves_provider_values():
@@ -217,7 +246,7 @@ def test_massive_provider_invalid_credentials_fail_clearly(monkeypatch):
 
     monkeypatch.setattr(provider, "_client", fake_client_factory)
 
-    with pytest.raises(RuntimeError, match="Massive authentication failed"):
+    with pytest.raises(ProviderAuthenticationError, match="Massive authentication failed"):
         provider._fetch_snapshot_results("TSLA")  # pylint: disable=protected-access
 
 
@@ -251,3 +280,18 @@ api_key = "secret"
     assert set(result["data_source"]) == {"massive"}
     assert "delta" in result.columns
     assert result["delta"].notna().all()
+
+
+def test_fetch_ticker_option_chain_reraises_massive_auth_errors(monkeypatch):
+    """Invalid Massive credentials should fail fast through the shared fetch path."""
+    provider = MassiveProvider()
+
+    def raise_auth_error(_ticker):
+        """Raise a clear provider auth error."""
+        raise ProviderAuthenticationError("Massive authentication failed.")
+
+    monkeypatch.setattr(fetch, "get_data_provider", lambda: provider)
+    monkeypatch.setattr(provider, "load_underlying_snapshot", raise_auth_error)
+
+    with pytest.raises(ProviderAuthenticationError, match="Massive authentication failed"):
+        fetch.fetch_ticker_option_chain("TSLA")

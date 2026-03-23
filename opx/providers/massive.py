@@ -1,5 +1,7 @@
 """Massive provider implementation backed by the official Massive client."""
 
+# pylint: disable=duplicate-code
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -10,13 +12,18 @@ import numpy as np
 import pandas as pd
 from massive import RESTClient
 
-from opx.config import get_provider_credentials
-from opx.normalize import normalize_vendor_option_frame
-from opx.providers.base import DataProvider, OptionChainFrames
+from opx.config import get_provider_credentials, get_runtime_config
+from opx.providers.base import (
+    DataProvider,
+    OptionChainFrames,
+    ProviderAuthenticationError,
+    normalize_provider_frame,
+)
 from opx.utils import coerce_float, normalize_timestamp
 
 MAX_RETRIES = 3
 BACKOFF_SECONDS = 1.0
+DEFAULT_SNAPSHOT_PAGE_LIMIT = 1000
 
 
 def _coalesce(*values: Any) -> Any:
@@ -58,6 +65,9 @@ class MassiveProvider(DataProvider):
 
     name = "massive"
 
+    def __init__(self) -> None:
+        self._last_request_started_at: float | None = None
+
     @property
     def external_logger_names(self) -> tuple[str, ...]:
         """Expose urllib3 logging used underneath the official client."""
@@ -70,24 +80,49 @@ class MassiveProvider(DataProvider):
     @lru_cache(maxsize=1)
     def _client(self) -> RESTClient:
         """Construct the official Massive REST client once per provider instance."""
-        return RESTClient(api_key=self._api_key(), retries=MAX_RETRIES, pagination=True)
+        client = RESTClient(api_key=self._api_key(), retries=MAX_RETRIES, pagination=True)
+        client._get = self._wrap_rate_limited_get(client._get)  # pylint: disable=protected-access
+        return client
+
+    def _snapshot_page_limit(self) -> int:
+        """Return the configured Massive snapshot page size."""
+        return get_runtime_config().massive_snapshot_page_limit
+
+    def _request_interval_seconds(self) -> float:
+        """Return the configured minimum spacing between Massive HTTP requests."""
+        return get_runtime_config().massive_request_interval_seconds
+
+    def _wrap_rate_limited_get(self, wrapped_get):
+        """Enforce minimum spacing between underlying Massive client HTTP calls."""
+
+        def rate_limited_get(*args, **kwargs):
+            interval_seconds = self._request_interval_seconds()
+            if self._last_request_started_at is not None and interval_seconds > 0:
+                elapsed = time.monotonic() - self._last_request_started_at
+                remaining = interval_seconds - elapsed
+                if remaining > 0:
+                    time.sleep(remaining)
+            self._last_request_started_at = time.monotonic()
+            return wrapped_get(*args, **kwargs)
+
+        return rate_limited_get
 
     def _fetch_snapshot_results(self, ticker: str) -> tuple[Any, ...]:
-        """Load snapshot rows from the official client with exponential backoff."""
+        """Load the per-ticker snapshot chain via the single Massive collection call."""
         last_error: Exception | None = None
 
         for attempt in range(MAX_RETRIES + 1):
             try:
                 results = self._client().list_snapshot_options_chain(
                     ticker.upper(),
-                    params={"limit": 250},
+                    params={"limit": self._snapshot_page_limit()},
                 )
                 return tuple(results)
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 last_error = exc
                 message = str(exc).lower()
                 if "401" in message or "403" in message or "auth" in message:
-                    raise RuntimeError(
+                    raise ProviderAuthenticationError(
                         "Massive authentication failed. Check [providers.massive] api_key "
                         "in ~/.config/opx/config.toml."
                     ) from exc
@@ -238,7 +273,7 @@ class MassiveProvider(DataProvider):
         ticker: str,
     ) -> pd.DataFrame:
         """Normalize a Massive frame into the canonical options schema."""
-        frame = normalize_vendor_option_frame(
+        frame = normalize_provider_frame(
             df=df,
             underlying_price=underlying_price,
             expiration_date=expiration_date,

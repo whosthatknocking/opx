@@ -168,6 +168,8 @@ The active provider is selected in this config file, not via environment variabl
 Defaults:
 
 - if the config file is absent or incomplete, defaults should favor `yfinance`
+- if individual config values are missing, malformed, or out of range, the loader should apply code defaults for those fields rather than aborting the run
+- startup output should show the resolved config values actually applied, with secrets redacted and fallback-to-default notices when relevant
 - `yfinance` remains the default provider because it requires the least effort to get started
 
 There is no need for environment-variable overrides in this phase.
@@ -280,8 +282,10 @@ Initial required capabilities:
 Initial endpoint direction:
 
 - the implementation should support the Massive snapshot endpoint `/v3/snapshot/options/{underlyingAsset}`
-- this endpoint may be used to source option-chain snapshot data, quotes, and related contract-level fields for a single underlying
-- if additional Massive endpoints are needed for expirations or underlying details, they should complement this snapshot endpoint rather than replace it without a documented reason
+- the per-ticker Massive flow should use this snapshot endpoint as its collection path for option-chain data, quotes, expiration discovery, and underlying details derived from the returned payload
+- the implementation should request snapshot pages with a configurable `limit`, defaulting to `1000`
+- the implementation should enforce configurable latency between Massive HTTP requests, including paginated snapshot requests
+- the default Massive request latency should be conservative for delayed-plan usage and configurable per account limits
 - Massive provides the key timestamps needed to compute and assess current freshness metrics for options chain data, especially for real-time or near-real-time plans
 - Massive API access should go through the official client library rather than ad hoc raw HTTP request code in the app
 
@@ -531,7 +535,7 @@ Completed work:
 - `~/.config/opx/config.toml` was introduced as the user config contract
 - provider selection and user-tunable runtime settings were moved into the config loader model
 - `yfinance` is the default provider when config is absent or incomplete
-- config loading and validation were added
+- config loading with default fallback behavior was added
 - provider credential access was isolated behind the config layer
 
 Verification notes:
@@ -539,7 +543,7 @@ Verification notes:
 - verified that the runtime loads config from `~/.config/opx/config.toml` with in-repo defaults when absent
 - verified that package imports resolve under `opx` and that no `options_fetcher` compatibility layer remains
 - verified that `viewer.py` remains unchanged as the top-level entrypoint
-- verified that provider selection and Massive credential validation are driven by the config loader
+- verified that provider selection and provider-specific defaults are driven by the config loader
 - verified that no environment-variable override path is part of the config model
 
 Goals:
@@ -550,7 +554,7 @@ Goals:
 - introduce `~/.config/opx/config.toml` as the user config contract
 - move provider selection and other relevant user-tunable runtime settings into that file
 - establish `yfinance` as the default provider in the config model
-- add config loading and validation
+- add config loading with default fallback behavior for invalid user values
 - isolate credential access from the rest of the fetch pipeline
 
 Exit criteria:
@@ -596,19 +600,23 @@ Exit criteria:
 
 ### Milestone 3: Massive Provider Implementation
 
-Status: Not implemented.
+Status: Verified complete on 2026-03-23.
 
 Completed work:
 
-- Massive can be selected in config and validated for missing credentials, but runtime execution remains unimplemented
+- added the real `opx/providers/massive.py` module using the official `massive` client library
+- wired Massive API key usage through the config loader and provider factory
+- implemented snapshot, expiration, and option-chain retrieval through `list_snapshot_options_chain`
+- normalized Massive payloads into the canonical schema
+- preserved provider-native Greeks when their semantics match the canonical columns
+- added clear authentication-failure handling for invalid Massive credentials
 
-Remaining work:
+Verification notes:
 
-- add the real `massive` provider module
-- implement expiration, snapshot, and option-chain retrieval
-- normalize Massive payloads into the canonical schema
-- support provider-native analytics where semantics match
-- make the provider runnable end-to-end
+- verified that `massive` can be selected in config and execute the shared fetch path end to end in tests
+- verified that missing Massive credentials fall back to the default provider instead of aborting the run
+- verified that invalid Massive credentials fail clearly through the provider fetch path
+- verified that Massive provider-native fields map into the existing canonical schema without schema expansion
 
 Goals:
 

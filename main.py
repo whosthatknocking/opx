@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from opx.config import get_runtime_config
+from opx.config import describe_runtime_config, get_runtime_config
 from opx.export import write_options_csv
 from opx.fetch import fetch_ticker_option_chain
 from opx.runlog import create_run_logger
@@ -27,6 +27,13 @@ def main():
     print(f"Today: {config.today}")
     print(f"Max expiration: {config.max_expiration}")
     print(f"Log: {log_path}")
+    print("Resolved config:")
+    for line in describe_runtime_config(config):
+        print(f"  {line}")
+    if config.config_warnings:
+        print("Config fallbacks:")
+        for warning in config.config_warnings:
+            print(f"  {warning}")
     logger.info(
         "run_context today=%s max_expiration=%s provider=%s config_path=%s",
         config.today,
@@ -34,6 +41,10 @@ def main():
         config.data_provider,
         config.config_path,
     )
+    for line in describe_runtime_config(config):
+        logger.info("config_applied %s", line)
+    for warning in config.config_warnings:
+        logger.warning("config_fallback %s", warning)
 
     ticker_frames = []
     for ticker in config.tickers:

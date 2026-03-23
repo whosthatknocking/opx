@@ -30,6 +30,8 @@ def make_runtime_config(**overrides):
         "max_expiration": "2026-06-30",
         "today": date(2026, 3, 20),
         "massive_api_key": None,
+        "massive_snapshot_page_limit": 1000,
+        "massive_request_interval_seconds": 12.0,
         "config_path": Path("/tmp/opx.toml"),
     }
     defaults.update(overrides)
