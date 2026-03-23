@@ -22,12 +22,12 @@ Warning: Yahoo Finance quote timestamps can lag, and the collected option, under
 ## Quick Start
 
 ```bash
-python3 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python3 -m playwright install
-python3 fetcher.py
-python3 viewer.py
+python -m playwright install
+python fetcher.py
+python viewer.py
 ```
 
 Then open `http://127.0.0.1:8000` in your browser.
@@ -58,7 +58,7 @@ Then open `http://127.0.0.1:8000` in your browser.
 Run the project from the repository root:
 
 ```bash
-python3 fetcher.py
+python fetcher.py
 ```
 
 ## CSV Browser
@@ -66,7 +66,7 @@ python3 fetcher.py
 Run the local viewer from the repository root:
 
 ```bash
-python3 viewer.py
+python viewer.py
 ```
 
 Then open `http://127.0.0.1:8000` in your browser.
@@ -316,10 +316,10 @@ In practice:
 Install dependencies from `requirements.txt`:
 
 ```bash
-python3 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python3 -m playwright install
+python -m playwright install
 ```
 
 `playwright` is optional for the fetch/export pipeline itself, but required if you want automated browser screenshots or browser-driven UI checks.
@@ -329,7 +329,7 @@ python3 -m playwright install
 Regenerate the viewer screenshot used in this README with:
 
 ```bash
-python3 scripts/capture_viewer_screenshot.py
+python scripts/capture_viewer_screenshot.py
 ```
 
 By default this saves a dark-mode full-page screenshot to:
@@ -341,8 +341,8 @@ docs/images/viewer-option-chain.png
 Optional flags:
 
 ```bash
-python3 scripts/capture_viewer_screenshot.py --theme light
-python3 scripts/capture_viewer_screenshot.py --output docs/images/viewer-custom.png
+python scripts/capture_viewer_screenshot.py --theme light
+python scripts/capture_viewer_screenshot.py --output docs/images/viewer-custom.png
 ```
 
 ## Verification
