@@ -4,8 +4,8 @@ import math
 
 import pandas as pd
 
-from options_fetcher.greeks import compute_greeks
-from options_fetcher.metrics import add_expected_move_by_expiration
+from opx.greeks import compute_greeks
+from opx.metrics import add_expected_move_by_expiration
 
 
 def test_compute_greeks_probability_itm_complements_for_matching_call_put():

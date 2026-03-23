@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
-from options_fetcher.export import UNWANTED_EXPORT_COLUMNS
+from opx.export import UNWANTED_EXPORT_COLUMNS
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -636,7 +636,7 @@ class ViewerRequestHandler(SimpleHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:  # pylint: disable=redefined-builtin
         """Optionally suppress request logs when running screenshot automation."""
-        if os.environ.get("OPTIONS_FETCHER_VIEWER_QUIET") == "1":
+        if os.environ.get("OPX_VIEWER_QUIET") == "1":
             return
         super().log_message(format, *args)
 
@@ -655,8 +655,8 @@ def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
 
 def main() -> None:
     """Start the local viewer using environment-configured host and port."""
-    host = os.environ.get("OPTIONS_FETCHER_VIEWER_HOST", "127.0.0.1")
-    port = int(os.environ.get("OPTIONS_FETCHER_VIEWER_PORT", "8000"))
+    host = os.environ.get("OPX_VIEWER_HOST", "127.0.0.1")
+    port = int(os.environ.get("OPX_VIEWER_PORT", "8000"))
     serve(host=host, port=port)
 
 

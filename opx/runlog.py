@@ -5,8 +5,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from options_fetcher.config import SCRIPT_VERSION
-from options_fetcher.providers import get_data_provider
+from opx.config import SCRIPT_VERSION, get_runtime_config
+from opx.providers import get_data_provider
 
 
 def configure_external_loggers(file_handler):
@@ -22,12 +22,13 @@ def configure_external_loggers(file_handler):
 
 def create_run_logger():
     """Create the append-only run logger and return it with its file path."""
+    config = get_runtime_config()
     timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
     logs_dir = Path("logs")
     logs_dir.mkdir(exist_ok=True)
-    log_path = logs_dir / "options_fetcher_runs.log"
+    log_path = logs_dir / "opx_runs.log"
 
-    logger = logging.getLogger("options_fetcher.run")
+    logger = logging.getLogger("opx.run")
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
     logger.propagate = False
@@ -40,5 +41,11 @@ def create_run_logger():
     configure_external_loggers(file_handler)
 
     logger.info("=" * 80)
-    logger.info("run_started run_id=%s script_version=%s", timestamp, SCRIPT_VERSION)
+    logger.info(
+        "run_started run_id=%s script_version=%s provider=%s config_path=%s",
+        timestamp,
+        SCRIPT_VERSION,
+        config.data_provider,
+        config.config_path,
+    )
     return logger, log_path

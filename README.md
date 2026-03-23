@@ -1,6 +1,6 @@
-# Options Fetcher
+# opx
 
-Options Fetcher is a Python tool for downloading near-term option chains from Yahoo Finance, enriching them with pricing and screening metrics, and exporting the result to a timestamped CSV. It also includes a local browser UI for inspecting the generated dataset in a sortable table.
+`opx` is a Python tool for downloading near-term option chains from Yahoo Finance, enriching them with pricing and screening metrics, and exporting the result to a timestamped CSV. It also includes a local browser UI for inspecting the generated dataset in a sortable table.
 
 ## At a Glance
 
@@ -71,7 +71,7 @@ python3 viewer.py
 
 Then open `http://127.0.0.1:8000` in your browser.
 
-![Options Fetcher viewer](docs/images/viewer-option-chain.png)
+![opx viewer](docs/images/viewer-option-chain.png)
 
 The viewer includes:
 
@@ -95,7 +95,7 @@ outputs/options_engine_output_YYYYMMDD_HHMMSS.csv
 Operational details that are not row-specific are written to:
 
 ```text
-logs/options_fetcher_runs.log
+logs/opx_runs.log
 ```
 
 The run log also records:
@@ -223,7 +223,7 @@ The exported CSV contains both raw option data and derived fields. Some values m
 - `data_source`: Source name for the active provider, currently `yfinance`. Use it for lineage and auditability.
 - `risk_free_rate_used`: Risk-free rate used in Greek calculations. Use it to reproduce the Black-Scholes outputs.
 
-Execution details that are not row-specific are written to the append-only run log `logs/options_fetcher_runs.log`, including:
+Execution details that are not row-specific are written to the append-only run log `logs/opx_runs.log`, including:
 
 - run start time
 - script version
@@ -246,7 +246,7 @@ This section is for people changing the codebase, adding providers, or working o
 │       └── viewer-option-chain.png
 ├── scripts/
 │   └── capture_viewer_screenshot.py
-├── options_fetcher/
+├── opx/
 │   ├── config.py
 │   ├── export.py
 │   ├── fetch.py
@@ -265,7 +265,27 @@ This section is for people changing the codebase, adding providers, or working o
 
 ## Configuration
 
-Core runtime configuration lives in `options_fetcher/config.py`. This is the main file you edit to change what gets fetched and how aggressively the dataset is filtered.
+Runtime configuration lives in `~/.config/opx/config.toml`. If the file is absent, the app falls back to built-in defaults and uses `yfinance` as the active provider.
+
+Example config:
+
+```toml
+[settings]
+tickers = ["TSLA", "NVDA", "UBER", "MSFT", "GOOGL", "ORCL", "PLTR"]
+data_provider = "yfinance"
+min_bid = 0.50
+min_open_interest = 100
+min_volume = 10
+max_spread_pct_of_mid = 0.25
+max_strike_distance_pct = 0.30
+risk_free_rate = 0.045
+hv_lookback_days = 30
+trading_days_per_year = 252
+stale_quote_seconds = 900
+
+[providers.massive]
+api_key = "replace-me"
+```
 
 Current defaults:
 
@@ -279,16 +299,17 @@ Current defaults:
 - `HV_LOOKBACK_DAYS = 30`: lookback window for historical volatility.
 - `TRADING_DAYS_PER_YEAR = 252`: annualization factor for volatility.
 - `STALE_QUOTE_SECONDS = 900`: staleness threshold for option and underlying quotes.
-- `DATA_PROVIDER = "yfinance"`: provider implementation used by the fetch pipeline.
-- `SCRIPT_VERSION = "2026-03-21.1"`: run-version string written to the append-only log.
+- `data_provider = "yfinance"`: provider implementation used by the fetch pipeline.
+- `SCRIPT_VERSION = "2026-03-23.2"`: run-version string written to the append-only log.
 - `MAX_EXPIRATION`: computed dynamically as the last calendar day of the month four months from today, so the fetch window stays on a rolling roughly four-month horizon.
 
 In practice:
 
-- Change `TICKERS` when you want a different watchlist.
-- Tighten or loosen `MAX_STRIKE_DISTANCE_PCT`, `MAX_SPREAD_PCT_OF_MID`, `MIN_BID`, `MIN_OPEN_INTEREST`, and `MIN_VOLUME` when you want a narrower or broader tradability filter.
-- Change `RISK_FREE_RATE`, `HV_LOOKBACK_DAYS`, `TRADING_DAYS_PER_YEAR`, or `STALE_QUOTE_SECONDS` only if you want different modeling or freshness assumptions.
-- Switch `DATA_PROVIDER` when you want to use a different market-data implementation.
+- Change `tickers` when you want a different watchlist.
+- Tighten or loosen the threshold values when you want a narrower or broader tradability filter.
+- Change the rate, lookback, trading-day, or staleness settings only if you want different modeling or freshness assumptions.
+- Switch `data_provider` when you want to use a different market-data implementation.
+- Add `[providers.massive].api_key` only when you select `massive`.
 
 ## Development Setup
 

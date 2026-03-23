@@ -8,10 +8,10 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from options_fetcher.config import HV_LOOKBACK_DAYS, TRADING_DAYS_PER_YEAR
-from options_fetcher.normalize import normalize_vendor_option_frame
-from options_fetcher.providers.base import DataProvider, OptionChainFrames
-from options_fetcher.utils import coerce_float, normalize_timestamp
+from opx.config import get_runtime_config
+from opx.normalize import normalize_vendor_option_frame
+from opx.providers.base import DataProvider, OptionChainFrames
+from opx.utils import coerce_float, normalize_timestamp
 
 
 def normalize_market_state(value):
@@ -30,7 +30,8 @@ def normalize_market_state(value):
 
 def compute_historical_volatility(stock):  # pylint: disable=broad-exception-caught
     """Compute trailing annualized realized volatility from daily closes."""
-    lookback_period = f"{max(HV_LOOKBACK_DAYS * 3, 90)}d"
+    config = get_runtime_config()
+    lookback_period = f"{max(config.hv_lookback_days * 3, 90)}d"
     try:
         history = stock.history(period=lookback_period, interval="1d", auto_adjust=False)
     except Exception:  # pylint: disable=broad-exception-caught
@@ -41,11 +42,11 @@ def compute_historical_volatility(stock):  # pylint: disable=broad-exception-cau
     close_column = "Adj Close" if "Adj Close" in history.columns else "Close"
     closes = pd.to_numeric(history[close_column], errors="coerce").dropna()
     log_returns = np.log(closes / closes.shift(1)).dropna()
-    if len(log_returns) < HV_LOOKBACK_DAYS:
+    if len(log_returns) < config.hv_lookback_days:
         return np.nan
 
-    recent_returns = log_returns.tail(HV_LOOKBACK_DAYS)
-    return recent_returns.std(ddof=1) * np.sqrt(TRADING_DAYS_PER_YEAR)
+    recent_returns = log_returns.tail(config.hv_lookback_days)
+    return recent_returns.std(ddof=1) * np.sqrt(config.trading_days_per_year)
 
 
 class YFinanceProvider(DataProvider):
