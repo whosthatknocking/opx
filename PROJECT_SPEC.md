@@ -563,17 +563,21 @@ Exit criteria:
 
 ### Milestone 2: Provider Contract Cleanup
 
-Status: In progress.
+Status: Verified complete on 2026-03-23.
 
 Completed work:
 
 - provider selection now uses a central factory/registry structure
 - shared fetch logging was generalized from `raw_yfinance_rows` to `raw_provider_rows`
+- export now enforces the canonical CSV schema instead of appending unexpected provider-specific columns
+- tests now cover provider registry contents, provider-neutral shared logging, and schema-preservation behavior
 
-Remaining work:
+Verification notes:
 
-- full enforcement of schema-preservation rules in implementation and tests
-- complete provider-neutral documentation around provider-supplied versus derived fields
+- verified that the shared provider registry exposes `yfinance` and `massive`
+- verified that shared fetch logging uses provider-neutral wording and preserves provider context on errors
+- verified that CSV export drops unexpected provider-specific fields and stays pinned to the canonical column set
+- verified that shared documentation now describes provider-neutral logging and canonical-schema preservation
 
 Goals:
 

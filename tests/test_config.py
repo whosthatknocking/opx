@@ -5,7 +5,12 @@ from pathlib import Path
 import pytest
 
 from opx.config import ConfigError, load_runtime_config, reset_runtime_config
-from opx.providers import MassiveProvider, YFinanceProvider, get_data_provider
+from opx.providers import (
+    PROVIDER_FACTORIES,
+    MassiveProvider,
+    YFinanceProvider,
+    get_data_provider,
+)
 
 
 def test_load_runtime_config_uses_defaults_when_file_is_absent(tmp_path: Path):
@@ -82,3 +87,8 @@ def test_load_runtime_config_rejects_unsupported_provider(tmp_path: Path):
 
     with pytest.raises(ConfigError, match="Unsupported provider 'invalid'"):
         load_runtime_config(config_path)
+
+
+def test_provider_registry_exposes_supported_providers():
+    """The shared factory registry should enumerate the supported provider set."""
+    assert set(PROVIDER_FACTORIES) == {"yfinance", "massive"}

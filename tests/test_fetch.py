@@ -120,6 +120,16 @@ class StubProvider:
         return frame
 
 
+class ErrorProvider:  # pylint: disable=too-few-public-methods
+    """Provider stub that fails after selection so shared error logging can be asserted."""
+
+    name = "broken"
+
+    def load_underlying_snapshot(self, ticker):
+        """Raise a provider error so shared logging can include provider context."""
+        raise RuntimeError(f"provider exploded for {ticker}")
+
+
 def test_fetch_ticker_option_chain_logs_raw_provider_row_counts(monkeypatch, caplog):
     """Log raw provider counts before app-side filtering changes the row set."""
     monkeypatch.setattr(fetch, "get_data_provider", StubProvider)
@@ -141,3 +151,17 @@ def test_fetch_ticker_option_chain_logs_raw_provider_row_counts(monkeypatch, cap
     ) in caplog.text
     assert "status=ok" in caplog.text
     assert "raw_provider_rows=3 raw_expirations=1" in caplog.text
+
+
+def test_fetch_ticker_option_chain_logs_provider_name_on_error(monkeypatch, caplog):
+    """Shared error logs should stay provider-neutral while preserving provider context."""
+    monkeypatch.setattr(fetch, "get_data_provider", ErrorProvider)
+    monkeypatch.setattr(fetch, "get_runtime_config", make_runtime_config)
+
+    caplog.set_level("ERROR", logger="opx.run")
+    logger = logging.getLogger("opx.run")
+
+    result = fetch.fetch_ticker_option_chain("TEST", logger=logger)
+
+    assert result.empty
+    assert "provider=broken status=error" in caplog.text

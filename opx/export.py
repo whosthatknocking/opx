@@ -105,6 +105,7 @@ UNWANTED_EXPORT_COLUMNS = {
     "script_version",
     "fetched_at",
 }
+CANONICAL_EXPORT_COLUMNS = tuple(COLUMN_ORDER)
 
 
 def format_export_timestamps(df):
@@ -124,10 +125,9 @@ def drop_unwanted_columns(df):
 
 
 def reorder_export_columns(df):
-    """Pin a stable schema while preserving any unexpected source columns at the end."""
-    ordered = [column for column in COLUMN_ORDER if column in df.columns]
-    extras = [column for column in df.columns if column not in ordered]
-    return df[ordered + extras]
+    """Pin the export to the canonical schema without leaking provider-specific extras."""
+    ordered = [column for column in CANONICAL_EXPORT_COLUMNS if column in df.columns]
+    return df[ordered]
 
 
 def write_options_csv(ticker_frames, output_path):
