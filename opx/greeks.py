@@ -1,7 +1,13 @@
 """Black-Scholes greek and ITM-probability calculations for option rows."""
 
 import numpy as np
+import pandas as pd
 from scipy.stats import norm
+
+
+def _merge_provider_and_derived(existing, derived):
+    """Keep provider-native values when present and fill gaps with derived ones."""
+    return existing.where(existing.notna(), derived) if existing is not None else derived
 
 
 def compute_greeks(  # pylint: disable=too-many-locals
@@ -69,13 +75,25 @@ def compute_greeks(  # pylint: disable=too-many-locals
         * (1 - cdf_d2[valid_puts])
     )
 
-    df["delta"] = delta
-    df["delta_abs"] = np.abs(delta)
-    df["probability_itm"] = probability_itm
-    df["gamma"] = gamma
-    df["vega"] = vega
-    df["theta"] = theta / 365
-    df["delta_itm_proxy"] = np.where(is_call, df["delta"], df["delta_abs"])
-    df["has_valid_greeks"] = valid
+    derived_delta = pd.Series(delta, index=df.index, dtype=float)
+    derived_probability_itm = pd.Series(probability_itm, index=df.index, dtype=float)
+    derived_gamma = pd.Series(gamma, index=df.index, dtype=float)
+    derived_vega = pd.Series(vega, index=df.index, dtype=float)
+    derived_theta = pd.Series(theta / 365, index=df.index, dtype=float)
+
+    df["delta"] = _merge_provider_and_derived(df.get("delta"), derived_delta)
+    df["probability_itm"] = _merge_provider_and_derived(
+        df.get("probability_itm"),
+        derived_probability_itm,
+    )
+    df["gamma"] = _merge_provider_and_derived(df.get("gamma"), derived_gamma)
+    df["vega"] = _merge_provider_and_derived(df.get("vega"), derived_vega)
+    df["theta"] = _merge_provider_and_derived(df.get("theta"), derived_theta)
+    df["delta_abs"] = _merge_provider_and_derived(df.get("delta_abs"), df["delta"].abs())
+    df["delta_itm_proxy"] = _merge_provider_and_derived(
+        df.get("delta_itm_proxy"),
+        np.where(is_call, df["delta"], df["delta_abs"]),
+    )
+    df["has_valid_greeks"] = valid | df["delta"].notna()
 
     return df

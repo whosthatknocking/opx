@@ -268,6 +268,7 @@ Status:
 - API-key backed
 - expected to be the more explicit and production-oriented data source
 - requires provider onboarding before use
+- should use the official Massive client library installed from `massive`
 
 Initial required capabilities:
 
@@ -282,6 +283,7 @@ Initial endpoint direction:
 - this endpoint may be used to source option-chain snapshot data, quotes, and related contract-level fields for a single underlying
 - if additional Massive endpoints are needed for expirations or underlying details, they should complement this snapshot endpoint rather than replace it without a documented reason
 - Massive provides the key timestamps needed to compute and assess current freshness metrics for options chain data, especially for real-time or near-real-time plans
+- Massive API access should go through the official client library rather than ad hoc raw HTTP request code in the app
 
 Massive-specific field policy:
 
@@ -421,7 +423,7 @@ Add a new provider module:
 
 Responsibilities:
 
-- API client calls
+- API client calls through the official Massive client library
 - response parsing
 - pagination handling if required by the API
 - provider rate-limit handling with exponential backoff and 3 retries
