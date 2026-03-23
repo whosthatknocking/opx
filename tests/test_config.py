@@ -17,7 +17,7 @@ def test_load_runtime_config_uses_defaults_when_file_is_absent(tmp_path: Path):
 
     assert config.data_provider == "yfinance"
     assert config.massive_api_key is None
-    assert config.massive_snapshot_page_limit == 1000
+    assert config.massive_snapshot_page_limit == 250
     assert config.massive_request_interval_seconds == 12.0
     assert config.tickers
     assert config.config_path == tmp_path / "missing.toml"
@@ -36,7 +36,7 @@ max_expiration = "2026-07-31"
 
 [providers.massive]
 api_key = "secret"
-snapshot_page_limit = 500
+snapshot_page_limit = 250
 request_interval_seconds = 1.5
 """.strip(),
         encoding="utf-8",
@@ -49,7 +49,7 @@ request_interval_seconds = 1.5
     assert config.min_bid == 1.25
     assert config.max_expiration == "2026-07-31"
     assert config.massive_api_key == "secret"
-    assert config.massive_snapshot_page_limit == 500
+    assert config.massive_snapshot_page_limit == 250
     assert config.massive_request_interval_seconds == 1.5
 
 
@@ -110,8 +110,24 @@ snapshot_page_limit = 0
         encoding="utf-8",
     )
     config = load_runtime_config(zero_limit)
-    assert config.massive_snapshot_page_limit == 1000
+    assert config.massive_snapshot_page_limit == 250
     assert any("snapshot_page_limit" in warning for warning in config.config_warnings)
+
+    too_large_limit = tmp_path / "too-large-limit.toml"
+    too_large_limit.write_text(
+        """
+[settings]
+data_provider = "massive"
+
+[providers.massive]
+api_key = "secret"
+snapshot_page_limit = 1000
+""".strip(),
+        encoding="utf-8",
+    )
+    config = load_runtime_config(too_large_limit)
+    assert config.massive_snapshot_page_limit == 250
+    assert any("clamped to 250" in warning for warning in config.config_warnings)
 
     negative_interval = tmp_path / "negative-interval.toml"
     negative_interval.write_text(

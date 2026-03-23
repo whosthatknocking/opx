@@ -12,7 +12,11 @@ import numpy as np
 import pandas as pd
 from massive import RESTClient
 
-from opx.config import get_provider_credentials, get_runtime_config
+from opx.config import (
+    DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT,
+    get_provider_credentials,
+    get_runtime_config,
+)
 from opx.providers.base import (
     DataProvider,
     OptionChainFrames,
@@ -23,7 +27,7 @@ from opx.utils import coerce_float, normalize_timestamp
 
 MAX_RETRIES = 3
 BACKOFF_SECONDS = 1.0
-DEFAULT_SNAPSHOT_PAGE_LIMIT = 1000
+DEFAULT_SNAPSHOT_PAGE_LIMIT = DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT
 
 
 def _coalesce(*values: Any) -> Any:

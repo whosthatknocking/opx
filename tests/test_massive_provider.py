@@ -194,11 +194,11 @@ def test_massive_provider_spaces_underlying_http_requests(monkeypatch):
         lambda *args, **kwargs: wrapped_calls.append((args, kwargs)) or "ok"
     )
 
-    result = wrapped("/v3/snapshot/options/TSLA", params={"limit": 1000})
+    result = wrapped("/v3/snapshot/options/TSLA", params={"limit": 250})
 
     assert result == "ok"
     assert sleeps == [7.0]
-    assert wrapped_calls == [(("/v3/snapshot/options/TSLA",), {"params": {"limit": 1000}})]
+    assert wrapped_calls == [(("/v3/snapshot/options/TSLA",), {"params": {"limit": 250}})]
     assert provider._last_request_started_at == 112.0
 
 

@@ -283,7 +283,8 @@ Initial endpoint direction:
 
 - the implementation should support the Massive snapshot endpoint `/v3/snapshot/options/{underlyingAsset}`
 - the per-ticker Massive flow should use this snapshot endpoint as its collection path for option-chain data, quotes, expiration discovery, and underlying details derived from the returned payload
-- the implementation should request snapshot pages with a configurable `limit`, defaulting to `1000`
+- the implementation should request snapshot pages with a configurable `limit`, defaulting to `250`
+- configured snapshot page sizes above the endpoint maximum should be clamped before the request is made
 - the implementation should enforce configurable latency between Massive HTTP requests, including paginated snapshot requests
 - the default Massive request latency should be conservative for delayed-plan usage and configurable per account limits
 - Massive provides the key timestamps needed to compute and assess current freshness metrics for options chain data, especially for real-time or near-real-time plans

@@ -27,7 +27,8 @@ DEFAULT_HV_LOOKBACK_DAYS = 30
 DEFAULT_TRADING_DAYS_PER_YEAR = 252
 DEFAULT_STALE_QUOTE_SECONDS = 15 * 60
 DEFAULT_MAX_STRIKE_DISTANCE_PCT = 0.30
-DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT = 1000
+MAX_MASSIVE_SNAPSHOT_PAGE_LIMIT = 250
+DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT = MAX_MASSIVE_SNAPSHOT_PAGE_LIMIT
 DEFAULT_MASSIVE_REQUEST_INTERVAL_SECONDS = 12.0
 
 
@@ -158,6 +159,20 @@ def _resolve_table(value, *, field_name, warnings):
     return {}
 
 
+def _clamp_massive_snapshot_page_limit(value: int, warnings: list[str]) -> int:
+    """Clamp Massive snapshot page size to the endpoint's documented maximum."""
+    if value <= 0:
+        _append_default_warning(warnings, "providers.massive.snapshot_page_limit", 250)
+        return DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT
+    if value > MAX_MASSIVE_SNAPSHOT_PAGE_LIMIT:
+        warnings.append(
+            "providers.massive.snapshot_page_limit: clamped to 250 because "
+            "/v3/snapshot/options/{underlyingAsset} rejects larger values."
+        )
+        return MAX_MASSIVE_SNAPSHOT_PAGE_LIMIT
+    return value
+
+
 def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:
     """Load runtime config from the user config file, falling back to defaults."""
     resolved_path = (config_path or DEFAULT_CONFIG_PATH).expanduser()
@@ -274,14 +289,13 @@ def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:
         ),
         today=today,
         massive_api_key=massive_api_key,
-        massive_snapshot_page_limit=_resolve_config_value(
+        massive_snapshot_page_limit=_clamp_massive_snapshot_page_limit(_resolve_config_value(
             massive_settings.get("snapshot_page_limit"),
             field_name="providers.massive.snapshot_page_limit",
             default=DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT,
             coercer=_coerce_int,
             warnings=warnings,
-            validator=lambda value: value > 0,
-        ),
+        ), warnings),
         massive_request_interval_seconds=_resolve_config_value(
             massive_settings.get("request_interval_seconds"),
             field_name="providers.massive.request_interval_seconds",
@@ -309,8 +323,10 @@ def validate_runtime_config(config: RuntimeConfig) -> None:
             f"'{config.config_path}'. Set [providers.massive] api_key when using "
             "data_provider = 'massive'."
         )
-    if config.massive_snapshot_page_limit <= 0:
-        raise ConfigError("Config field 'providers.massive.snapshot_page_limit' must be positive.")
+    if not 0 < config.massive_snapshot_page_limit <= MAX_MASSIVE_SNAPSHOT_PAGE_LIMIT:
+        raise ConfigError(
+            "Config field 'providers.massive.snapshot_page_limit' must be between 1 and 250."
+        )
     if config.massive_request_interval_seconds < 0:
         raise ConfigError(
             "Config field 'providers.massive.request_interval_seconds' must be non-negative."

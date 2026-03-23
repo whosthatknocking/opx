@@ -310,7 +310,7 @@ stale_quote_seconds = 900
 
 [providers.massive]
 api_key = "replace-me"
-snapshot_page_limit = 1000
+snapshot_page_limit = 250
 request_interval_seconds = 12.0
 ```
 
@@ -327,7 +327,7 @@ Current defaults:
 - `TRADING_DAYS_PER_YEAR = 252`: annualization factor for volatility.
 - `STALE_QUOTE_SECONDS = 900`: staleness threshold for option and underlying quotes.
 - `data_provider = "yfinance"`: provider implementation used by the fetch pipeline.
-- `providers.massive.snapshot_page_limit = 1000`: per-request Massive snapshot page size used for the option-chain endpoint.
+- `providers.massive.snapshot_page_limit = 250`: per-request Massive snapshot page size used for the option-chain endpoint. Values above `250` are clamped because the Massive snapshot endpoint rejects larger limits.
 - `providers.massive.request_interval_seconds = 12.0`: minimum delay between Massive HTTP requests. This default is conservative for delayed-plan usage.
 - `SCRIPT_VERSION = "2026-03-23.2"`: run-version string written to the append-only log.
 - `MAX_EXPIRATION`: computed dynamically as the last calendar day of the month four months from today, so the fetch window stays on a rolling roughly four-month horizon.
