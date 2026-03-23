@@ -3,10 +3,10 @@
 from datetime import datetime
 from pathlib import Path
 
-from options_fetcher.config import MAX_EXPIRATION, TICKERS, today
-from options_fetcher.export import write_options_csv
-from options_fetcher.fetch import fetch_ticker_option_chain
-from options_fetcher.runlog import create_run_logger
+from opx.config import get_runtime_config
+from opx.export import write_options_csv
+from opx.fetch import fetch_ticker_option_chain
+from opx.runlog import create_run_logger
 
 OUTPUTS_DIR = Path("outputs")
 
@@ -22,14 +22,21 @@ def format_file_size(byte_count):
 
 def main():
     """Fetch configured tickers and write the consolidated CSV output."""
+    config = get_runtime_config()
     logger, log_path = create_run_logger()
-    print(f"Today: {today}")
-    print(f"Max expiration: {MAX_EXPIRATION}")
+    print(f"Today: {config.today}")
+    print(f"Max expiration: {config.max_expiration}")
     print(f"Log: {log_path}")
-    logger.info("run_context today=%s max_expiration=%s", today, MAX_EXPIRATION)
+    logger.info(
+        "run_context today=%s max_expiration=%s provider=%s config_path=%s",
+        config.today,
+        config.max_expiration,
+        config.data_provider,
+        config.config_path,
+    )
 
     ticker_frames = []
-    for ticker in TICKERS:
+    for ticker in config.tickers:
         print(f"Loading {ticker}")
         ticker_df = fetch_ticker_option_chain(ticker, logger=logger)
         if not ticker_df.empty:

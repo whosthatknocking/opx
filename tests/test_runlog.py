@@ -2,7 +2,7 @@
 
 import logging
 
-from options_fetcher.runlog import create_run_logger
+from opx.runlog import create_run_logger
 
 
 def test_create_run_logger_routes_yfinance_errors_to_run_log(tmp_path, monkeypatch):
@@ -18,3 +18,4 @@ def test_create_run_logger_routes_yfinance_errors_to_run_log(tmp_path, monkeypat
     contents = log_path.read_text(encoding="utf-8")
     assert "run_started" in contents
     assert "remote request failed for TSLA" in contents
+    assert log_path.name == "opx_runs.log"
