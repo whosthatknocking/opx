@@ -171,6 +171,7 @@ def test_fetch_ticker_option_chain_prints_stage_counts(monkeypatch, capsys):
     assert "TEST: fetch start provider=stub" in stdout
     assert "TEST: expirations available=1 usable=1" in stdout
     assert "TEST: expiration=2026-04-17 raw call_rows=2 put_rows=1 total_rows=3" in stdout
+    assert "TEST: progress expirations_processed=1/1 raw_rows_so_far=3" in stdout
     assert "TEST: expiration=2026-04-17 side=call normalized_rows=2 post_filter_rows=1" in stdout
     assert "TEST: fetch complete rows=1 expirations=1 raw_provider_rows=3" in stdout
 

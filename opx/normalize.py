@@ -39,7 +39,10 @@ def normalize_vendor_option_frame(  # pylint: disable=too-many-arguments,too-man
     time_to_expiration_years = days_to_expiration / 365.0
 
     df["option_type"] = option_type
-    df["underlying_symbol"] = ticker
+    if "underlying_symbol" not in df.columns:
+        df["underlying_symbol"] = ticker
+    else:
+        df["underlying_symbol"] = df["underlying_symbol"].fillna(ticker)
     df["expiration_date"] = expiration_date
     df["days_to_expiration"] = days_to_expiration
     df["time_to_expiration_years"] = time_to_expiration_years

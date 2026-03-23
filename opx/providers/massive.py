@@ -14,6 +14,7 @@ from massive import RESTClient
 
 from opx.config import (
     DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT,
+    SCRIPT_VERSION,
     get_provider_credentials,
     get_runtime_config,
 )
@@ -28,6 +29,7 @@ from opx.utils import coerce_float, normalize_timestamp
 MAX_RETRIES = 3
 BACKOFF_SECONDS = 1.0
 DEFAULT_SNAPSHOT_PAGE_LIMIT = DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT
+CALLER_USER_AGENT = f"opx/{SCRIPT_VERSION}"
 
 
 def _coalesce(*values: Any) -> Any:
@@ -64,6 +66,26 @@ def _normalize_contract_type(value: Any) -> str | None:
     return None
 
 
+def _compute_is_in_the_money(result: Any, option_type: str | None) -> bool | None:
+    """Infer in-the-money state from the snapshot underlying price and strike."""
+    if option_type is None:
+        return None
+    underlying_price = coerce_float(
+        _coalesce(
+            _get_field(result, "underlying_asset", "price"),
+            _get_field(result, "underlying_asset", "value"),
+        )
+    )
+    strike_price = coerce_float(_get_field(result, "details", "strike_price"))
+    if pd.isna(underlying_price) or pd.isna(strike_price):
+        return None
+    if option_type == "call":
+        return bool(underlying_price > strike_price)
+    if option_type == "put":
+        return bool(underlying_price < strike_price)
+    return None
+
+
 class MassiveProvider(DataProvider):
     """Market-data provider backed by the official Massive/Polygon REST client."""
 
@@ -85,6 +107,8 @@ class MassiveProvider(DataProvider):
     def _client(self) -> RESTClient:
         """Construct the official Massive REST client once per provider instance."""
         client = RESTClient(api_key=self._api_key(), retries=MAX_RETRIES, pagination=True)
+        client.headers["User-Agent"] = CALLER_USER_AGENT
+        client.client.headers["User-Agent"] = CALLER_USER_AGENT
         client._get = self._wrap_rate_limited_get(client._get)  # pylint: disable=protected-access
         return client
 
@@ -175,6 +199,7 @@ class MassiveProvider(DataProvider):
                 _get_field(first, "underlying_asset", "last_updated"),
                 _get_field(first, "day", "last_updated"),
                 _get_field(first, "last_trade", "sip_timestamp"),
+                _get_field(first, "last_quote", "last_updated"),
                 _get_field(first, "last_quote", "sip_timestamp"),
             )
         )
@@ -222,6 +247,10 @@ class MassiveProvider(DataProvider):
                     _get_field(result, "details", "ticker"),
                     _get_field(result, "ticker"),
                 ),
+                "underlying_symbol": _coalesce(
+                    _get_field(result, "underlying_asset", "ticker"),
+                    ticker.upper(),
+                ),
                 "option_type": option_type,
                 "strike": _get_field(result, "details", "strike_price"),
                 "expiration_date": expiration_date,
@@ -230,6 +259,7 @@ class MassiveProvider(DataProvider):
                     "REGULAR",
                 ),
                 "option_quote_time": _coalesce(
+                    _get_field(result, "last_quote", "last_updated"),
                     _get_field(result, "last_quote", "sip_timestamp"),
                     _get_field(result, "last_trade", "sip_timestamp"),
                     _get_field(result, "day", "last_updated"),
@@ -251,7 +281,7 @@ class MassiveProvider(DataProvider):
                 "implied_volatility": _get_field(result, "implied_volatility"),
                 "change": _get_field(result, "day", "change"),
                 "percent_change": _get_field(result, "day", "change_percent"),
-                "is_in_the_money": _get_field(result, "details", "in_the_money"),
+                "is_in_the_money": _compute_is_in_the_money(result, option_type),
                 "delta": _get_field(result, "greeks", "delta"),
                 "gamma": _get_field(result, "greeks", "gamma"),
                 "theta": _get_field(result, "greeks", "theta"),
