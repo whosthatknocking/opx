@@ -305,6 +305,8 @@ hv_lookback_days = 30
 trading_days_per_year = 252
 stale_quote_seconds = 900
 enable_post_download_filters = true
+debug_dump_provider_payload = false
+debug_dump_dir = "logs/provider_debug"
 max_expiration_weeks = 26
 
 [providers.massive]
@@ -326,6 +328,8 @@ Current defaults:
 - `TRADING_DAYS_PER_YEAR = 252`: annualization factor for volatility.
 - `STALE_QUOTE_SECONDS = 900`: staleness threshold for option and underlying quotes.
 - `ENABLE_POST_DOWNLOAD_FILTERS = true`: applies the zero-bid, strike-band, and wide-spread row filters after download. Set it to `false` when you want the raw downloaded rows to remain in the exported dataset while still computing metrics and quality flags.
+- `DEBUG_DUMP_PROVIDER_PAYLOAD = false`: when `true`, dump raw provider payloads to JSON before normalization so missing fields can be inspected directly.
+- `DEBUG_DUMP_DIR = "logs/provider_debug"`: directory used for raw provider payload dumps. Dump filenames are prefixed with the provider name.
 - `MAX_EXPIRATION_WEEKS = 26`: caps expirations to roughly the next six months by default. Set it to any positive week count you want, or `0` to disable the expiration cap entirely.
 - `data_provider = "yfinance"`: provider implementation used by the fetch pipeline.
 - `providers.massive.snapshot_page_limit = 250`: per-request Massive snapshot page size used for the option-chain endpoint. Values above `250` are clamped because the Massive snapshot endpoint rejects larger limits.
@@ -337,6 +341,7 @@ In practice:
 - Change `tickers` when you want a different watchlist.
 - Tighten or loosen the threshold values when you want a narrower or broader tradability filter.
 - Set `enable_post_download_filters = false` when you want to keep rows that would normally be removed by the shared post-download filters.
+- Turn on `debug_dump_provider_payload = true` when you need to inspect the raw provider payload and confirm whether fields such as `last_quote`, `underlying_asset`, or Yahoo chain columns were present before normalization.
 - Change `max_expiration_weeks` when you want a shorter or longer expiration window, or set it to `0` to disable the max-expiration cutoff.
 - Change the rate, lookback, trading-day, or staleness settings only if you want different modeling or freshness assumptions.
 - Switch `data_provider` when you want to use a different market-data implementation.
@@ -349,6 +354,7 @@ Startup output:
 - Secret values are redacted in that output. For example, the Massive API key is shown as `set` or `not set`, never in plaintext.
 - When a config value is invalid and a code default is used instead, the fetcher prints a `Config fallbacks:` block so the override is visible.
 - During each ticker fetch, the fetcher prints provider progress, expiration counts, raw provider row counts, normalized-versus-kept row counts, and final kept rows so empty runs can be traced to a specific stage.
+- When `debug_dump_provider_payload = true`, the fetcher also writes raw provider payload JSON files under `debug_dump_dir`, using filenames such as `massive_TSLA_snapshot_chain_...json` or `yfinance_TSLA_option_chain_2026-04-17_...json`.
 - `python fetcher.py` exits with status `0` after a successful CSV write and `1` when the run finishes with `No data fetched.`
 
 ## Development Setup

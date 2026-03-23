@@ -37,6 +37,17 @@ def acquire_fetcher_lock():
     return handle
 
 
+def release_fetcher_lock(lock_handle):
+    """Close the lock handle and remove the lock file path after the run ends."""
+    try:
+        lock_handle.close()
+    finally:
+        try:
+            FETCHER_LOCK_PATH.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def main():
     """Fetch configured tickers and write the consolidated CSV output."""
     lock_handle = acquire_fetcher_lock()
@@ -97,7 +108,7 @@ def main():
         print(f"Rows written: {row_count} | File size: {format_file_size(file_size_bytes)}")
         return 0
     finally:
-        lock_handle.close()
+        release_fetcher_lock(lock_handle)
 
 
 if __name__ == "__main__":

@@ -121,6 +121,7 @@ def test_main_returns_failure_when_no_data_is_fetched(monkeypatch, tmp_path: Pat
     )
 
     assert main.main() == 1
+    assert not (tmp_path / "fetcher.lock").exists()
 
 
 def test_main_returns_failure_when_fetcher_lock_is_held(monkeypatch, capsys, tmp_path: Path):
@@ -140,3 +141,34 @@ def test_main_returns_failure_when_fetcher_lock_is_held(monkeypatch, capsys, tmp
     stdout = capsys.readouterr().out
     assert exit_code == 1
     assert "Another fetcher run is already active:" in stdout
+
+
+def test_main_removes_lock_file_after_success(monkeypatch, tmp_path: Path):
+    """Successful runs should remove the fetcher lock file on exit."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main, "FETCHER_LOCK_PATH", tmp_path / "fetcher.lock")
+    monkeypatch.setattr(main, "LOCKS_DIR", tmp_path)
+    monkeypatch.setattr(
+        main,
+        "get_runtime_config",
+        lambda: make_runtime_config(tickers=("AAA",)),
+    )
+    monkeypatch.setattr(
+        main,
+        "create_run_logger",
+        lambda: (StubLogger(), Path("logs/run.log")),
+    )
+    monkeypatch.setattr(
+        main,
+        "fetch_ticker_option_chain",
+        lambda ticker, logger=None: pd.DataFrame([{"x": 1}]),
+    )
+    monkeypatch.setattr(
+        main,
+        "write_options_csv",
+        lambda ticker_frames, output_path: output_path.parent.mkdir(parents=True, exist_ok=True)
+        or output_path.write_text("ok", encoding="utf-8"),
+    )
+
+    assert main.main() == 0
+    assert not (tmp_path / "fetcher.lock").exists()

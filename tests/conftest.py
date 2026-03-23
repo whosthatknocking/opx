@@ -27,6 +27,8 @@ def make_runtime_config(**overrides):
         "data_provider": "yfinance",
         "stale_quote_seconds": 900,
         "enable_post_download_filters": True,
+        "debug_dump_provider_payload": False,
+        "debug_dump_dir": Path("/tmp/opx-provider-debug"),
         "max_strike_distance_pct": 0.30,
         "max_expiration_weeks": 14,
         "max_expiration": "2026-06-30",
