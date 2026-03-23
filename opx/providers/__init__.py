@@ -1,36 +1,9 @@
 """Provider selection helpers for the market-data layer."""
 
 from opx.config import get_runtime_config
+from opx.providers.massive import MassiveProvider
 from opx.providers.base import DataProvider
 from opx.providers.yfinance import YFinanceProvider
-
-
-class MassiveProvider(DataProvider):
-    """Placeholder provider used until the Massive implementation lands."""
-
-    name = "massive"
-
-    def load_vix_snapshot(self) -> dict:
-        raise NotImplementedError("Provider 'massive' is not implemented yet.")
-
-    def load_underlying_snapshot(self, ticker: str) -> dict:
-        raise NotImplementedError("Provider 'massive' is not implemented yet.")
-
-    def list_option_expirations(self, ticker: str) -> list[str]:
-        raise NotImplementedError("Provider 'massive' is not implemented yet.")
-
-    def load_option_chain(self, ticker: str, expiration_date: str):
-        raise NotImplementedError("Provider 'massive' is not implemented yet.")
-
-    def normalize_option_frame(
-        self,
-        df,
-        underlying_price,
-        expiration_date,
-        option_type,
-        ticker,
-    ):  # pylint: disable=too-many-arguments,too-many-positional-arguments
-        raise NotImplementedError("Provider 'massive' is not implemented yet.")
 
 
 PROVIDER_FACTORIES = {

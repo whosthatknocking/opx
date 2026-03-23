@@ -19,6 +19,8 @@ The output is designed to be data-focused rather than decision-focused. It does 
 
 Warning: Yahoo Finance quote timestamps can lag, and the collected option, underlying, or VIX data may be stale. Sparse or empty option-chain results are especially common near the regular market open because Yahoo data is delayed and cached, option markets may not have fully formed yet, the `yfinance` API is scraping-based and can be unreliable, and immediate post-open liquidity is often thin. Always check the freshness fields in the CSV or browser before relying on the output for trading decisions.
 
+Warning: Massive free-plan access can impose practical limits on freshness, request volume, and endpoint coverage. Depending on the plan, option snapshots may be delayed, rate limits may be tighter, and some real-time or higher-throughput workflows may not be available. Always confirm what your Massive / Polygon plan actually includes before treating the output as real-time production data.
+
 ## Quick Start
 
 ```bash
@@ -63,6 +65,15 @@ Provider rules:
 
 - Python 3.9+
 - Internet access for Yahoo Finance data
+- Python dependencies installed from `requirements.txt`
+
+Key dependencies:
+
+- `yfinance` for the baseline Yahoo Finance provider
+- `massive` for the official Massive / Polygon client library
+- `pandas`, `numpy`, and `scipy` for normalization and analytics
+- `pytest` for the automated test suite
+- `playwright` for browser-driven screenshot and UI checks
 
 ## How To Run
 
@@ -334,6 +345,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python -m playwright install
 ```
+
+This installs both market-data client libraries used by the project, including the official `massive` client for Massive / Polygon access.
 
 `playwright` is optional for the fetch/export pipeline itself, but required if you want automated browser screenshots or browser-driven UI checks.
 
