@@ -202,6 +202,27 @@ def test_fetch_ticker_option_chain_explains_when_filters_remove_everything(monke
     ) in stdout
 
 
+def test_fetch_ticker_option_chain_can_disable_post_download_filters(monkeypatch):
+    """Disabling post-download filters should keep rows that filters would normally drop."""
+    monkeypatch.setattr(fetch, "get_data_provider", StubProvider)
+
+    def config_factory():
+        """Return a runtime config with post-download filters disabled."""
+        return make_runtime_config(
+            today=pd.Timestamp("2026-03-20").date(),
+            enable_post_download_filters=False,
+        )
+
+    monkeypatch.setattr(fetch, "get_runtime_config", config_factory)
+    monkeypatch.setattr(opx.normalize, "get_runtime_config", config_factory)
+    monkeypatch.setattr(opx.metrics, "get_runtime_config", config_factory)
+
+    result = fetch.fetch_ticker_option_chain("TEST")
+
+    assert len(result) == 3
+    assert set(result["contract_symbol"]) == {"TESTC1", "TESTC2", "TESTP1"}
+
+
 def test_fetch_ticker_option_chain_logs_provider_name_on_error(monkeypatch, caplog):
     """Shared error logs should stay provider-neutral while preserving provider context."""
     monkeypatch.setattr(fetch, "get_data_provider", ErrorProvider)

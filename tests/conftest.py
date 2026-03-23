@@ -26,6 +26,7 @@ def make_runtime_config(**overrides):
         "trading_days_per_year": 252,
         "data_provider": "yfinance",
         "stale_quote_seconds": 900,
+        "enable_post_download_filters": True,
         "max_strike_distance_pct": 0.30,
         "max_expiration": "2026-06-30",
         "today": date(2026, 3, 20),

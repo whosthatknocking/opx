@@ -19,6 +19,7 @@ def test_load_runtime_config_uses_defaults_when_file_is_absent(tmp_path: Path):
     assert config.massive_api_key is None
     assert config.massive_snapshot_page_limit == 250
     assert config.massive_request_interval_seconds == 12.0
+    assert config.enable_post_download_filters is True
     assert config.tickers
     assert config.config_path == tmp_path / "missing.toml"
 
@@ -32,6 +33,7 @@ def test_load_runtime_config_reads_user_config_file(tmp_path: Path):
 tickers = ["spy", "qqq"]
 data_provider = "yfinance"
 min_bid = 1.25
+enable_post_download_filters = false
 max_expiration = "2026-07-31"
 
 [providers.massive]
@@ -47,6 +49,7 @@ request_interval_seconds = 1.5
     assert config.tickers == ("SPY", "QQQ")
     assert config.data_provider == "yfinance"
     assert config.min_bid == 1.25
+    assert config.enable_post_download_filters is False
     assert config.max_expiration == "2026-07-31"
     assert config.massive_api_key == "secret"
     assert config.massive_snapshot_page_limit == 250
@@ -144,6 +147,23 @@ request_interval_seconds = -1
     config = load_runtime_config(negative_interval)
     assert config.massive_request_interval_seconds == 12.0
     assert any("request_interval_seconds" in warning for warning in config.config_warnings)
+
+
+def test_load_runtime_config_defaults_invalid_filter_toggle(tmp_path: Path):
+    """Invalid filter-toggle values should fall back to the default."""
+    config_path = tmp_path / "bad-filter-toggle.toml"
+    config_path.write_text(
+        """
+[settings]
+enable_post_download_filters = "sometimes"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_runtime_config(config_path)
+
+    assert config.enable_post_download_filters is True
+    assert any("enable_post_download_filters" in warning for warning in config.config_warnings)
 
 
 def test_load_runtime_config_defaults_invalid_toml(tmp_path: Path):
