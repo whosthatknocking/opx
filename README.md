@@ -19,7 +19,7 @@ The output is designed to be data-focused rather than decision-focused. It does 
 
 Warning: Yahoo Finance quote timestamps can lag, and the collected option, underlying, or VIX data may be stale. Sparse or empty option-chain results are especially common near the regular market open because Yahoo data is delayed and cached, option markets may not have fully formed yet, the `yfinance` API is scraping-based and can be unreliable, and immediate post-open liquidity is often thin. Always check the freshness fields in the CSV or browser before relying on the output for trading decisions.
 
-Warning: Massive options support for this project requires a Massive account with an options plan that exposes the option snapshot data this fetch path uses. Per Massive's published options pricing, `Options Basic` does not expose the required access, and `Options Starter` is the minimum plan for delayed options data. Confirm your plan includes the option snapshot coverage you expect before treating the output as current market data.
+Warning: Massive options support for this project requires a Massive account with an options plan that exposes both the option snapshot data and a usable underlying price for the fetch path. `Options Basic` does not expose the required access, and while `Options Starter` is the entry point for delayed options data, this app's underlying-price-dependent calculations and strike filtering may be incomplete unless you have `Options Developer` or higher. Confirm your plan includes the underlying-price coverage you expect before treating the output as current market data.
 
 ## Quick Start
 
@@ -144,7 +144,7 @@ The exported CSV contains both provider-supplied and app-derived fields. Some va
 - `days_to_expiration`: Calendar days until expiration. Use it for short-dated screening and decay analysis. Lower means faster decay and more event risk.
 - `time_to_expiration_years`: `days_to_expiration` expressed in years. Use it as the time input for Black-Scholes calculations.
 - `strike`: Strike price of the contract. Use it to measure moneyness and break-even.
-- `contract_size`: Contract multiplier from the vendor, typically `REGULAR`. Use it to confirm contract sizing conventions.
+- `contract_size`: Contract multiplier from the vendor. Yahoo often reports `REGULAR`, while Massive maps the numeric `shares_per_contract` value from the snapshot payload. Use it to confirm contract sizing conventions.
 
 ### Underlying Snapshot Fields
 
@@ -169,7 +169,7 @@ The exported CSV contains both provider-supplied and app-derived fields. Some va
 - `change`: Absolute price change reported by the vendor. Use it to understand the contract's move during the session.
 - `percent_change`: Percentage price change reported by the vendor. Use it for relative move comparisons.
 - `option_quote_time`: Timestamp of the option quote or last trade update. Use it to measure quote freshness.
-- `is_in_the_money`: Vendor in-the-money flag. Use it as a quick classification check against derived moneyness fields.
+- `is_in_the_money`: In-the-money classification from the provider when available, or derived from spot versus strike when the provider snapshot omits a direct flag. Use it as a quick classification check against derived moneyness fields.
 
 ### Quote Quality and Liquidity Fields
 
@@ -346,6 +346,8 @@ Startup output:
 - The fetcher prints the config path it read, whether the file exists, and the full set of resolved runtime values it will apply.
 - Secret values are redacted in that output. For example, the Massive API key is shown as `set` or `not set`, never in plaintext.
 - When a config value is invalid and a code default is used instead, the fetcher prints a `Config fallbacks:` block so the override is visible.
+- During each ticker fetch, the fetcher prints provider progress, expiration counts, raw provider row counts, normalized-versus-kept row counts, and final kept rows so empty runs can be traced to a specific stage.
+- `python fetcher.py` exits with status `0` after a successful CSV write and `1` when the run finishes with `No data fetched.`
 
 ## Development Setup
 
