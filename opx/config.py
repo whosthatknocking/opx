@@ -31,6 +31,8 @@ DEFAULT_MAX_EXPIRATION_WEEKS = 26
 MAX_MASSIVE_SNAPSHOT_PAGE_LIMIT = 250
 DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT = MAX_MASSIVE_SNAPSHOT_PAGE_LIMIT
 DEFAULT_MASSIVE_REQUEST_INTERVAL_SECONDS = 12.0
+DEFAULT_DEBUG_DUMP_PROVIDER_PAYLOAD = False
+DEFAULT_DEBUG_DUMP_DIR = Path("logs/provider_debug")
 
 
 class ConfigError(ValueError):
@@ -60,6 +62,8 @@ class RuntimeConfig:
     massive_api_key: str | None
     massive_snapshot_page_limit: int
     massive_request_interval_seconds: float
+    debug_dump_provider_payload: bool
+    debug_dump_dir: Path
     config_path: Path
     config_warnings: tuple[str, ...] = field(default_factory=tuple)
 
@@ -112,6 +116,17 @@ def _coerce_float(value, *, field_name):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigError(f"Config field '{field_name}' must be numeric.")
     return float(value)
+
+
+def _coerce_path(value, *, field_name):
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ConfigError(f"Config field '{field_name}' must be a string path.")
+    normalized = value.strip()
+    if not normalized:
+        raise ConfigError(f"Config field '{field_name}' must not be blank.")
+    return Path(normalized).expanduser()
 
 
 def _read_config_data(config_path: Path) -> dict:
@@ -285,6 +300,20 @@ def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:
             coercer=_coerce_bool,
             warnings=warnings,
         ),
+        debug_dump_provider_payload=_resolve_config_value(
+            settings.get("debug_dump_provider_payload"),
+            field_name="settings.debug_dump_provider_payload",
+            default=DEFAULT_DEBUG_DUMP_PROVIDER_PAYLOAD,
+            coercer=_coerce_bool,
+            warnings=warnings,
+        ),
+        debug_dump_dir=_resolve_config_value(
+            settings.get("debug_dump_dir"),
+            field_name="settings.debug_dump_dir",
+            default=DEFAULT_DEBUG_DUMP_DIR,
+            coercer=_coerce_path,
+            warnings=warnings,
+        ),
         max_strike_distance_pct=_resolve_config_value(
             settings.get("max_strike_distance_pct"),
             field_name="settings.max_strike_distance_pct",
@@ -354,6 +383,8 @@ def validate_runtime_config(config: RuntimeConfig) -> None:
         raise ConfigError(
             "Config field 'providers.massive.request_interval_seconds' must be non-negative."
         )
+    if not str(config.debug_dump_dir).strip():
+        raise ConfigError("Config field 'settings.debug_dump_dir' must not be blank.")
 
 
 @lru_cache(maxsize=1)
@@ -393,6 +424,8 @@ def describe_runtime_config(config: RuntimeConfig) -> tuple[str, ...]:
         f"Applied trading_days_per_year: {config.trading_days_per_year}",
         f"Applied stale_quote_seconds: {config.stale_quote_seconds}",
         f"Applied enable_post_download_filters: {config.enable_post_download_filters}",
+        f"Applied debug_dump_provider_payload: {config.debug_dump_provider_payload}",
+        f"Applied debug_dump_dir: {config.debug_dump_dir}",
         f"Applied max_expiration_weeks: {config.max_expiration_weeks}",
         f"Applied max_expiration: {config.max_expiration or 'disabled'}",
         f"Applied providers.massive.api_key: {masked_massive_key}",

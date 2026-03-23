@@ -146,7 +146,9 @@ def test_fetch_ticker_option_chain_logs_raw_provider_row_counts(monkeypatch, cap
     assert not result.empty
     assert (
         "provider=stub expiration=2026-04-17 status=raw_provider_rows "
-        "call_rows=2 put_rows=1 total_rows=3"
+        "call_rows=2 put_rows=1 total_rows=3 "
+        "call_bid_rows=2 put_bid_rows=1 call_ask_rows=2 put_ask_rows=1 "
+        "call_trade_rows=2 put_trade_rows=1"
     ) in caplog.text
     assert "status=ok" in caplog.text
     assert "raw_provider_rows=3 raw_expirations=1" in caplog.text
@@ -170,7 +172,11 @@ def test_fetch_ticker_option_chain_prints_stage_counts(monkeypatch, capsys):
     assert not result.empty
     assert "TEST: fetch start provider=stub" in stdout
     assert "TEST: expirations available=1 usable=1" in stdout
-    assert "TEST: expiration=2026-04-17 raw call_rows=2 put_rows=1 total_rows=3" in stdout
+    assert (
+        "TEST: expiration=2026-04-17 raw call_rows=2 put_rows=1 total_rows=3 "
+        "call_bid_rows=2 put_bid_rows=1 call_ask_rows=2 put_ask_rows=1 "
+        "call_trade_rows=2 put_trade_rows=1"
+    ) in stdout
     assert "TEST: progress expirations_processed=1/1 raw_rows_so_far=3" in stdout
     assert "TEST: expiration=2026-04-17 side=call normalized_rows=2 post_filter_rows=1" in stdout
     assert "TEST: fetch complete rows=1 expirations=1 raw_provider_rows=3" in stdout
@@ -194,7 +200,11 @@ def test_fetch_ticker_option_chain_explains_when_filters_remove_everything(monke
 
     stdout = capsys.readouterr().out
     assert result.empty
-    assert "TEST: expiration=2026-04-17 raw call_rows=2 put_rows=1 total_rows=3" in stdout
+    assert (
+        "TEST: expiration=2026-04-17 raw call_rows=2 put_rows=1 total_rows=3 "
+        "call_bid_rows=2 put_bid_rows=1 call_ask_rows=2 put_ask_rows=1 "
+        "call_trade_rows=2 put_trade_rows=1"
+    ) in stdout
     assert "TEST: expiration=2026-04-17 side=call normalized_rows=2 post_filter_rows=0" in stdout
     assert (
         "TEST: all provider rows were filtered out by the shared normalization and "

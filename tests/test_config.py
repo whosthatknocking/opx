@@ -19,6 +19,8 @@ def test_load_runtime_config_uses_defaults_when_file_is_absent(tmp_path: Path):
     assert config.massive_api_key is None
     assert config.massive_snapshot_page_limit == 250
     assert config.massive_request_interval_seconds == 12.0
+    assert config.debug_dump_provider_payload is False
+    assert config.debug_dump_dir == Path("logs/provider_debug")
     assert config.enable_post_download_filters is True
     assert config.max_expiration_weeks == 26
     assert config.max_expiration is not None
@@ -36,6 +38,8 @@ tickers = ["spy", "qqq"]
 data_provider = "yfinance"
 min_bid = 1.25
 enable_post_download_filters = false
+debug_dump_provider_payload = true
+debug_dump_dir = "logs/provider_payloads"
 max_expiration_weeks = 8
 
 [providers.massive]
@@ -52,6 +56,8 @@ request_interval_seconds = 1.5
     assert config.data_provider == "yfinance"
     assert config.min_bid == 1.25
     assert config.enable_post_download_filters is False
+    assert config.debug_dump_provider_payload is True
+    assert config.debug_dump_dir == Path("logs/provider_payloads")
     assert config.max_expiration_weeks == 8
     assert config.max_expiration is not None
     assert config.massive_api_key == "secret"
@@ -151,6 +157,31 @@ request_interval_seconds = -1
     assert config.massive_request_interval_seconds == 12.0
     assert any("request_interval_seconds" in warning for warning in config.config_warnings)
 
+    bad_debug_toggle = tmp_path / "bad-debug-toggle.toml"
+    bad_debug_toggle.write_text(
+        """
+[settings]
+data_provider = "massive"
+debug_dump_provider_payload = "yes"
+""".strip(),
+        encoding="utf-8",
+    )
+    config = load_runtime_config(bad_debug_toggle)
+    assert config.debug_dump_provider_payload is False
+    assert any("debug_dump_provider_payload" in warning for warning in config.config_warnings)
+
+    bad_debug_dir = tmp_path / "bad-debug-dir.toml"
+    bad_debug_dir.write_text(
+        """
+[settings]
+debug_dump_dir = 42
+""".strip(),
+        encoding="utf-8",
+    )
+    config = load_runtime_config(bad_debug_dir)
+    assert config.debug_dump_dir == Path("logs/provider_debug")
+    assert any("debug_dump_dir" in warning for warning in config.config_warnings)
+
 
 def test_load_runtime_config_defaults_invalid_filter_toggle(tmp_path: Path):
     """Invalid filter-toggle values should fall back to the default."""
@@ -212,6 +243,8 @@ api_key = "secret"
 
     assert any(line.endswith("set") for line in lines if "api_key" in line)
     assert all("secret" not in line for line in lines)
+    assert any("debug_dump_provider_payload" in line for line in lines)
+    assert any("debug_dump_dir" in line for line in lines)
 
 
 def test_provider_registry_exposes_supported_providers():

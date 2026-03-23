@@ -1,11 +1,13 @@
 """Massive provider tests covering snapshot parsing and retry behavior."""
 
 from pathlib import Path
+import json
 
 import pandas as pd
 import pytest
 from massive.rest.models.snapshot import OptionContractSnapshot
 
+from conftest import make_runtime_config
 from opx import fetch
 from opx.greeks import compute_greeks
 from opx.config import reset_runtime_config
@@ -378,6 +380,40 @@ def test_massive_provider_retries_rate_limits(monkeypatch):
     assert attempts["count"] == 3
     assert seen_params == [{"limit": DEFAULT_SNAPSHOT_PAGE_LIMIT}] * 3
     assert sleeps == [1.0, 2.0]
+
+
+def test_massive_provider_can_dump_raw_snapshot_payload(monkeypatch, tmp_path: Path, capsys):
+    """Shared provider debug mode should dump the raw Massive payload to JSON."""
+    provider = MassiveProvider()
+    monkeypatch.setattr(
+        "opx.providers.base.get_runtime_config",
+        lambda: make_runtime_config(
+            data_provider="massive",
+            massive_api_key="secret",
+            debug_dump_provider_payload=True,
+            debug_dump_dir=tmp_path,
+        ),
+    )
+
+    provider.debug_dump_payload(
+        "TSLA",
+        "snapshot_chain",
+        {
+            "results_count": 2,
+            "results": make_snapshot_model_results(),
+        },
+    )
+
+    dumped_files = list(tmp_path.glob("massive_TSLA_snapshot_chain_*.json"))
+    assert len(dumped_files) == 1
+    payload = json.loads(dumped_files[0].read_text(encoding="utf-8"))
+    assert payload["ticker"] == "TSLA"
+    assert payload["provider"] == "massive"
+    assert payload["label"] == "snapshot_chain"
+    assert payload["payload"]["results_count"] == 2
+    assert payload["payload"]["results"][0]["last_quote"]["bid"] == 1.2
+    assert payload["payload"]["results"][0]["underlying_asset"]["ticker"] == "TSLA"
+    assert "massive debug: dumped snapshot_chain payload to" in capsys.readouterr().out
 
 
 def test_massive_provider_spaces_underlying_http_requests(monkeypatch):

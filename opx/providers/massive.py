@@ -96,7 +96,6 @@ def _compute_is_in_the_money(result: Any, option_type: str | None) -> bool | Non
         return bool(underlying_price < strike_price)
     return None
 
-
 class MassiveProvider(DataProvider):
     """Market-data provider backed by the official Massive/Polygon REST client."""
 
@@ -196,7 +195,16 @@ class MassiveProvider(DataProvider):
                     ticker.upper(),
                     params={"limit": self._snapshot_page_limit()},
                 )
-                return tuple(results)
+                resolved_results = tuple(results)
+                self.debug_dump_payload(
+                    ticker,
+                    "snapshot_chain",
+                    {
+                        "results_count": len(resolved_results),
+                        "results": resolved_results,
+                    },
+                )
+                return resolved_results
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 last_error = exc
                 message = str(exc).lower()

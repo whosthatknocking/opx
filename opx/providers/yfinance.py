@@ -52,6 +52,11 @@ class YFinanceProvider(DataProvider):
             info = stock.info
         except Exception:  # pylint: disable=broad-exception-caught
             info = {}
+        self.debug_dump_payload(
+            ticker,
+            "underlying_snapshot",
+            {"fast_info": fast_info, "info": info},
+        )
 
         last_price = coerce_float(
             fast_info.get("lastPrice")
@@ -78,12 +83,19 @@ class YFinanceProvider(DataProvider):
     def list_option_expirations(self, ticker: str) -> list[str]:
         """Return option expiration strings available from yfinance."""
         stock = yf.Ticker(ticker)
-        return list(stock.options)
+        expirations = list(stock.options)
+        self.debug_dump_payload(ticker, "expirations", expirations)
+        return expirations
 
     def load_option_chain(self, ticker: str, expiration_date: str) -> OptionChainFrames:
         """Load one yfinance option chain and return its raw call/put frames."""
         stock = yf.Ticker(ticker)
         chain = stock.option_chain(expiration_date)
+        self.debug_dump_payload(
+            ticker,
+            f"option_chain_{expiration_date}",
+            {"calls": chain.calls, "puts": chain.puts},
+        )
         return OptionChainFrames(calls=chain.calls, puts=chain.puts)
 
     def normalize_option_frame(  # pylint: disable=too-many-arguments,too-many-positional-arguments

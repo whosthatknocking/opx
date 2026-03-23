@@ -19,6 +19,13 @@ def _emit_fetch_info(message, logger=None):
         logger.info(message)
 
 
+def _frame_value_count(frame, column):
+    """Count non-null values for one column without assuming the column exists."""
+    if column not in frame.columns:
+        return 0
+    return int(frame[column].notna().sum())
+
+
 def append_underlying_snapshot_fields(df, snapshot, fetched_at, stale_quote_seconds):
     """Add underlying snapshot metadata to each option row."""
     df["underlying_price_time"] = snapshot["underlying_price_time"]
@@ -103,10 +110,19 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
             expiration_raw_count = len(chain.calls) + len(chain.puts)
             raw_contract_count += expiration_raw_count
             raw_expiration_count += 1
+            call_bid_count = _frame_value_count(chain.calls, "bid")
+            put_bid_count = _frame_value_count(chain.puts, "bid")
+            call_ask_count = _frame_value_count(chain.calls, "ask")
+            put_ask_count = _frame_value_count(chain.puts, "ask")
+            call_trade_count = _frame_value_count(chain.calls, "last_trade_price")
+            put_trade_count = _frame_value_count(chain.puts, "last_trade_price")
             _emit_fetch_info(
                 (
                     f"{ticker}: expiration={expiration_date} raw call_rows={len(chain.calls)} "
-                    f"put_rows={len(chain.puts)} total_rows={expiration_raw_count}"
+                    f"put_rows={len(chain.puts)} total_rows={expiration_raw_count} "
+                    f"call_bid_rows={call_bid_count} put_bid_rows={put_bid_count} "
+                    f"call_ask_rows={call_ask_count} put_ask_rows={put_ask_count} "
+                    f"call_trade_rows={call_trade_count} put_trade_rows={put_trade_count}"
                 ),
                 logger=logger,
             )
@@ -121,7 +137,9 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
                 logger.info(
                     (
                         "ticker=%s provider=%s expiration=%s status=raw_provider_rows "
-                        "call_rows=%s put_rows=%s total_rows=%s"
+                        "call_rows=%s put_rows=%s total_rows=%s "
+                        "call_bid_rows=%s put_bid_rows=%s call_ask_rows=%s put_ask_rows=%s "
+                        "call_trade_rows=%s put_trade_rows=%s"
                     ),
                     ticker,
                     provider.name,
@@ -129,6 +147,12 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
                     len(chain.calls),
                     len(chain.puts),
                     expiration_raw_count,
+                    call_bid_count,
+                    put_bid_count,
+                    call_ask_count,
+                    put_ask_count,
+                    call_trade_count,
+                    put_trade_count,
                 )
             for option_type, option_frame in [("call", chain.calls), ("put", chain.puts)]:
                 vendor_normalized = provider.normalize_option_frame(
