@@ -102,7 +102,6 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
         )
 
         for expiration_date in usable_expirations:
-
             chain = provider.load_option_chain(ticker, expiration_date)
             expiration_raw_count = len(chain.calls) + len(chain.puts)
             raw_contract_count += expiration_raw_count
@@ -111,6 +110,13 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
                 (
                     f"{ticker}: expiration={expiration_date} raw call_rows={len(chain.calls)} "
                     f"put_rows={len(chain.puts)} total_rows={expiration_raw_count}"
+                ),
+                logger=logger,
+            )
+            _emit_fetch_info(
+                (
+                    f"{ticker}: progress expirations_processed={raw_expiration_count}/"
+                    f"{len(usable_expirations)} raw_rows_so_far={raw_contract_count}"
                 ),
                 logger=logger,
             )

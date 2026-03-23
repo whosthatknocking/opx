@@ -4,12 +4,13 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from massive.rest.models.snapshot import OptionContractSnapshot
 
 from opx import fetch
 from opx.greeks import compute_greeks
 from opx.config import reset_runtime_config
 from opx.providers.base import ProviderAuthenticationError
-from opx.providers.massive import DEFAULT_SNAPSHOT_PAGE_LIMIT, MassiveProvider
+from opx.providers.massive import CALLER_USER_AGENT, DEFAULT_SNAPSHOT_PAGE_LIMIT, MassiveProvider
 
 
 def make_snapshot_results():
@@ -47,6 +48,7 @@ def make_snapshot_results():
             "implied_volatility": 0.31,
             "open_interest": 450,
             "underlying_asset": {
+                "ticker": "TSLA",
                 "price": 102.5,
                 "last_updated": "2026-03-20T13:39:59Z",
                 "change_percent": 0.015,
@@ -84,12 +86,98 @@ def make_snapshot_results():
             "implied_volatility": 0.29,
             "open_interest": 300,
             "underlying_asset": {
+                "ticker": "TSLA",
                 "price": 102.5,
                 "last_updated": "2026-03-20T13:39:59Z",
                 "change_percent": 0.015,
             },
         },
     )
+
+
+def make_snapshot_model_results():
+    """Build official-client snapshot model objects matching the endpoint schema."""
+    raw_results = (
+        {
+            "details": {
+                "ticker": "O:TSLA260417C00100000",
+                "contract_type": "call",
+                "expiration_date": "2026-04-17",
+                "strike_price": 100.0,
+                "shares_per_contract": 100,
+            },
+            "last_quote": {
+                "bid": 1.2,
+                "ask": 1.4,
+                "last_updated": 1710942000000000000,
+            },
+            "last_trade": {
+                "price": 1.3,
+                "sip_timestamp": 1710942002000000000,
+            },
+            "day": {
+                "change": 0.1,
+                "change_percent": 0.02,
+                "volume": 120,
+                "close": 1.25,
+                "last_updated": 1710942005000000000,
+                "previous_close": 1.15,
+            },
+            "greeks": {
+                "delta": 0.42,
+                "gamma": 0.07,
+                "theta": -0.11,
+                "vega": 0.18,
+            },
+            "implied_volatility": 0.31,
+            "open_interest": 450,
+            "underlying_asset": {
+                "ticker": "TSLA",
+                "price": 102.5,
+                "last_updated": 1710941999000000000,
+            },
+        },
+        {
+            "details": {
+                "ticker": "O:TSLA260417P00095000",
+                "contract_type": "put",
+                "expiration_date": "2026-04-17",
+                "strike_price": 95.0,
+                "shares_per_contract": 100,
+            },
+            "last_quote": {
+                "bid": 0.8,
+                "ask": 1.0,
+                "last_updated": 1710942010000000000,
+            },
+            "last_trade": {
+                "price": 0.9,
+                "sip_timestamp": 1710942011000000000,
+            },
+            "day": {
+                "change": -0.03,
+                "change_percent": -0.01,
+                "volume": 75,
+                "close": 0.92,
+                "last_updated": 1710942012000000000,
+                "previous_close": 0.95,
+            },
+            "greeks": {
+                "delta": -0.28,
+                "gamma": 0.05,
+                "theta": -0.09,
+                "vega": 0.16,
+            },
+            "implied_volatility": 0.29,
+            "open_interest": 300,
+            "underlying_asset": {
+                "ticker": "TSLA",
+                "price": 102.5,
+                "last_updated": 1710941999000000000,
+            },
+        },
+    )
+    return tuple(OptionContractSnapshot.from_dict(item) for item in raw_results)
 
 
 def test_massive_provider_builds_snapshot_and_option_chain(monkeypatch):
@@ -111,8 +199,55 @@ def test_massive_provider_builds_snapshot_and_option_chain(monkeypatch):
     assert expirations == ["2026-04-17"]
     assert len(chain.calls) == 1
     assert len(chain.puts) == 1
+    assert chain.calls.iloc[0]["underlying_symbol"] == "TSLA"
+    assert bool(chain.calls.iloc[0]["is_in_the_money"]) is True
+    assert bool(chain.puts.iloc[0]["is_in_the_money"]) is False
     assert chain.calls.iloc[0]["delta"] == 0.42
     assert chain.puts.iloc[0]["contract_symbol"] == "O:TSLA260417P00095000"
+
+
+def test_massive_provider_parses_official_client_model_objects(monkeypatch):
+    """Official client model instances should parse into the canonical row shape."""
+    monkeypatch.setattr(
+        MassiveProvider,
+        "_snapshot_results",
+        lambda self, ticker: make_snapshot_model_results(),
+    )
+    provider = MassiveProvider()
+
+    snapshot = provider.load_underlying_snapshot("TSLA")
+    chain = provider.load_option_chain("TSLA", "2026-04-17")
+    normalized = provider.normalize_option_frame(
+        df=chain.calls,
+        underlying_price=102.5,
+        expiration_date="2026-04-17",
+        option_type="call",
+        ticker="TSLA",
+    )
+
+    assert snapshot["underlying_price"] == 102.5
+    assert str(snapshot["underlying_price_time"]) == "2024-03-20 13:39:59+00:00"
+    assert normalized.iloc[0]["underlying_symbol"] == "TSLA"
+    assert normalized.iloc[0]["contract_symbol"] == "O:TSLA260417C00100000"
+    assert bool(normalized.iloc[0]["is_in_the_money"]) is True
+    assert chain.calls.iloc[0]["bid"] == 1.2
+    assert chain.calls.iloc[0]["ask"] == 1.4
+    assert str(normalized.iloc[0]["option_quote_time"]) == "2024-03-20 13:40:00+00:00"
+    assert chain.calls.iloc[0]["open_interest"] == 450
+
+
+def test_massive_provider_client_sets_app_user_agent(monkeypatch):
+    """Massive requests should advertise the app name and version in User-Agent."""
+    monkeypatch.setattr(
+        "opx.providers.massive.get_provider_credentials",
+        lambda _provider_name: {"api_key": "secret"},
+    )
+    provider = MassiveProvider()
+
+    client = provider._client()  # pylint: disable=protected-access
+
+    assert client.headers["User-Agent"] == CALLER_USER_AGENT
+    assert client.client.headers["User-Agent"] == CALLER_USER_AGENT
 
 
 def test_massive_provider_normalization_keeps_provider_greeks(monkeypatch):
