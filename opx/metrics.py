@@ -35,7 +35,12 @@ def add_option_score(df):
         df["option_score"] = np.nan
         return df
 
-    income_score = _clip_zero_to_one(df["premium_per_day"] / 0.05)
+    min_useful_premium_per_day = 0.01
+    max_premium_per_day = 0.05
+    income_score = _clip_zero_to_one(
+        (df["premium_per_day"] - min_useful_premium_per_day)
+        / (max_premium_per_day - min_useful_premium_per_day)
+    )
     spread_score = _clip_zero_to_one(1 - (df["bid_ask_spread_pct_of_mid"] / 0.25))
     oi_score = _clip_zero_to_one(df["open_interest"] / 1000.0)
     volume_score = _clip_zero_to_one(df["volume"] / 100.0)
