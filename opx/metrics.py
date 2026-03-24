@@ -22,6 +22,58 @@ def _clip_zero_to_one(values):
     return np.clip(values, 0.0, 1.0)
 
 
+def _compute_dte_score(days_to_expiration, income_score):
+    """Apply the tiered DTE preference used by option scoring."""
+    return np.select(
+        [
+            days_to_expiration < 5,
+            days_to_expiration < 7,
+            days_to_expiration <= 21,
+            days_to_expiration <= 35,
+            days_to_expiration <= 45,
+        ],
+        [
+            0.4 + (0.6 * income_score),
+            0.75 + (0.25 * income_score),
+            1.0,
+            0.85,
+            0.55,
+        ],
+        default=0.35,
+    )
+
+
+def _compute_income_score(premium_per_day):
+    """Score premium-per-day with a floor for near-useless income and a hard cap."""
+    min_useful_premium_per_day = 0.01
+    max_premium_per_day = 0.05
+    return _clip_zero_to_one(
+        (premium_per_day - min_useful_premium_per_day)
+        / (max_premium_per_day - min_useful_premium_per_day)
+    )
+
+
+def _compute_liquidity_score(df):
+    """Blend spread, open-interest, and volume into one liquidity score."""
+    spread_score = _clip_zero_to_one(1 - (df["bid_ask_spread_pct_of_mid"] / 0.25))
+    oi_score = _clip_zero_to_one(df["open_interest"] / 1000.0)
+    volume_score = _clip_zero_to_one(df["volume"] / 100.0)
+    return spread_score * 0.5 + oi_score * 0.3 + volume_score * 0.2
+
+
+def _compute_risk_score(df):
+    """Reward delta staying close to the side-aware target."""
+    target_delta = np.where(df["option_type"] == "call", 0.25, 0.20)
+    return _clip_zero_to_one(1 - (np.abs(df["delta_abs"] - target_delta) / target_delta))
+
+
+def _compute_efficiency_score(df, income_score):
+    """Blend DTE preference and strike-distance efficiency into one score."""
+    dte_score = _compute_dte_score(df["days_to_expiration"], income_score)
+    distance_score = _clip_zero_to_one(1 - (df["strike_distance_pct"] / 0.30))
+    return dte_score * 0.5 + distance_score * 0.5
+
+
 def add_option_score(df):
     """Add a shared 0-100 option score built from income, liquidity, risk, and efficiency."""
     config = get_runtime_config()
@@ -35,39 +87,10 @@ def add_option_score(df):
         df["option_score"] = np.nan
         return df
 
-    min_useful_premium_per_day = 0.01
-    max_premium_per_day = 0.05
-    income_score = _clip_zero_to_one(
-        (df["premium_per_day"] - min_useful_premium_per_day)
-        / (max_premium_per_day - min_useful_premium_per_day)
-    )
-    spread_score = _clip_zero_to_one(1 - (df["bid_ask_spread_pct_of_mid"] / 0.25))
-    oi_score = _clip_zero_to_one(df["open_interest"] / 1000.0)
-    volume_score = _clip_zero_to_one(df["volume"] / 100.0)
-    liquidity_score = spread_score * 0.5 + oi_score * 0.3 + volume_score * 0.2
-
-    target_delta = np.where(df["option_type"] == "call", 0.25, 0.20)
-    risk_score = _clip_zero_to_one(1 - (np.abs(df["delta_abs"] - target_delta) / target_delta))
-
-    dte_score = np.select(
-        [
-            df["days_to_expiration"] < 5,
-            df["days_to_expiration"] < 7,
-            df["days_to_expiration"] <= 21,
-            df["days_to_expiration"] <= 35,
-            df["days_to_expiration"] <= 45,
-        ],
-        [
-            0.4 + (0.6 * income_score),
-            0.75 + (0.25 * income_score),
-            1.0,
-            0.85,
-            0.55,
-        ],
-        default=0.35,
-    )
-    distance_score = _clip_zero_to_one(1 - (df["strike_distance_pct"] / 0.30))
-    efficiency_score = dte_score * 0.5 + distance_score * 0.5
+    income_score = _compute_income_score(df["premium_per_day"])
+    liquidity_score = _compute_liquidity_score(df)
+    risk_score = _compute_risk_score(df)
+    efficiency_score = _compute_efficiency_score(df, income_score)
 
     weighted_score = (
         income_score * config.option_score_income_weight

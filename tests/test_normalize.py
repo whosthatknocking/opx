@@ -44,9 +44,12 @@ def test_filter_strikes_near_spot_keeps_only_rows_within_configured_band():
 
 def test_filter_wide_spread_quotes_keeps_rows_at_the_cutoff(monkeypatch: pytest.MonkeyPatch):
     """The configured spread cutoff should exclude only rows above the threshold."""
+    def make_config():
+        return type("Config", (), {"max_spread_pct_of_mid": 0.25})()
+
     monkeypatch.setattr(
         "opx.normalize.get_runtime_config",
-        lambda: type("Config", (), {"max_spread_pct_of_mid": 0.25})(),
+        make_config,
     )
     frame = pd.DataFrame(
         [

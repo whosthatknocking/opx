@@ -119,7 +119,10 @@ def test_pick_profitable_opportunity_prefers_higher_option_score_when_rom_matche
 
 def test_pick_moderate_risk_opportunity_accepts_spread_at_config_cutoff(monkeypatch):
     """Moderate-risk selection should keep candidates whose spread equals the configured limit."""
-    monkeypatch.setattr("opx.viewer.get_runtime_config", lambda: type("Config", (), {"max_spread_pct_of_mid": 0.25})())
+    def make_config():
+        return type("Config", (), {"max_spread_pct_of_mid": 0.25})()
+
+    monkeypatch.setattr("opx.viewer.get_runtime_config", make_config)
     frame = pd.DataFrame(
         [
             {
