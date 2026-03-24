@@ -217,12 +217,19 @@ These settings are only used by the matching provider.
 
 Current scoring logic:
 
-- Income: rewards higher `premium_per_day`
-- Liquidity: rewards tighter spreads, higher open interest, and higher volume
-- Risk: rewards delta closer to the current side-aware target
-- Efficiency: rewards shorter time to expiration and strikes closer to spot
+- Income: rewards higher `premium_per_day`, with the component saturating at the default `0.05` premium-per-day reference
+- Liquidity: rewards tighter spreads, higher open interest, and higher volume using default references of `25%` spread-of-mid, `1000` open interest, and `100` volume; the liquidity sub-mix is `50%` spread, `30%` open interest, `20%` volume
+- Risk: rewards delta closer to the current side-aware target, using default targets of `0.25` for calls and `0.20` for puts
+- Efficiency: rewards shorter time to expiration and strikes closer to spot, using default references of `35` days-to-expiration and `30%` strike distance; the efficiency sub-mix is `50%` DTE and `50%` strike distance
 
-The four `option_score_*_weight` settings control how much each component contributes to the final score. All weights must be non-negative, and their total must stay positive or the loader falls back to the built-in defaults.
+Default top-level weights:
+
+- `option_score_income_weight = 0.30`
+- `option_score_liquidity_weight = 0.30`
+- `option_score_risk_weight = 0.25`
+- `option_score_efficiency_weight = 0.15`
+
+The four `option_score_*_weight` settings control how much each component contributes to the final score. All weights must be non-negative, and their total must stay positive or the loader falls back to the built-in defaults shown above.
 
 ## Runtime Behavior
 
