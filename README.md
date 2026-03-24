@@ -40,9 +40,7 @@ Yahoo Finance can be delayed, stale, or sparse, especially near the regular mark
 
 Massive support depends on your plan. Lower tiers can leave you with trades but no `bid` or `ask`, and quote access may require Massive's highest-cost quote-enabled options plan.
 
-Market Data support requires a Market Data account and API token configured under `[providers.marketdata]` in `~/.config/opx/config.toml`. The Market Data Free Forever tier is 24 hours delayed for both stock and options data, so treat that provider as end-of-day-plus data unless your plan includes fresher access.
-You can also set `providers.marketdata.mode` to `live`, `cached`, or `delayed` when you want deterministic SDK-side recency behavior, but mode availability depends on your Market Data plan.
-For rate-limit handling, the provider retries `429` responses with exponential backoff by default and can optionally add client-side pacing through `providers.marketdata.request_interval_seconds`.
+Market Data plan access affects recency. The Free Forever tier is 24 hours delayed for both stock and options data, so treat that provider as end-of-day-plus data unless your plan includes fresher access.
 
 ## Requirements
 
