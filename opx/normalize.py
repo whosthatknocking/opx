@@ -39,7 +39,10 @@ def normalize_vendor_option_frame(  # pylint: disable=too-many-arguments,too-man
     time_to_expiration_years = days_to_expiration / 365.0
 
     df["option_type"] = option_type
-    df["underlying_symbol"] = ticker
+    if "underlying_symbol" not in df.columns:
+        df["underlying_symbol"] = ticker
+    else:
+        df["underlying_symbol"] = df["underlying_symbol"].fillna(ticker)
     df["expiration_date"] = expiration_date
     df["days_to_expiration"] = days_to_expiration
     df["time_to_expiration_years"] = time_to_expiration_years
@@ -90,10 +93,13 @@ def filter_wide_spread_quotes(df):
 
 def enrich_option_frame(df, underlying_price, fetched_at):
     """Add derived metrics and quality flags to an already normalized frame."""
-    df = filter_zero_bid_quotes(df)
-    df = filter_strikes_near_spot(df, underlying_price)
+    config = get_runtime_config()
+    if config.enable_post_download_filters:
+        df = filter_zero_bid_quotes(df)
+        df = filter_strikes_near_spot(df, underlying_price)
     df = add_quote_quality_metrics(df, underlying_price)
-    df = filter_wide_spread_quotes(df)
+    if config.enable_post_download_filters:
+        df = filter_wide_spread_quotes(df)
     df = add_derived_pricing_metrics(df, underlying_price)
     df = add_screening_and_freshness_flags(df, fetched_at)
     return df

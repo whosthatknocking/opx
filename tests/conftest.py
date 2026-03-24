@@ -26,10 +26,16 @@ def make_runtime_config(**overrides):
         "trading_days_per_year": 252,
         "data_provider": "yfinance",
         "stale_quote_seconds": 900,
+        "enable_post_download_filters": True,
+        "debug_dump_provider_payload": False,
+        "debug_dump_dir": Path("/tmp/opx-provider-debug"),
         "max_strike_distance_pct": 0.30,
+        "max_expiration_weeks": 14,
         "max_expiration": "2026-06-30",
         "today": date(2026, 3, 20),
         "massive_api_key": None,
+        "massive_snapshot_page_limit": 250,
+        "massive_request_interval_seconds": 12.0,
         "config_path": Path("/tmp/opx.toml"),
     }
     defaults.update(overrides)

@@ -121,10 +121,10 @@ function formatDuration(seconds) {
 
 function formatDatasetValue(card) {
   if (!card) return '—';
-  if (card.name === 'vix_level' || card.name === 'risk_free_rate_used') {
+  if (card.name === 'risk_free_rate_used') {
     const number = Number(card.value);
     if (Number.isFinite(number)) {
-      return card.name === 'risk_free_rate_used' ? `${(number * 100).toFixed(2)}%` : number.toFixed(2);
+      return `${(number * 100).toFixed(2)}%`;
     }
   }
   return formatCell(card.value);
@@ -821,8 +821,8 @@ async function loadData(fileName) {
   renderTable();
 }
 
-async function loadReadme() {
-  const payload = await fetchJson('/api/readme');
+async function loadReference() {
+  const payload = await fetchJson('/api/reference');
   elements.readmeContent.innerHTML = renderMarkdown(payload.markdown);
 }
 
@@ -853,7 +853,7 @@ function initializeTheme() {
 
 async function initialize() {
   initializeTheme();
-  await Promise.all([loadFiles(), loadReadme()]);
+  await Promise.all([loadFiles(), loadReference()]);
   if (state.files.length > 0) {
     await loadData(state.files[0].name);
   } else {
