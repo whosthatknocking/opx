@@ -20,6 +20,10 @@ Core product rules:
 - provider-specific data should map into existing canonical fields where semantics match
 - `viewer.py` remains unchanged as the top-level entrypoint name
 
+Current minimum supported runtime:
+
+- Python `3.10+`
+
 ## 2. Current Product Scope
 
 The project currently supports:
@@ -190,12 +194,15 @@ Current characteristics:
 - requires account onboarding and API token setup
 - uses one full `options.chain(..., expiration="all")` request per ticker fetch sequence
 - derives expirations and per-expiration option frames from the cached full-chain payload
+- plan access affects data recency; Market Data Free Forever is 24 hours delayed for both stocks and options
 
 Implemented Market Data behavior:
 
 - uses the official SDK client rather than ad hoc raw HTTP calls
 - suppresses the SDK startup rate-limit probe so provider initialization does not spend an extra API call
 - supports optional SDK request mode selection through `[providers.marketdata].mode`
+- retries `429` rate-limit responses with exponential backoff and honors `Retry-After` when present
+- optional client-side request spacing is available through `[providers.marketdata].request_interval_seconds`
 - request caller header identifies the app as `opx/<version>`
 - fetch progress prints per-request API status and row-count progress
 - raw response payload dumps can be written to `debug/`
@@ -379,7 +386,7 @@ Completed:
 
 - added the Market Data provider module
 - used the official Market Data SDK
-- implemented one-chain-per-ticker fetch flow plus stock-quote snapshots
+- implemented one-chain-per-ticker fetch flow
 - mapped Market Data fields into the canonical schema
 - preserved provider-native greeks when appropriate
 
