@@ -67,7 +67,7 @@ The exported CSV contains both provider-supplied and app-derived fields. Some va
 - `premium_to_strike`: Reference premium divided by strike. Use it as a simple premium yield measure.
 - `premium_to_strike_bid`: Bid divided by strike. Use it for a more conservative premium yield estimate.
 - `premium_to_strike_annualized`: `premium_to_strike` annualized by time to expiration. Use it to compare contracts with different expiries. Higher can be attractive, but very high values often come with more risk or weaker liquidity.
-- `premium_per_day`: Reference premium earned per day until expiration. Use it to compare short-dated income efficiency. Higher means more daily premium, but often with more event and assignment risk.
+- `premium_per_day`: Reference premium earned per day until expiration. Use it to compare short-dated income efficiency. In the shared `option_score`, values below `0.01` are treated as near useless, values from `0.01` to `0.05` are rewarded linearly, and values above `0.05` are capped for the income component. Higher usually means more daily premium, but often with more event and assignment risk.
 - `estimated_margin_requirement`: Reg-T style per-share margin proxy for a short option, using `premium + max(20% of spot - OTM amount, 10% floor)`. Use it as the denominator for ROM-style comparisons. Lower means less capital tied up, but not necessarily less real risk.
 - `return_on_margin`: `premium_reference_price / estimated_margin_requirement`. Use it to compare premium collected relative to estimated capital at risk. Higher is usually better if quote quality and downside risk are still acceptable.
 - `return_on_margin_annualized`: `return_on_margin` annualized by time to expiration. Use it to compare ROM across expirations. Higher is stronger on paper, but extreme values deserve extra caution.
@@ -107,7 +107,7 @@ The exported CSV contains both provider-supplied and app-derived fields. Some va
 - `near_expiry_near_money_flag`: True when expiration is within 14 days and strike is within 3% of spot. Use it to highlight short-dated near-the-money contracts.
 - `passes_primary_screen`: True when bid, spread, open interest, and volume all pass configured thresholds. Use it as the main tradability filter. `True` is generally better for practical trading candidates.
 - `quote_quality_score`: Simple composite score built from quote validity, IV, Greeks, market structure, and freshness checks. Use it to rank rows by data quality. Higher is better.
-- `option_score`: Shared 0-100 score built from income, liquidity, risk, and efficiency components using canonical fields such as premium per day, spread quality, open interest, volume, delta, days to expiration, and strike distance. Use it to sort contracts by overall attractiveness within one run. Higher is better.
+- `option_score`: Shared 0-100 score built from income, liquidity, risk, and efficiency components using canonical fields such as premium per day, spread quality, open interest, volume, delta, days to expiration, and strike distance. The income component treats `premium_per_day < 0.01` as near useless and caps at `0.05`. Use it to sort contracts by overall attractiveness within one run. Higher is better.
 
 ## Run Metadata Fields
 
@@ -242,7 +242,7 @@ Legend:
 | `near_expiry_near_money_flag` | Derived: expiry and moneyness flag | Derived: expiry and moneyness flag | Derived: expiry and moneyness flag |
 | `passes_primary_screen` | Derived: bid, spread, OI, and volume thresholds | Derived: bid, spread, OI, and volume thresholds | Derived: bid, spread, OI, and volume thresholds |
 | `quote_quality_score` | Derived: shared composite quality score | Derived: shared composite quality score | Derived: shared composite quality score |
-| `option_score` | Derived: shared weighted score from income, liquidity, risk, and efficiency components | Derived: shared weighted score from income, liquidity, risk, and efficiency components | Derived: shared weighted score from income, liquidity, risk, and efficiency components |
+| `option_score` | Derived: shared weighted score from income, liquidity, risk, and efficiency components; income penalizes `premium_per_day < 0.01` and caps at `0.05` | Derived: shared weighted score from income, liquidity, risk, and efficiency components; income penalizes `premium_per_day < 0.01` and caps at `0.05` | Derived: shared weighted score from income, liquidity, risk, and efficiency components; income penalizes `premium_per_day < 0.01` and caps at `0.05` |
 
 ### Run Metadata Mapping
 

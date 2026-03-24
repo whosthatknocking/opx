@@ -156,6 +156,38 @@ def test_add_option_score_returns_bounded_value(monkeypatch):
     assert result.loc[0, "option_score"] > result.loc[1, "option_score"]
 
 
+def test_add_option_score_penalizes_near_useless_premium_per_day(monkeypatch):
+    """Income scoring should zero out near-useless premium-per-day values below the floor."""
+    monkeypatch.setattr("opx.metrics.get_runtime_config", make_score_config)
+    frame = pd.DataFrame(
+        [
+            make_scored_row(premium_per_day=0.009),
+            make_scored_row(premium_per_day=0.01),
+            make_scored_row(premium_per_day=0.03),
+        ]
+    )
+
+    result = add_option_score(frame.copy())
+
+    assert result.loc[0, "option_score"] == pytest.approx(result.loc[1, "option_score"])
+    assert result.loc[2, "option_score"] > result.loc[1, "option_score"]
+
+
+def test_add_option_score_caps_income_component_at_point_zero_five(monkeypatch):
+    """Income scoring should still cap at the premium-per-day ceiling."""
+    monkeypatch.setattr("opx.metrics.get_runtime_config", make_score_config)
+    frame = pd.DataFrame(
+        [
+            make_scored_row(premium_per_day=0.05),
+            make_scored_row(premium_per_day=0.08),
+        ]
+    )
+
+    result = add_option_score(frame.copy())
+
+    assert result.loc[0, "option_score"] == pytest.approx(result.loc[1, "option_score"])
+
+
 def test_add_option_score_returns_nan_when_required_inputs_are_missing(monkeypatch):
     """Option score should stay blank when required inputs are not available."""
     monkeypatch.setattr("opx.metrics.get_runtime_config", make_score_config)

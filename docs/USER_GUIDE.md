@@ -217,7 +217,7 @@ These settings are only used by the matching provider.
 
 Current scoring logic:
 
-- Income: rewards higher `premium_per_day`, with the component saturating at the default `0.05` premium-per-day reference
+- Income: penalizes contracts with `premium_per_day < 0.01` as near useless, then linearly rewards `premium_per_day` from `0.01` up to the default `0.05` cap
 - Liquidity: rewards tighter spreads, higher open interest, and higher volume using default references of `25%` spread-of-mid, `1000` open interest, and `100` volume; the liquidity sub-mix is `50%` spread, `30%` open interest, `20%` volume
 - Risk: rewards delta closer to the current side-aware target, using default targets of `0.25` for calls and `0.20` for puts
 - Efficiency: rewards shorter time to expiration and strikes closer to spot, using default references of `35` days-to-expiration and `30%` strike distance; the efficiency sub-mix is `50%` DTE and `50%` strike distance

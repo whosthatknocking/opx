@@ -278,6 +278,7 @@ Requirements:
 - `option_score` is a canonical derived field in the `0-100` range
 - it is computed from shared normalized fields only, not provider-specific scratch fields
 - the current score combines income, liquidity, risk, and efficiency components
+- the income component penalizes `premium_per_day < 0.01` and caps at `0.05`
 - score weights are configurable through runtime config so tuning does not require code changes
 - the configured weights must remain non-negative and sum to a positive total; otherwise defaults are used
 - score output is visible both in the exported CSV and in the local viewer
