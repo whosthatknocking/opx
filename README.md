@@ -31,16 +31,14 @@ Then open `http://127.0.0.1:8000` in your browser.
 - User guide: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
 - CSV field reference: [docs/FIELD_REFERENCE.md](docs/FIELD_REFERENCE.md)
 - Development guide: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-- Project spec: [PROJECT_SPEC.md](PROJECT_SPEC.md)
-- Design notes: [DESIGN.md](DESIGN.md)
+- Project spec: [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md)
+- Design spec: [docs/DESIGN_SPEC.md](docs/DESIGN_SPEC.md)
 
 ## Important Notes
 
-Yahoo Finance can be delayed, stale, or sparse, especially near the regular market open. Always check freshness fields before relying on the output.
-
-Massive support depends on your plan. Lower tiers can leave you with trades but no `bid` or `ask`, and quote access may require Massive's highest-cost quote-enabled options plan.
-
-Market Data plan access affects recency. The Free Forever tier is 24 hours delayed for both stock and options data, so treat that provider as end-of-day-plus data unless your plan includes fresher access.
+- Yahoo Finance can be delayed, stale, or sparse, especially near the regular market open. Always check freshness fields before relying on the output.
+- Massive support depends on your plan. Lower tiers can leave you with trades but no `bid` or `ask`, and quote access may require Massive's highest-cost quote-enabled options plan.
+- Market Data plan access affects recency. The Free Forever tier is 24 hours delayed for both stock and options data, so treat that provider as end-of-day-plus data unless your plan includes fresher access.
 
 ## Requirements
 

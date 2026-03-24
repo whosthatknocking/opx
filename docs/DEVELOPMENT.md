@@ -10,6 +10,9 @@ This guide is for people changing the codebase, adding providers, or working on 
 ├── viewer.py
 ├── docs/
 │   ├── DEVELOPMENT.md
+│   ├── DESIGN_SPEC.md
+│   ├── FIELD_REFERENCE.md
+│   ├── PROJECT_SPEC.md
 │   ├── USER_GUIDE.md
 │   └── images/
 │       └── viewer-option-chain.png
@@ -128,7 +131,7 @@ Rules to keep the provider layer stable:
 - avoid adding extra per-ticker API calls when the active endpoint already carries the needed fields
 - treat provider-side filtering carefully; shared app filtering should stay the main screening path unless there is a strong reason to narrow upstream payloads
 - keep debug payload dumps representative of the exact provider response shape so mapping regressions can be audited later
-- update both [FIELD_REFERENCE.md](FIELD_REFERENCE.md) and [../PROJECT_SPEC.md](../PROJECT_SPEC.md) when a provider mapping or dependency changes
+- update both [FIELD_REFERENCE.md](FIELD_REFERENCE.md) and [PROJECT_SPEC.md](PROJECT_SPEC.md) when a provider mapping or dependency changes
 
 ## Documentation Assets
 
