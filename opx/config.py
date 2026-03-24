@@ -13,18 +13,18 @@ except ImportError:  # pragma: no cover
     import tomli as tomllib
 
 SUPPORTED_PROVIDERS = frozenset({"yfinance", "massive", "marketdata"})
-SCRIPT_VERSION = "2026-03-23.3"
+SCRIPT_VERSION = "2026-03-23.4"
 DEFAULT_CONFIG_PATH = Path("~/.config/opx/config.toml").expanduser()
 DEFAULT_TICKERS = ("TSLA", "NVDA", "UBER", "MSFT", "GOOGL", "ORCL", "PLTR")
 DEFAULT_DATA_PROVIDER = "yfinance"
 DEFAULT_MIN_BID = 0.50
 DEFAULT_MIN_OPEN_INTEREST = 100
 DEFAULT_MIN_VOLUME = 10
-DEFAULT_MAX_SPREAD_PCT_OF_MID = 0.25
+DEFAULT_MAX_SPREAD_PCT_OF_MID = 0.20
 DEFAULT_RISK_FREE_RATE = 0.045
 DEFAULT_HV_LOOKBACK_DAYS = 30
 DEFAULT_TRADING_DAYS_PER_YEAR = 252
-DEFAULT_STALE_QUOTE_SECONDS = 15 * 60
+DEFAULT_STALE_QUOTE_SECONDS = 21600
 DEFAULT_ENABLE_FILTERS = True
 DEFAULT_ENABLE_VALIDATION = True
 DEFAULT_OPTION_SCORE_INCOME_WEIGHT = 0.30
@@ -279,29 +279,29 @@ def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:
             warnings=warnings,
         ),
         min_bid=_resolve_config_value(
-            settings.get("min_bid"),
-            field_name="settings.min_bid",
+            settings.get("filters_min_bid"),
+            field_name="settings.filters_min_bid",
             default=DEFAULT_MIN_BID,
             coercer=_coerce_float,
             warnings=warnings,
         ),
         min_open_interest=_resolve_config_value(
-            settings.get("min_open_interest"),
-            field_name="settings.min_open_interest",
+            settings.get("filters_min_open_interest"),
+            field_name="settings.filters_min_open_interest",
             default=DEFAULT_MIN_OPEN_INTEREST,
             coercer=_coerce_int,
             warnings=warnings,
         ),
         min_volume=_resolve_config_value(
-            settings.get("min_volume"),
-            field_name="settings.min_volume",
+            settings.get("filters_min_volume"),
+            field_name="settings.filters_min_volume",
             default=DEFAULT_MIN_VOLUME,
             coercer=_coerce_int,
             warnings=warnings,
         ),
         max_spread_pct_of_mid=_resolve_config_value(
-            settings.get("max_spread_pct_of_mid"),
-            field_name="settings.max_spread_pct_of_mid",
+            settings.get("filters_max_spread_pct_of_mid"),
+            field_name="settings.filters_max_spread_pct_of_mid",
             default=DEFAULT_MAX_SPREAD_PCT_OF_MID,
             coercer=_coerce_float,
             warnings=warnings,
@@ -368,8 +368,8 @@ def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:
             warnings=warnings,
         ),
         enable_filters=_resolve_config_value(
-            settings.get("enable_filters"),
-            field_name="settings.enable_filters",
+            settings.get("filters_enable"),
+            field_name="settings.filters_enable",
             default=DEFAULT_ENABLE_FILTERS,
             coercer=_coerce_bool,
             warnings=warnings,
@@ -396,8 +396,8 @@ def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:
             warnings=warnings,
         ),
         max_strike_distance_pct=_resolve_config_value(
-            settings.get("max_strike_distance_pct"),
-            field_name="settings.max_strike_distance_pct",
+            settings.get("filters_max_strike_distance_pct"),
+            field_name="settings.filters_max_strike_distance_pct",
             default=DEFAULT_MAX_STRIKE_DISTANCE_PCT,
             coercer=_coerce_float,
             warnings=warnings,
@@ -569,11 +569,11 @@ def describe_runtime_config(config: RuntimeConfig) -> tuple[str, ...]:
         f"Config file exists: {config.config_path.exists()}",
         f"Applied provider: {config.data_provider}",
         f"Applied tickers: {', '.join(config.tickers)}",
-        f"Applied min_bid: {config.min_bid}",
-        f"Applied min_open_interest: {config.min_open_interest}",
-        f"Applied min_volume: {config.min_volume}",
-        f"Applied max_spread_pct_of_mid: {config.max_spread_pct_of_mid}",
-        f"Applied max_strike_distance_pct: {config.max_strike_distance_pct}",
+        f"Applied filters_min_bid: {config.min_bid}",
+        f"Applied filters_min_open_interest: {config.min_open_interest}",
+        f"Applied filters_min_volume: {config.min_volume}",
+        f"Applied filters_max_spread_pct_of_mid: {config.max_spread_pct_of_mid}",
+        f"Applied filters_max_strike_distance_pct: {config.max_strike_distance_pct}",
         f"Applied risk_free_rate: {config.risk_free_rate}",
         f"Applied hv_lookback_days: {config.hv_lookback_days}",
         f"Applied trading_days_per_year: {config.trading_days_per_year}",
@@ -582,7 +582,7 @@ def describe_runtime_config(config: RuntimeConfig) -> tuple[str, ...]:
         f"Applied option_score_risk_weight: {config.option_score_risk_weight}",
         f"Applied option_score_efficiency_weight: {config.option_score_efficiency_weight}",
         f"Applied stale_quote_seconds: {config.stale_quote_seconds}",
-        f"Applied enable_filters: {config.enable_filters}",
+        f"Applied filters_enable: {config.enable_filters}",
         f"Applied enable_validation: {config.enable_validation}",
         f"Applied debug_dump_provider_payload: {config.debug_dump_provider_payload}",
         f"Applied debug_dump_dir: {config.debug_dump_dir}",
