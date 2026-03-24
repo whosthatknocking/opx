@@ -59,6 +59,12 @@ def add_option_score(df):
         + risk_score * config.option_score_risk_weight
         + efficiency_score * config.option_score_efficiency_weight
     ) / total_weight
+    short_dte_penalty = np.where(
+        df["days_to_expiration"] < 7,
+        0.7 + (0.3 * income_score),
+        1.0,
+    )
+    weighted_score = weighted_score * short_dte_penalty
 
     required = (
         df["premium_per_day"].notna()

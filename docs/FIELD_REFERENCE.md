@@ -107,7 +107,7 @@ The exported CSV contains both provider-supplied and app-derived fields. Some va
 - `near_expiry_near_money_flag`: True when expiration is within 14 days and strike is within 3% of spot. Use it to highlight short-dated near-the-money contracts.
 - `passes_primary_screen`: True when bid, spread, open interest, and volume all pass configured thresholds. Use it as the main tradability filter. `True` is generally better for practical trading candidates.
 - `quote_quality_score`: Simple composite score built from quote validity, IV, Greeks, market structure, and freshness checks. Use it to rank rows by data quality. Higher is better.
-- `option_score`: Shared 0-100 score built from income, liquidity, risk, and efficiency components using canonical fields such as premium per day, spread quality, open interest, volume, delta, days to expiration, and strike distance. The income component treats `premium_per_day < 0.01` as near useless and caps at `0.05`. Use it to sort contracts by overall attractiveness within one run. Higher is better.
+- `option_score`: Shared 0-100 score built from income, liquidity, risk, and efficiency components using canonical fields such as premium per day, spread quality, open interest, volume, delta, days to expiration, and strike distance. The income component treats `premium_per_day < 0.01` as near useless and caps at `0.05`, and contracts with `days_to_expiration < 7` take a penalty unless premium is exceptional. Use it to sort contracts by overall attractiveness within one run. Higher is better.
 
 ## Run Metadata Fields
 
@@ -242,7 +242,7 @@ Legend:
 | `near_expiry_near_money_flag` | Derived: expiry and moneyness flag | Derived: expiry and moneyness flag | Derived: expiry and moneyness flag |
 | `passes_primary_screen` | Derived: bid, spread, OI, and volume thresholds | Derived: bid, spread, OI, and volume thresholds | Derived: bid, spread, OI, and volume thresholds |
 | `quote_quality_score` | Derived: shared composite quality score | Derived: shared composite quality score | Derived: shared composite quality score |
-| `option_score` | Derived: shared weighted score from income, liquidity, risk, and efficiency components; income penalizes `premium_per_day < 0.01` and caps at `0.05` | Derived: shared weighted score from income, liquidity, risk, and efficiency components; income penalizes `premium_per_day < 0.01` and caps at `0.05` | Derived: shared weighted score from income, liquidity, risk, and efficiency components; income penalizes `premium_per_day < 0.01` and caps at `0.05` |
+| `option_score` | Derived: shared weighted score from income, liquidity, risk, and efficiency components; income penalizes `premium_per_day < 0.01`, caps at `0.05`, and short-DTE rows under `7` days take a penalty unless premium is exceptional | Derived: shared weighted score from income, liquidity, risk, and efficiency components; income penalizes `premium_per_day < 0.01`, caps at `0.05`, and short-DTE rows under `7` days take a penalty unless premium is exceptional | Derived: shared weighted score from income, liquidity, risk, and efficiency components; income penalizes `premium_per_day < 0.01`, caps at `0.05`, and short-DTE rows under `7` days take a penalty unless premium is exceptional |
 
 ### Run Metadata Mapping
 

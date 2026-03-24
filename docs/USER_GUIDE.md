@@ -221,6 +221,7 @@ Current scoring logic:
 - Liquidity: rewards tighter spreads, higher open interest, and higher volume using default references of `25%` spread-of-mid, `1000` open interest, and `100` volume; the liquidity sub-mix is `50%` spread, `30%` open interest, `20%` volume
 - Risk: rewards delta closer to the current side-aware target, using default targets of `0.25` for calls and `0.20` for puts
 - Efficiency: rewards shorter time to expiration and strikes closer to spot, using default references of `35` days-to-expiration and `30%` strike distance; the efficiency sub-mix is `50%` DTE and `50%` strike distance
+- Short-DTE adjustment: contracts with fewer than `7` days to expiration get a score reduction by default; the penalty fades out as the income component rises and disappears when `premium_per_day` reaches the exceptional `0.05` cap
 
 Default top-level weights:
 

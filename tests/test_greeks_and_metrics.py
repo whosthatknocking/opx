@@ -188,6 +188,36 @@ def test_add_option_score_caps_income_component_at_point_zero_five(monkeypatch):
     assert result.loc[0, "option_score"] == pytest.approx(result.loc[1, "option_score"])
 
 
+def test_add_option_score_penalizes_short_dte_when_premium_is_not_exceptional(monkeypatch):
+    """Contracts inside 7 DTE should score lower unless premium-per-day is exceptional."""
+    monkeypatch.setattr("opx.metrics.get_runtime_config", make_score_config)
+    frame = pd.DataFrame(
+        [
+            make_scored_row(days_to_expiration=7, premium_per_day=0.02),
+            make_scored_row(days_to_expiration=6, premium_per_day=0.02),
+        ]
+    )
+
+    result = add_option_score(frame.copy())
+
+    assert result.loc[0, "option_score"] > result.loc[1, "option_score"]
+
+
+def test_add_option_score_skips_short_dte_penalty_for_exceptional_premium(monkeypatch):
+    """Exceptional premium-per-day should fully offset the short-DTE penalty multiplier."""
+    monkeypatch.setattr("opx.metrics.get_runtime_config", make_score_config)
+    frame = pd.DataFrame(
+        [
+            make_scored_row(days_to_expiration=6, premium_per_day=0.05),
+            make_scored_row(days_to_expiration=6, premium_per_day=0.08),
+        ]
+    )
+
+    result = add_option_score(frame.copy())
+
+    assert result.loc[0, "option_score"] == pytest.approx(result.loc[1, "option_score"])
+
+
 def test_add_option_score_returns_nan_when_required_inputs_are_missing(monkeypatch):
     """Option score should stay blank when required inputs are not available."""
     monkeypatch.setattr("opx.metrics.get_runtime_config", make_score_config)
