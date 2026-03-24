@@ -1,31 +1,16 @@
 """Yahoo Finance provider implementation."""
 
-from __future__ import annotations
+# pylint: disable=duplicate-code
 
-from functools import lru_cache
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
 
 from opx.config import get_runtime_config
-from opx.normalize import normalize_vendor_option_frame
-from opx.providers.base import DataProvider, OptionChainFrames
+from opx.providers.base import DataProvider, OptionChainFrames, normalize_provider_frame
 from opx.utils import coerce_float, normalize_timestamp
-
-
-def normalize_market_state(value):
-    """Collapse duplicated vendor market-state strings such as POSTPOST -> POST."""
-    if value is None:
-        return None
-    normalized = str(value).strip()
-    if not normalized:
-        return None
-
-    half = len(normalized) // 2
-    if len(normalized) % 2 == 0 and normalized[:half] == normalized[half:]:
-        return normalized[:half]
-    return normalized
 
 
 def compute_historical_volatility(stock):  # pylint: disable=broad-exception-caught
@@ -59,28 +44,6 @@ class YFinanceProvider(DataProvider):
         """Expose yfinance's logger so runlog can capture vendor errors."""
         return ("yfinance",)
 
-    @lru_cache(maxsize=1)
-    def load_vix_snapshot(self) -> dict:
-        """Load the latest VIX snapshot once per run."""
-        try:  # pylint: disable=broad-exception-caught
-            vix = yf.Ticker("^VIX")
-            fast_info = getattr(vix, "fast_info", {}) or {}
-            info = vix.info
-        except Exception:  # pylint: disable=broad-exception-caught
-            fast_info = {}
-            info = {}
-
-        vix_level = coerce_float(
-            fast_info.get("lastPrice")
-            or info.get("regularMarketPrice")
-            or info.get("previousClose")
-        )
-        vix_quote_time = normalize_timestamp(info.get("regularMarketTime"))
-        return {
-            "vix_level": vix_level,
-            "vix_quote_time": vix_quote_time,
-        }
-
     def load_underlying_snapshot(self, ticker: str) -> dict:  # pylint: disable=broad-exception-caught
         """Load the underlying snapshot once per ticker and reuse it for each expiration."""
         stock = yf.Ticker(ticker)
@@ -89,6 +52,11 @@ class YFinanceProvider(DataProvider):
             info = stock.info
         except Exception:  # pylint: disable=broad-exception-caught
             info = {}
+        self.debug_dump_payload(
+            ticker,
+            "underlying_snapshot",
+            {"fast_info": fast_info, "info": info},
+        )
 
         last_price = coerce_float(
             fast_info.get("lastPrice")
@@ -105,27 +73,29 @@ class YFinanceProvider(DataProvider):
         else:
             underlying_day_change_pct = np.nan
 
-        vix_snapshot = self.load_vix_snapshot()
-
         return {
             "underlying_price": last_price,
             "underlying_price_time": normalize_timestamp(info.get("regularMarketTime")),
-            "underlying_market_state": normalize_market_state(info.get("marketState")),
             "underlying_day_change_pct": underlying_day_change_pct,
             "historical_volatility": compute_historical_volatility(stock),
-            "vix_level": vix_snapshot["vix_level"],
-            "vix_quote_time": vix_snapshot["vix_quote_time"],
         }
 
     def list_option_expirations(self, ticker: str) -> list[str]:
         """Return option expiration strings available from yfinance."""
         stock = yf.Ticker(ticker)
-        return list(stock.options)
+        expirations = list(stock.options)
+        self.debug_dump_payload(ticker, "expirations", expirations)
+        return expirations
 
     def load_option_chain(self, ticker: str, expiration_date: str) -> OptionChainFrames:
         """Load one yfinance option chain and return its raw call/put frames."""
         stock = yf.Ticker(ticker)
         chain = stock.option_chain(expiration_date)
+        self.debug_dump_payload(
+            ticker,
+            f"option_chain_{expiration_date}",
+            {"calls": chain.calls, "puts": chain.puts},
+        )
         return OptionChainFrames(calls=chain.calls, puts=chain.puts)
 
     def normalize_option_frame(  # pylint: disable=too-many-arguments,too-many-positional-arguments
@@ -137,7 +107,7 @@ class YFinanceProvider(DataProvider):
         ticker: str,
     ) -> pd.DataFrame:
         """Normalize a yfinance frame into the canonical options schema."""
-        return normalize_vendor_option_frame(
+        return normalize_provider_frame(
             df=df,
             underlying_price=underlying_price,
             expiration_date=expiration_date,

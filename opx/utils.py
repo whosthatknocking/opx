@@ -15,6 +15,16 @@ def normalize_timestamp(value):
         return pd.NaT
 
     if isinstance(value, (int, float, np.integer, np.floating)):
-        return pd.to_datetime(value, unit="s", utc=True, errors="coerce")
+        numeric_value = float(value)
+        absolute_value = abs(numeric_value)
+        if absolute_value >= 1e17:
+            unit = "ns"
+        elif absolute_value >= 1e14:
+            unit = "us"
+        elif absolute_value >= 1e11:
+            unit = "ms"
+        else:
+            unit = "s"
+        return pd.to_datetime(value, unit=unit, utc=True, errors="coerce")
 
     return pd.to_datetime(value, utc=True, errors="coerce")

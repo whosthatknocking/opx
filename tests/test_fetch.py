@@ -6,6 +6,8 @@ import pandas as pd
 
 from conftest import make_runtime_config
 from opx import fetch
+import opx.metrics
+import opx.normalize
 from opx.providers.base import OptionChainFrames
 
 
@@ -25,11 +27,8 @@ class StubProvider:
         return {
             "underlying_price": 100.0,
             "underlying_price_time": pd.Timestamp("2026-03-20T13:45:00Z"),
-            "underlying_market_state": "REGULAR",
             "underlying_day_change_pct": 0.01,
             "historical_volatility": 0.2,
-            "vix_level": 18.5,
-            "vix_quote_time": pd.Timestamp("2026-03-20T13:45:00Z"),
         }
 
     def list_option_expirations(self, ticker):
@@ -147,10 +146,91 @@ def test_fetch_ticker_option_chain_logs_raw_provider_row_counts(monkeypatch, cap
     assert not result.empty
     assert (
         "provider=stub expiration=2026-04-17 status=raw_provider_rows "
-        "call_rows=2 put_rows=1 total_rows=3"
+        "call_rows=2 put_rows=1 total_rows=3 "
+        "call_bid_rows=2 put_bid_rows=1 call_ask_rows=2 put_ask_rows=1 "
+        "call_trade_rows=2 put_trade_rows=1"
     ) in caplog.text
     assert "status=ok" in caplog.text
     assert "raw_provider_rows=3 raw_expirations=1" in caplog.text
+
+
+def test_fetch_ticker_option_chain_prints_stage_counts(monkeypatch, capsys):
+    """Console output should show per-stage fetch counts for each ticker."""
+    monkeypatch.setattr(fetch, "get_data_provider", StubProvider)
+
+    def config_factory():
+        """Return the standard filtered runtime config for fetch-stage diagnostics."""
+        return make_runtime_config(today=pd.Timestamp("2026-03-20").date())
+
+    monkeypatch.setattr(fetch, "get_runtime_config", config_factory)
+    monkeypatch.setattr(opx.normalize, "get_runtime_config", config_factory)
+    monkeypatch.setattr(opx.metrics, "get_runtime_config", config_factory)
+
+    result = fetch.fetch_ticker_option_chain("TEST")
+
+    stdout = capsys.readouterr().out
+    assert not result.empty
+    assert "TEST: fetch start provider=stub" in stdout
+    assert "TEST: expirations available=1 usable=1" in stdout
+    assert (
+        "TEST: expiration=2026-04-17 raw call_rows=2 put_rows=1 total_rows=3 "
+        "call_bid_rows=2 put_bid_rows=1 call_ask_rows=2 put_ask_rows=1 "
+        "call_trade_rows=2 put_trade_rows=1"
+    ) in stdout
+    assert "TEST: progress expirations_processed=1/1 raw_rows_so_far=3" in stdout
+    assert "TEST: expiration=2026-04-17 side=call normalized_rows=2 post_filter_rows=1" in stdout
+    assert "TEST: fetch complete rows=1 expirations=1 raw_provider_rows=3" in stdout
+
+
+def test_fetch_ticker_option_chain_explains_when_filters_remove_everything(monkeypatch, capsys):
+    """Console output should explain empty results after provider data is filtered out."""
+    monkeypatch.setattr(fetch, "get_data_provider", StubProvider)
+    def config_factory():
+        """Return a stricter runtime config that filters all quotes."""
+        return make_runtime_config(
+            today=pd.Timestamp("2026-03-20").date(),
+            max_spread_pct_of_mid=0.01,
+        )
+
+    monkeypatch.setattr(fetch, "get_runtime_config", config_factory)
+    monkeypatch.setattr(opx.normalize, "get_runtime_config", config_factory)
+    monkeypatch.setattr(opx.metrics, "get_runtime_config", config_factory)
+
+    result = fetch.fetch_ticker_option_chain("TEST")
+
+    stdout = capsys.readouterr().out
+    assert result.empty
+    assert (
+        "TEST: expiration=2026-04-17 raw call_rows=2 put_rows=1 total_rows=3 "
+        "call_bid_rows=2 put_bid_rows=1 call_ask_rows=2 put_ask_rows=1 "
+        "call_trade_rows=2 put_trade_rows=1"
+    ) in stdout
+    assert "TEST: expiration=2026-04-17 side=call normalized_rows=2 post_filter_rows=0" in stdout
+    assert (
+        "TEST: all provider rows were filtered out by the shared normalization and "
+        "screening pipeline"
+    ) in stdout
+
+
+def test_fetch_ticker_option_chain_can_disable_post_download_filters(monkeypatch):
+    """Disabling post-download filters should keep rows that filters would normally drop."""
+    monkeypatch.setattr(fetch, "get_data_provider", StubProvider)
+
+    def config_factory():
+        """Return a runtime config with post-download filters disabled."""
+        return make_runtime_config(
+            today=pd.Timestamp("2026-03-20").date(),
+            enable_post_download_filters=False,
+        )
+
+    monkeypatch.setattr(fetch, "get_runtime_config", config_factory)
+    monkeypatch.setattr(opx.normalize, "get_runtime_config", config_factory)
+    monkeypatch.setattr(opx.metrics, "get_runtime_config", config_factory)
+
+    result = fetch.fetch_ticker_option_chain("TEST")
+
+    assert len(result) == 3
+    assert set(result["contract_symbol"]) == {"TESTC1", "TESTC2", "TESTP1"}
 
 
 def test_fetch_ticker_option_chain_logs_provider_name_on_error(monkeypatch, caplog):

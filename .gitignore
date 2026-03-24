@@ -8,3 +8,4 @@ __pycache__/
 # Generated outputs
 *.csv
 logs/
+debug/

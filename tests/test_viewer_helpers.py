@@ -7,8 +7,8 @@ import pandas as pd
 from opx import viewer
 
 
-def test_extract_field_descriptions_reads_current_readme_entries():
-    """README-backed field descriptions should stay discoverable for the viewer."""
+def test_extract_field_descriptions_reads_current_user_guide_entries():
+    """User-guide field descriptions should stay discoverable for the viewer."""
     descriptions = viewer.extract_field_descriptions()
 
     assert "underlying_symbol" in descriptions
@@ -20,15 +20,11 @@ def test_build_dataset_cards_only_promotes_dataset_wide_constant_values():
     frame = pd.DataFrame(
         [
             {
-                "underlying_market_state": "POST",
-                "vix_level": 18.5,
                 "premium_reference_method": "mid",
                 "risk_free_rate_used": 0.045,
                 "data_source": "yfinance",
             },
             {
-                "underlying_market_state": "POST",
-                "vix_level": 18.5,
                 "premium_reference_method": "bid",
                 "risk_free_rate_used": 0.045,
                 "data_source": "yfinance",
@@ -39,8 +35,6 @@ def test_build_dataset_cards_only_promotes_dataset_wide_constant_values():
     cards = viewer.build_dataset_cards(frame, descriptions={"data_source": "Source label."})
     card_names = [card["name"] for card in cards]
 
-    assert "underlying_market_state" in card_names
-    assert "vix_level" in card_names
     assert "risk_free_rate_used" in card_names
     assert "data_source" in card_names
     assert "premium_reference_method" not in card_names
