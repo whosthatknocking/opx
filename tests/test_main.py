@@ -97,7 +97,7 @@ def test_main_prints_config_fallbacks(monkeypatch, capsys, tmp_path: Path):
     """Config fallback warnings should be shown when defaults were applied."""
     config = make_runtime_config(
         config_warnings=(
-            "settings.min_bid: using default 0.5.",
+            "settings.filters_min_bid: using default 0.5.",
         ),
     )
     monkeypatch.chdir(tmp_path)
@@ -120,7 +120,7 @@ def test_main_prints_config_fallbacks(monkeypatch, capsys, tmp_path: Path):
     stdout = capsys.readouterr().out
     assert exit_code == 1
     assert "Config fallbacks:" in stdout
-    assert "settings.min_bid: using default 0.5." in stdout
+    assert "settings.filters_min_bid: using default 0.5." in stdout
 
 
 def test_main_prints_validation_summary_before_export(monkeypatch, capsys, tmp_path: Path):

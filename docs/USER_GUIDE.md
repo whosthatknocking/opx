@@ -95,26 +95,28 @@ Example config:
 tickers = ["TSLA", "NVDA", "UBER", "MSFT", "GOOGL", "ORCL", "PLTR"]
 data_provider = "yfinance"
 
-# Shared filtering and scoring
-min_bid = 0.50
-min_open_interest = 100
-min_volume = 10
-max_spread_pct_of_mid = 0.25
-max_strike_distance_pct = 0.30
+# Shared filtering
+filters_min_bid = 0.50
+filters_min_open_interest = 100
+filters_min_volume = 10
+filters_max_spread_pct_of_mid = 0.20
+filters_max_strike_distance_pct = 0.30
+filters_enable = true
 
 # Shared analytics and freshness
 risk_free_rate = 0.045
 hv_lookback_days = 30
 trading_days_per_year = 252
-stale_quote_seconds = 900
+stale_quote_seconds = 21600
 max_expiration_weeks = 26
+
+# Shared scoring
 option_score_income_weight = 0.30
 option_score_liquidity_weight = 0.30
 option_score_risk_weight = 0.25
 option_score_efficiency_weight = 0.15
 
 # Shared diagnostics
-enable_filters = true
 enable_validation = true
 debug_dump_provider_payload = false
 debug_dump_dir = "debug"
@@ -142,19 +144,22 @@ These settings apply regardless of which provider is active.
 
 #### Shared Filtering Defaults
 
-- `MIN_BID = 0.50`: excludes very low-premium contracts, in addition to the hard `bid == 0` filter.
-- `MIN_OPEN_INTEREST = 100`: baseline open-interest threshold used by the screening metrics.
-- `MIN_VOLUME = 10`: baseline daily volume threshold used by the screening metrics.
-- `MAX_SPREAD_PCT_OF_MID = 0.25`: excludes contracts with spreads wider than 25% of midpoint.
-- `MAX_STRIKE_DISTANCE_PCT = 0.30`: keeps only strikes within +/-30% of the latest underlying price.
+- `FILTERS_MIN_BID = 0.50`: excludes very low-premium contracts, in addition to the hard `bid == 0` filter.
+- `FILTERS_MIN_OPEN_INTEREST = 100`: baseline open-interest threshold used by the screening metrics.
+- `FILTERS_MIN_VOLUME = 10`: baseline daily volume threshold used by the screening metrics.
+- `FILTERS_MAX_SPREAD_PCT_OF_MID = 0.20`: excludes contracts with spreads wider than 20% of midpoint.
+- `FILTERS_MAX_STRIKE_DISTANCE_PCT = 0.30`: keeps only strikes within +/-30% of the latest underlying price.
 
 #### Shared Analytics and Freshness Defaults
 
 - `RISK_FREE_RATE = 0.045`: risk-free rate used in Black-Scholes calculations.
 - `HV_LOOKBACK_DAYS = 30`: lookback window for historical volatility.
 - `TRADING_DAYS_PER_YEAR = 252`: annualization factor for volatility.
-- `STALE_QUOTE_SECONDS = 900`: staleness threshold for option and underlying quotes.
+- `STALE_QUOTE_SECONDS = 21600`: staleness threshold for option and underlying quotes.
 - `MAX_EXPIRATION_WEEKS = 26`: caps expirations to roughly the next six months by default. Set it to any positive week count you want, or `0` to disable the expiration cap entirely.
+
+#### Shared Scoring Defaults
+
 - `OPTION_SCORE_INCOME_WEIGHT = 0.30`: weight on premium-per-day in the shared `option_score`.
 - `OPTION_SCORE_LIQUIDITY_WEIGHT = 0.30`: weight on spread, open interest, and volume in the shared `option_score`.
 - `OPTION_SCORE_RISK_WEIGHT = 0.25`: weight on the side-aware delta target in the shared `option_score`.
@@ -162,7 +167,7 @@ These settings apply regardless of which provider is active.
 
 #### Shared Diagnostics Defaults
 
-- `ENABLE_FILTERS = true`: applies the zero-bid, strike-band, and wide-spread row filters after download. Set it to `false` when you want the raw downloaded rows to remain in the exported dataset while still computing metrics and quality flags.
+- `FILTERS_ENABLE = true`: applies the zero-bid, strike-band, and wide-spread row filters after download. Set it to `false` when you want the raw downloaded rows to remain in the exported dataset while still computing metrics and quality flags.
 - `ENABLE_VALIDATION = true`: runs shared row-level validation before post-download filtering and file-level validation before export. Set it to `false` when you want to skip validation findings and validation summary output entirely.
 - `DEBUG_DUMP_PROVIDER_PAYLOAD = false`: when `true`, dump raw provider payloads to JSON before normalization so missing fields can be inspected directly.
 - `DEBUG_DUMP_DIR = "debug"`: directory used for raw provider payload dumps. Dump filenames are prefixed with the provider name.
@@ -186,18 +191,18 @@ These settings are only used by the matching provider.
 
 ### Internal Build Metadata
 
-- `SCRIPT_VERSION = "2026-03-23.3"`: run-version string written to the append-only log.
+- `SCRIPT_VERSION = "2026-03-23.4"`: run-version string written to the append-only log.
 
 ### Common Configuration Tasks
 
 - Change `tickers` when you want a different watchlist.
 - Switch `data_provider` when you want to use a different market-data implementation.
-- Tighten or loosen the threshold values when you want a narrower or broader tradability filter.
-- Set `enable_filters = false` when you want to keep rows that would normally be removed by the shared post-download filters.
+- Tighten or loosen the `filters_*` threshold values when you want a narrower or broader tradability filter.
+- Set `filters_enable = false` when you want to keep rows that would normally be removed by the shared post-download filters.
 - Set `enable_validation = false` when you want to skip shared row/file validation and suppress validation summaries.
 - Turn on `debug_dump_provider_payload = true` when you need to inspect the raw provider payload and confirm whether fields such as `last_quote`, `underlying_asset`, or Yahoo chain columns were present before normalization.
 - Change `max_expiration_weeks` when you want a shorter or longer expiration window, or set it to `0` to disable the max-expiration cutoff.
-- Change the rate, lookback, trading-day, or staleness settings only if you want different modeling or freshness assumptions.
+- Change the shared analytics or freshness settings only if you want different modeling assumptions.
 - Change the `option_score_*_weight` values when you want to tune the shared score without changing code. The weights must stay non-negative and their total must stay positive or the loader falls back to defaults.
 
 ### Provider-Specific Configuration Tasks
@@ -210,16 +215,29 @@ These settings are only used by the matching provider.
 - Raise or lower `[providers.marketdata].max_retries` when you want a different tolerance for rate-limit retries.
 - Set `[providers.marketdata].request_interval_seconds` above `0.0` only when you want additional client-side pacing on top of the provider's normal serial request flow.
 
-Startup output:
+## Scoring
+
+`option_score` is a shared derived field in the `0-100` range. It is intended for relative ranking within one run, not as an absolute trading recommendation.
+
+Current scoring logic:
+
+- Income: rewards higher `premium_per_day`
+- Liquidity: rewards tighter spreads, higher open interest, and higher volume
+- Risk: rewards delta closer to the current side-aware target
+- Efficiency: rewards shorter time to expiration and strikes closer to spot
+
+The four `option_score_*_weight` settings control how much each component contributes to the final score. All weights must be non-negative, and their total must stay positive or the loader falls back to the built-in defaults.
+
+## Runtime Behavior
 
 - The fetcher prints the config path it read, whether the file exists, and the full set of resolved runtime values it will apply.
 - Secret values are redacted in that output. For example, the Massive API key and Market Data token are shown as `set` or `not set`, never in plaintext.
 - When a config value is invalid and a code default is used instead, the fetcher prints a `Config fallbacks:` block so the override is visible.
 - When validation is enabled, the fetcher prints a validation summary after combining ticker frames and before writing the CSV.
 - During each ticker fetch, the fetcher prints provider progress, expiration counts, raw provider row counts, normalized-versus-kept row counts, and final kept rows so empty runs can be traced to a specific stage.
-- `python fetcher.py` exits with status `0` after a successful CSV write, `1` when the run finishes with `No data fetched.`, and `130` when interrupted with `Ctrl+C`.
+- The fetcher exits with status `0` after a successful CSV write, `1` when the run finishes with `No data fetched.`, and `130` when interrupted with `Ctrl+C`.
 
-Viewer behavior:
+## Viewer Behavior
 
 - The exported `option_score` field is visible in the viewer table like any other numeric column.
 - Summary-tab opportunity highlights also use `option_score` as a ranking signal alongside return-on-margin and quote quality, so score-weight changes affect both the CSV and the viewer's top picks.

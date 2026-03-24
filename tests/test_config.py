@@ -44,12 +44,12 @@ def test_load_runtime_config_reads_user_config_file(tmp_path: Path):
 [settings]
 tickers = ["spy", "qqq"]
 data_provider = "yfinance"
-min_bid = 1.25
+filters_min_bid = 1.25
 option_score_income_weight = 0.40
 option_score_liquidity_weight = 0.20
 option_score_risk_weight = 0.25
 option_score_efficiency_weight = 0.15
-enable_filters = false
+filters_enable = false
 enable_validation = false
 debug_dump_provider_payload = true
 debug_dump_dir = "logs/provider_payloads"
@@ -309,7 +309,7 @@ def test_load_runtime_config_defaults_invalid_filter_toggle(tmp_path: Path):
     config_path.write_text(
         """
 [settings]
-enable_filters = "sometimes"
+filters_enable = "sometimes"
 """.strip(),
         encoding="utf-8",
     )
@@ -317,7 +317,7 @@ enable_filters = "sometimes"
     config = load_runtime_config(config_path)
 
     assert config.enable_filters is True
-    assert any("enable_filters" in warning for warning in config.config_warnings)
+    assert any("filters_enable" in warning for warning in config.config_warnings)
 
 
 def test_load_runtime_config_defaults_invalid_validation_toggle(tmp_path: Path):
