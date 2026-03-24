@@ -52,7 +52,7 @@ The viewer includes:
 - hover descriptions on column headers pulled from this guide
 - a file selector for available CSV exports
 - a `Reference` tab that shows the CSV field documentation
-- a `Summary` tab for per-ticker snapshot metrics and opportunity highlights
+- an `Overview` tab for per-ticker snapshot metrics and opportunity highlights
 - a dark/light mode toggle
 - header filters, including numeric min/max filtering for numeric columns
 - dataset-level header cards for shared run metrics such as premium reference method
@@ -189,10 +189,6 @@ These settings are only used by the matching provider.
 - `providers.marketdata.max_retries = 3`: retry count for Market Data rate-limit responses (`429`). The provider uses exponential backoff and honors `Retry-After` when the upstream response supplies it.
 - `providers.marketdata.request_interval_seconds = 0.0`: optional minimum spacing between Market Data HTTP requests. Leave it at `0.0` unless you want extra pacing for low-credit or low-throughput plans.
 
-### Internal Build Metadata
-
-- `SCRIPT_VERSION = "2026-03-23.4"`: run-version string written to the append-only log.
-
 ### Common Configuration Tasks
 
 - Change `tickers` when you want a different watchlist.
@@ -236,11 +232,6 @@ The four `option_score_*_weight` settings control how much each component contri
 - When validation is enabled, the fetcher prints a validation summary after combining ticker frames and before writing the CSV.
 - During each ticker fetch, the fetcher prints provider progress, expiration counts, raw provider row counts, normalized-versus-kept row counts, and final kept rows so empty runs can be traced to a specific stage.
 - The fetcher exits with status `0` after a successful CSV write, `1` when the run finishes with `No data fetched.`, and `130` when interrupted with `Ctrl+C`.
-
-## Viewer Behavior
-
-- The exported `option_score` field is visible in the viewer table like any other numeric column.
-- Summary-tab opportunity highlights also use `option_score` as a ranking signal alongside return-on-margin and quote quality, so score-weight changes affect both the CSV and the viewer's top picks.
 
 ## Field Reference
 
