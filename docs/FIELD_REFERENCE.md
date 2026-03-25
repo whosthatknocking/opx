@@ -89,7 +89,7 @@ The exported CSV contains both provider-supplied and app-derived fields. Some va
 - `vega`: Black-Scholes vega. Use it to measure sensitivity to implied volatility changes. Higher means the option is more sensitive to vol expansion or crush.
 - `vega_per_day`: Vega divided by days to expiration. Use it to compare vol sensitivity across expiries on a per-day basis.
 - `theta`: Black-Scholes daily theta. Use it to estimate daily time decay.
-- `theta_dollars_per_day`: Absolute daily theta scaled to one contract as `abs(theta) * 100`. Use it to compare raw daily decay capture across rows.
+- `theta_dollars_per_day`: Absolute daily theta scaled to one contract as `abs(theta) * 100`. Use it to compare raw daily decay capture across rows. Multiply by contract count only when you want absolute position theta magnitude; use signed `theta * 100` with position direction when you need signed position theta.
 - `theta_to_premium_ratio`: Absolute theta divided by premium. Use it to compare time decay efficiency relative to premium collected or paid. Higher means faster daily decay relative to the option price.
 - `capital_required`: Simplified one-contract capital proxy. Calls use `last_trade_price * 100`; puts use `strike * 100`.
 - `theta_efficiency`: `theta_dollars_per_day / (capital_required / 1000)`. Use it to compare daily theta generation per `$1,000` of row-level capital.
