@@ -648,7 +648,7 @@ class ViewerRequestHandler(SimpleHTTPRequestHandler):
 def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Run the local viewer HTTP server."""
     server = ThreadingHTTPServer((host, port), ViewerRequestHandler)
-    print(f"CSV viewer running at http://{host}:{port}")
+    print(f"Options Screener running at http://{host}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

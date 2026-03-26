@@ -1,4 +1,4 @@
-# Design Specification: Options Chain Viewer
+# Design Specification: Options Screener
 
 ## 1. Overview
 The viewer uses an institutional, ledger-inspired visual system optimized for dense financial data. The goal is clarity, structural hierarchy, and fast scanning, without decorative marketing copy or non-functional chrome.
@@ -50,7 +50,7 @@ The viewer supports two modes with the same core identity: slate surfaces, high-
 The viewer uses a single functional header instead of a persistent sidebar.
 
 Header contents:
-* Viewer title: `Options Chain Viewer`
+* Viewer title: `Options Screener`
 * Primary tabs: `Dataset`, `Overview`, `Chain View`, `Reference`
 * Dataset selector: current CSV file chooser
 * Theme toggle: `Light` / `Dark`
@@ -99,7 +99,7 @@ Chain View behavior:
 
 ## 6. Naming Conventions
 Use the current functional UI labels:
-* Title: `Options Chain Viewer`
+* Title: `Options Screener`
 * Tab 1: `Dataset`
 * Tab 2: `Overview`
 * Tab 3: `Chain View`
