@@ -439,6 +439,10 @@ input,
   display: flex;
   flex-direction: column;
   gap: 6px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .summary-status,
@@ -1340,6 +1344,10 @@ body {
 
 .tab-panel.active {
   overflow: hidden;
+}
+
+#summaryTab.tab-panel.active {
+  overflow: auto;
 }
 
 .eyebrow,
