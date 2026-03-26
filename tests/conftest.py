@@ -34,6 +34,8 @@ def make_runtime_config(**overrides):
         "enable_validation": True,
         "debug_dump_provider_payload": False,
         "debug_dump_dir": Path("/tmp/opx-provider-debug"),
+        "viewer_host": "127.0.0.1",
+        "viewer_port": 8000,
         "max_strike_distance_pct": 0.30,
         "max_expiration_weeks": 14,
         "max_expiration": "2026-06-30",

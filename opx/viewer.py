@@ -658,9 +658,10 @@ def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
 
 
 def main() -> None:
-    """Start the local viewer using environment-configured host and port."""
-    host = os.environ.get("OPX_VIEWER_HOST", "127.0.0.1")
-    port = int(os.environ.get("OPX_VIEWER_PORT", "8000"))
+    """Start the local viewer using runtime config with optional env overrides."""
+    config = get_runtime_config()
+    host = os.environ.get("OPX_VIEWER_HOST", config.viewer_host)
+    port = int(os.environ.get("OPX_VIEWER_PORT", str(config.viewer_port)))
     serve(host=host, port=port)
 
 

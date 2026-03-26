@@ -36,6 +36,8 @@ DEFAULT_MAX_EXPIRATION_WEEKS = 26
 SUPPORTED_MARKETDATA_MODES = frozenset({"live", "cached", "delayed"})
 DEFAULT_MARKETDATA_MAX_RETRIES = 3
 DEFAULT_MARKETDATA_REQUEST_INTERVAL_SECONDS = 0.0
+DEFAULT_VIEWER_HOST = "127.0.0.1"
+DEFAULT_VIEWER_PORT = 8000
 MAX_MASSIVE_SNAPSHOT_PAGE_LIMIT = 250
 DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT = MAX_MASSIVE_SNAPSHOT_PAGE_LIMIT
 DEFAULT_MASSIVE_REQUEST_INTERVAL_SECONDS = 12.0
@@ -81,6 +83,8 @@ class RuntimeConfig:
     massive_request_interval_seconds: float
     debug_dump_provider_payload: bool
     debug_dump_dir: Path
+    viewer_host: str
+    viewer_port: int
     config_path: Path
     config_warnings: tuple[str, ...] = field(default_factory=tuple)
 
@@ -397,6 +401,21 @@ def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:  # py
             coercer=_coerce_path,
             warnings=warnings,
         ),
+        viewer_host=_resolve_config_value(
+            settings.get("viewer_host"),
+            field_name="settings.viewer_host",
+            default=DEFAULT_VIEWER_HOST,
+            coercer=_coerce_str,
+            warnings=warnings,
+        ),
+        viewer_port=_resolve_config_value(
+            settings.get("viewer_port"),
+            field_name="settings.viewer_port",
+            default=DEFAULT_VIEWER_PORT,
+            coercer=_coerce_int,
+            warnings=warnings,
+            validator=lambda value: 1 <= value <= 65535,
+        ),
         max_strike_distance_pct=_resolve_config_value(
             settings.get("filters_max_strike_distance_pct"),
             field_name="settings.filters_max_strike_distance_pct",
@@ -539,6 +558,10 @@ def validate_runtime_config(config: RuntimeConfig) -> None:
         )
     if not str(config.debug_dump_dir).strip():
         raise ConfigError("Config field 'settings.debug_dump_dir' must not be blank.")
+    if not config.viewer_host.strip():
+        raise ConfigError("Config field 'settings.viewer_host' must not be blank.")
+    if not 1 <= config.viewer_port <= 65535:
+        raise ConfigError("Config field 'settings.viewer_port' must be between 1 and 65535.")
 
 
 @lru_cache(maxsize=1)
@@ -588,6 +611,8 @@ def describe_runtime_config(config: RuntimeConfig) -> tuple[str, ...]:
         f"Applied enable_validation: {config.enable_validation}",
         f"Applied debug_dump_provider_payload: {config.debug_dump_provider_payload}",
         f"Applied debug_dump_dir: {config.debug_dump_dir}",
+        f"Applied viewer_host: {config.viewer_host}",
+        f"Applied viewer_port: {config.viewer_port}",
         f"Applied max_expiration_weeks: {config.max_expiration_weeks}",
         f"Applied max_expiration: {config.max_expiration or 'disabled'}",
         f"Applied providers.massive.api_key: {masked_massive_key}",

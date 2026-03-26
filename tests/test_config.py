@@ -29,6 +29,8 @@ def test_load_runtime_config_uses_defaults_when_file_is_absent(tmp_path: Path):
     assert config.massive_request_interval_seconds == 12.0
     assert config.debug_dump_provider_payload is False
     assert config.debug_dump_dir == Path("debug")
+    assert config.viewer_host == "127.0.0.1"
+    assert config.viewer_port == 8000
     assert config.enable_filters is True
     assert config.max_spread_pct_of_mid == 0.25
     assert config.max_expiration_weeks == 26
@@ -54,6 +56,8 @@ filters_enable = false
 enable_validation = false
 debug_dump_provider_payload = true
 debug_dump_dir = "logs/provider_payloads"
+viewer_host = "0.0.0.0"
+viewer_port = 9001
 max_expiration_weeks = 8
 
 [providers.massive]
@@ -83,6 +87,8 @@ request_interval_seconds = 0.75
     assert config.enable_validation is False
     assert config.debug_dump_provider_payload is True
     assert config.debug_dump_dir == Path("logs/provider_payloads")
+    assert config.viewer_host == "0.0.0.0"
+    assert config.viewer_port == 9001
     assert config.max_expiration_weeks == 8
     assert config.max_expiration is not None
     assert config.massive_api_key == "secret"
@@ -383,6 +389,33 @@ enable_validation = "sometimes"
     assert any("enable_validation" in warning for warning in config.config_warnings)
 
 
+def test_load_runtime_config_defaults_invalid_viewer_settings(tmp_path: Path):
+    """Invalid viewer host/port values should fall back to defaults."""
+    blank_host = tmp_path / "blank-viewer-host.toml"
+    blank_host.write_text(
+        """
+[settings]
+viewer_host = "   "
+""".strip(),
+        encoding="utf-8",
+    )
+    config = load_runtime_config(blank_host)
+    assert config.viewer_host == "127.0.0.1"
+    assert any("viewer_host" in warning for warning in config.config_warnings)
+
+    bad_port = tmp_path / "bad-viewer-port.toml"
+    bad_port.write_text(
+        """
+[settings]
+viewer_port = 70000
+""".strip(),
+        encoding="utf-8",
+    )
+    config = load_runtime_config(bad_port)
+    assert config.viewer_port == 8000
+    assert any("viewer_port" in warning for warning in config.config_warnings)
+
+
 def test_load_runtime_config_supports_disabling_max_expiration(tmp_path: Path):
     """A zero-week max expiration should disable the expiration cap."""
     config_path = tmp_path / "no-expiration-cap.toml"
@@ -432,6 +465,8 @@ api_token = "market-token"
     assert all("market-token" not in line for line in lines)
     assert any("debug_dump_provider_payload" in line for line in lines)
     assert any("debug_dump_dir" in line for line in lines)
+    assert any("viewer_host" in line for line in lines)
+    assert any("viewer_port" in line for line in lines)
     assert any("providers.marketdata.api_token" in line for line in lines)
 
 

@@ -46,6 +46,8 @@ Run the local viewer:
 python viewer.py
 ```
 
+The viewer binds to `settings.viewer_host` and `settings.viewer_port` from `~/.config/opx/config.toml` by default. `OPX_VIEWER_HOST` and `OPX_VIEWER_PORT` still override those values when you need a one-off launch target.
+
 The viewer includes:
 
 - a sortable table for the exported CSV
@@ -112,6 +114,10 @@ trading_days_per_year = 252
 stale_quote_seconds = 21600
 max_expiration_weeks = 26
 
+# Shared viewer runtime
+viewer_host = "127.0.0.1"
+viewer_port = 8000
+
 # Shared scoring
 option_score_income_weight = 0.30
 option_score_liquidity_weight = 0.30
@@ -160,6 +166,11 @@ These settings apply regardless of which provider is active.
 - `STALE_QUOTE_SECONDS = 21600`: staleness threshold for option and underlying quotes.
 - `MAX_EXPIRATION_WEEKS = 26`: caps expirations to roughly the next six months by default. Set it to any positive week count you want, or `0` to disable the expiration cap entirely.
 
+#### Shared Viewer Defaults
+
+- `VIEWER_HOST = "127.0.0.1"`: default bind host used by `python viewer.py`.
+- `VIEWER_PORT = 8000`: default bind port used by `python viewer.py`.
+
 #### Shared Scoring Defaults
 
 - `OPTION_SCORE_INCOME_WEIGHT = 0.30`: weight on premium-per-day in the shared `option_score`.
@@ -173,6 +184,8 @@ These settings apply regardless of which provider is active.
 - `ENABLE_VALIDATION = true`: runs shared row-level validation before post-download filtering and file-level validation before export. Set it to `false` when you want to skip validation findings and validation summary output entirely.
 - `DEBUG_DUMP_PROVIDER_PAYLOAD = false`: when `true`, dump raw provider payloads to JSON before normalization so missing fields can be inspected directly.
 - `DEBUG_DUMP_DIR = "debug"`: directory used for raw provider payload dumps. Dump filenames are prefixed with the provider name.
+- `VIEWER_HOST = "127.0.0.1"`: default host/interface for the local viewer server.
+- `VIEWER_PORT = 8000`: default port for the local viewer server.
 
 ### Provider Settings
 
@@ -200,6 +213,7 @@ These settings are only used by the matching provider.
 - Set `enable_validation = false` when you want to skip shared row/file validation and suppress validation summaries.
 - Turn on `debug_dump_provider_payload = true` when you need to inspect the raw provider payload and confirm whether fields such as `last_quote`, `underlying_asset`, or Yahoo chain columns were present before normalization.
 - Change `max_expiration_weeks` when you want a shorter or longer expiration window, or set it to `0` to disable the max-expiration cutoff.
+- Change `viewer_host` or `viewer_port` when you want the local viewer to bind to a different interface or port by default.
 - Change the shared analytics or freshness settings only if you want different modeling assumptions.
 - Change the `option_score_*_weight` values when you want to tune the shared score without changing code. The weights must stay non-negative and their total must stay positive or the loader falls back to defaults.
 

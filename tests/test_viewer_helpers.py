@@ -1,5 +1,4 @@
 """Viewer helper tests for field descriptions, cards, and freshness metadata."""
-
 from pathlib import Path
 
 import pandas as pd
@@ -158,3 +157,40 @@ def test_pick_moderate_risk_opportunity_accepts_spread_at_config_cutoff(monkeypa
 
     assert summary is not None
     assert summary["contract_symbol"] == "EDGE"
+
+
+def test_viewer_main_uses_runtime_config_host_and_port(monkeypatch):
+    """Viewer startup should default to the resolved runtime config values."""
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("opx.viewer.get_runtime_config", lambda: type(
+        "Config",
+        (),
+        {"viewer_host": "0.0.0.0", "viewer_port": 9001},
+    )())
+    monkeypatch.setattr("opx.viewer.serve", lambda host, port: captured.update(host=host, port=port))
+
+    monkeypatch.delenv("OPX_VIEWER_HOST", raising=False)
+    monkeypatch.delenv("OPX_VIEWER_PORT", raising=False)
+
+    viewer.main()
+
+    assert captured == {"host": "0.0.0.0", "port": 9001}
+
+
+def test_viewer_main_env_overrides_runtime_config(monkeypatch):
+    """Explicit viewer environment variables should override file config values."""
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("opx.viewer.get_runtime_config", lambda: type(
+        "Config",
+        (),
+        {"viewer_host": "127.0.0.1", "viewer_port": 8000},
+    )())
+    monkeypatch.setattr("opx.viewer.serve", lambda host, port: captured.update(host=host, port=port))
+    monkeypatch.setenv("OPX_VIEWER_HOST", "0.0.0.0")
+    monkeypatch.setenv("OPX_VIEWER_PORT", "9100")
+
+    viewer.main()
+
+    assert captured == {"host": "0.0.0.0", "port": 9100}

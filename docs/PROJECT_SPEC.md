@@ -87,6 +87,7 @@ The config loader is responsible for:
 - ticker selection
 - filter thresholds and enable/disable behavior
 - analytics, freshness, and expiration-window settings
+- viewer bind host and port
 - option-score weight tuning
 - validation enable/disable behavior
 - Massive credentials
