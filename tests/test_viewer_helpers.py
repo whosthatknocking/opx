@@ -165,6 +165,92 @@ def test_pick_moderate_risk_opportunity_accepts_spread_at_config_cutoff(monkeypa
     assert summary["contract_symbol"] == "EDGE"
 
 
+def test_pick_high_conviction_call_prefers_bullish_aligned_liquid_candidate():
+    """Call conviction should prefer cleaner bullish alignment over raw ROM alone."""
+    frame = pd.DataFrame(
+        [
+            {
+                "contract_symbol": "CALL_ROM",
+                "option_type": "call",
+                "strike": 110.0,
+                "expiration_date": "2026-04-17",
+                "underlying_day_change_pct": -0.03,
+                "strike_distance_pct": 0.12,
+                "delta_abs": 0.18,
+                "spread_score": 70.0,
+                "quote_quality_score": 4.0,
+                "return_on_margin_annualized": 2.2,
+                "option_score": 70.0,
+                "final_score": 72.0,
+                "passes_primary_screen": True,
+            },
+            {
+                "contract_symbol": "CALL_CONVICTION",
+                "option_type": "call",
+                "strike": 102.0,
+                "expiration_date": "2026-04-17",
+                "underlying_day_change_pct": 0.025,
+                "strike_distance_pct": 0.03,
+                "delta_abs": 0.39,
+                "spread_score": 92.0,
+                "quote_quality_score": 8.0,
+                "return_on_margin_annualized": 1.4,
+                "option_score": 88.0,
+                "final_score": 90.0,
+                "passes_primary_screen": True,
+            },
+        ]
+    )
+
+    summary = viewer.pick_high_conviction_opportunity(frame, "call")
+
+    assert summary is not None
+    assert summary["contract_symbol"] == "CALL_CONVICTION"
+
+
+def test_pick_high_conviction_put_prefers_bearish_aligned_candidate():
+    """Put conviction should stay side-specific and prefer downside alignment."""
+    frame = pd.DataFrame(
+        [
+            {
+                "contract_symbol": "PUT_BULLISH",
+                "option_type": "put",
+                "strike": 95.0,
+                "expiration_date": "2026-04-17",
+                "underlying_day_change_pct": 0.03,
+                "strike_distance_pct": 0.02,
+                "delta_abs": 0.34,
+                "spread_score": 95.0,
+                "quote_quality_score": 8.0,
+                "return_on_margin_annualized": 1.3,
+                "option_score": 89.0,
+                "final_score": 91.0,
+                "passes_primary_screen": True,
+            },
+            {
+                "contract_symbol": "PUT_CONVICTION",
+                "option_type": "put",
+                "strike": 98.0,
+                "expiration_date": "2026-04-17",
+                "underlying_day_change_pct": -0.025,
+                "strike_distance_pct": 0.04,
+                "delta_abs": 0.36,
+                "spread_score": 90.0,
+                "quote_quality_score": 7.0,
+                "return_on_margin_annualized": 1.2,
+                "option_score": 86.0,
+                "final_score": 89.0,
+                "passes_primary_screen": True,
+            },
+        ]
+    )
+
+    summary = viewer.pick_high_conviction_opportunity(frame, "put")
+
+    assert summary is not None
+    assert summary["contract_symbol"] == "PUT_CONVICTION"
+
+
 def test_viewer_main_uses_runtime_config_host_and_port(monkeypatch):
     """Viewer startup should default to the resolved runtime config values."""
     captured: dict[str, object] = {}

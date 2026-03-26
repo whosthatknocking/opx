@@ -57,7 +57,7 @@ Header contents:
 
 ### B. Main Surfaces
 * **Dataset tab:** toolbar, freshness cards, dataset cards, options table, pagination
-* **Overview tab:** ticker summary cards and opportunity cards
+* **Overview tab:** ticker summary cards and four opportunity cards per ticker for profitability, moderate-risk balance, bullish conviction, and bearish conviction
 * **Chain View tab:** one chart card per row, stacked vertically, using the same panel language as the rest of the viewer
 * **Reference tab:** rendered documentation/readme content
 

@@ -369,7 +369,7 @@ Current viewer behavior includes:
 - a `Chain View` tab that derives per-ticker/per-expiration visualizations directly from the exported CSV rows
 - sortable/filterable table view
 - summary highlights restricted to primary-screen rows when available
-- opportunity cards that surface `final_score`, `option_score`, `risk_level`, `spread_score`, `dte_score`, and `theta_efficiency`
+- opportunity cards for `Most Profitable`, `Moderate Risk`, `High Conviction Call`, and `High Conviction Put` that surface `final_score`, `option_score`, `risk_level`, `spread_score`, `dte_score`, and `theta_efficiency`
 - chain charts for delta-vs-strike/moneyness, premium-vs-spread, theta-efficiency-vs-delta, and a risk/liquidity summary
 - interactive chart hover tooltips and click-through from chart marks into the existing row-detail modal
 

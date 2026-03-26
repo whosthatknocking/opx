@@ -55,7 +55,7 @@ The viewer includes:
 - hover descriptions on column headers pulled from this guide
 - a file selector for available CSV exports
 - a `Reference` tab that shows the CSV field documentation
-- an `Overview` tab for per-ticker snapshot metrics and opportunity highlights
+- an `Overview` tab for per-ticker snapshot metrics plus `Most Profitable`, `Moderate Risk`, `High Conviction Call`, and `High Conviction Put` highlights
 - a `Chain View` tab for per-ticker/per-expiration chart inspection of chain structure, premium, theta efficiency, and screening/liquidity summaries
 - a dark/light mode toggle
 - header filters, including numeric min/max filtering for numeric columns

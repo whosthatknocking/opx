@@ -105,6 +105,8 @@ class TickerSummary(TypedDict):
     market_context: str
     profitable_opportunity: OpportunitySummary | None
     moderate_risk_opportunity: OpportunitySummary | None
+    high_conviction_call: OpportunitySummary | None
+    high_conviction_put: OpportunitySummary | None
 
 
 class CsvPayload(TypedDict):
@@ -392,6 +394,67 @@ def pick_moderate_risk_opportunity(frame: pd.DataFrame) -> OpportunitySummary | 
     return normalize_opportunity(moderate.iloc[0].to_dict()) if not moderate.empty else None
 
 
+def _compute_direction_alignment(day_change_pct: Any, option_type: str) -> pd.Series:
+    """Reward rows whose side matches the underlying's latest move."""
+    changes = coerce_number(day_change_pct).fillna(0.0)
+    if option_type == "call":
+        return changes.clip(lower=0.0)
+    return (-changes).clip(lower=0.0)
+
+
+def pick_high_conviction_opportunity(
+    frame: pd.DataFrame,
+    option_type: str,
+) -> OpportunitySummary | None:
+    """Select the strongest directional idea for one option side."""
+    if frame.empty:
+        return None
+    candidates = screen_primary_candidates(frame)
+    if "option_type" not in candidates.columns:
+        return None
+    candidates = candidates[candidates["option_type"].astype(str) == option_type].copy()
+    if candidates.empty:
+        return None
+
+    candidates = attach_opportunity_summary(candidates)
+    candidates["_rom"] = coerce_number(candidates.get("return_on_margin_annualized")).fillna(0.0)
+    candidates["_final_score"] = coerce_number(
+        candidates.get("final_score", candidates.get("option_score"))
+    ).fillna(0.0)
+    candidates["_quality"] = coerce_number(candidates.get("quote_quality_score")).fillna(0.0)
+    candidates["_spread_score"] = coerce_number(candidates.get("spread_score")).fillna(0.0)
+    candidates["_strike_distance_pct"] = coerce_number(candidates.get("strike_distance_pct"))
+    candidates["_delta_abs"] = coerce_number(candidates.get("delta_abs"))
+    candidates["_direction_alignment"] = _compute_direction_alignment(
+        candidates.get("underlying_day_change_pct"),
+        option_type,
+    )
+    delta_target = 0.40 if option_type == "call" else 0.35
+    candidates["_distance_penalty"] = candidates["_strike_distance_pct"].fillna(1.0)
+    candidates["_delta_penalty"] = (candidates["_delta_abs"] - delta_target).abs().fillna(1.0)
+    candidates["_conviction_score"] = (
+        candidates["_final_score"]
+        + (candidates["_quality"] * 2.0)
+        + (candidates["_spread_score"] * 0.5)
+        + (candidates["_direction_alignment"] * 100.0)
+        - (candidates["_distance_penalty"] * 100.0)
+        - (candidates["_delta_penalty"] * 40.0)
+        + (candidates["_rom"] * 5.0)
+    )
+    candidates = candidates.sort_values(
+        by=[
+            "_conviction_score",
+            "_final_score",
+            "_quality",
+            "_spread_score",
+            "_strike_distance_pct",
+        ],
+        ascending=[False, False, False, False, True],
+        na_position="last",
+    )
+    return normalize_opportunity(candidates.iloc[0].to_dict()) if not candidates.empty else None
+
+
 def build_market_context(
     ticker: str,
     underlying_price: float | None,
@@ -458,6 +521,8 @@ def build_ticker_summary(ticker: str, frame: pd.DataFrame) -> TickerSummary:
     hv = coerce_number(frame.get("historical_volatility")).dropna()
     profitable = pick_profitable_opportunity(frame)
     moderate = pick_moderate_risk_opportunity(frame)
+    high_conviction_call = pick_high_conviction_opportunity(frame, "call")
+    high_conviction_put = pick_high_conviction_opportunity(frame, "put")
     underlying_price_value = None if underlying_price.empty else float(underlying_price.iloc[0])
     day_change_value = None if day_change.empty else float(day_change.iloc[0])
     median_iv_value = (
@@ -483,6 +548,8 @@ def build_ticker_summary(ticker: str, frame: pd.DataFrame) -> TickerSummary:
         "market_context": build_market_context(ticker, underlying_price_value, day_change_value),
         "profitable_opportunity": profitable,
         "moderate_risk_opportunity": moderate,
+        "high_conviction_call": high_conviction_call,
+        "high_conviction_put": high_conviction_put,
     }
 
 

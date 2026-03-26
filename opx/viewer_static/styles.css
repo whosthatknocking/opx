@@ -611,6 +611,14 @@ input,
   border-color: rgba(2, 132, 199, 0.24);
 }
 
+.opportunity-card-conviction-call {
+  border-color: rgba(22, 163, 74, 0.24);
+}
+
+.opportunity-card-conviction-put {
+  border-color: rgba(220, 38, 38, 0.24);
+}
+
 .positive {
   color: var(--accent);
 }

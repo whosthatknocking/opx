@@ -253,6 +253,8 @@ function getFieldDescription(label) {
     'Calls / Puts': 'Count of call and put option rows available for this underlying symbol.',
     'Most Profitable': 'Heuristic pick for the highest annualized return on margin among candidate contracts. Highest return is not always the safest setup.',
     'Moderate Risk': 'Heuristic pick balancing return on margin with lower delta and acceptable spread after primary-screen filtering.',
+    'High Conviction Call': 'Bullish side-specific pick that emphasizes final score, quote quality, spread quality, cleaner strike positioning, and current upside alignment.',
+    'High Conviction Put': 'Bearish side-specific pick that emphasizes final score, quote quality, spread quality, cleaner strike positioning, and current downside alignment.',
   };
   const columnDescription = getColumnDefinition(label)?.description;
   return columnDescription || summaryDescriptions[label] || '';
@@ -357,6 +359,8 @@ function renderSummaryTickerGrid(tickers) {
       <div class="opportunity-grid">
         ${renderOpportunityCard('Most Profitable', item.profitable_opportunity, 'profit')}
         ${renderOpportunityCard('Moderate Risk', item.moderate_risk_opportunity, 'moderate')}
+        ${renderOpportunityCard('High Conviction Call', item.high_conviction_call, 'conviction-call')}
+        ${renderOpportunityCard('High Conviction Put', item.high_conviction_put, 'conviction-put')}
       </div>
     </article>
   `).join('');
