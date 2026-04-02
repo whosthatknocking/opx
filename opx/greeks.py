@@ -90,6 +90,10 @@ def compute_greeks(  # pylint: disable=too-many-locals
     df["vega"] = _merge_provider_and_derived(df.get("vega"), derived_vega)
     df["theta"] = _merge_provider_and_derived(df.get("theta"), derived_theta)
     df["delta_abs"] = _merge_provider_and_derived(df.get("delta_abs"), df["delta"].abs())
+    df["delta_safety_pct"] = _merge_provider_and_derived(
+        df.get("delta_safety_pct"),
+        (1 - df["delta_abs"]) * 100,
+    )
     df["delta_itm_proxy"] = _merge_provider_and_derived(
         df.get("delta_itm_proxy"),
         np.where(is_call, df["delta"], df["delta_abs"]),

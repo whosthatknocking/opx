@@ -68,6 +68,7 @@ COLUMN_ORDER = [
     "expected_move_upper_bound",
     "delta",
     "delta_abs",
+    "delta_safety_pct",
     "delta_itm_proxy",
     "probability_itm",
     "gamma",

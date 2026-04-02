@@ -83,6 +83,7 @@ The exported CSV contains both provider-supplied and app-derived fields. Some va
 
 - `delta`: Black-Scholes delta. Use it as an estimate of directional sensitivity and a rough probability proxy.
 - `delta_abs`: Absolute value of delta. Use it when you only care about magnitude, not call-versus-put sign. Lower usually means farther OTM; higher means closer to or deeper ITM.
+- `delta_safety_pct`: Use it as a simple delta-based safety gauge for short premium trades. Higher means lower absolute delta and more distance from an at-the-money or in-the-money risk profile; lower means the trade is carrying more directional exposure.
 - `delta_itm_proxy`: Delta normalized so higher values mean more in-the-money for both calls and puts. Use it for side-agnostic moneyness ranking.
 - `probability_itm`: Black-Scholes probability of finishing in the money, derived from `d2` rather than delta. Use it when you want the model-based ITM probability instead of the delta approximation. Lower generally means less assignment/exercise risk for short premium trades.
 - `gamma`: Black-Scholes gamma. Use it to measure how quickly delta changes as the stock moves. Higher means position risk can change faster as spot moves.
@@ -227,6 +228,7 @@ Legend:
 | --- | --- | --- | --- |
 | `delta` | Derived: Black-Scholes in shared app code | Transformed or Derived: provider `greeks.delta` preserved, app fills gaps | Direct/Transformed: provider `delta` preserved, app fills gaps |
 | `delta_abs` | Derived: absolute value of delta | Derived: absolute value of delta | Derived: absolute value of delta |
+| `delta_safety_pct` | Derived: `(1 - abs(delta)) * 100` | Derived: `(1 - abs(delta)) * 100` | Derived: `(1 - abs(delta)) * 100` |
 | `delta_itm_proxy` | Derived: side-normalized delta | Derived: side-normalized delta | Derived: side-normalized delta |
 | `probability_itm` | Derived: Black-Scholes `d2` probability | Derived: Black-Scholes `d2` probability unless provider value is present later | Derived: Black-Scholes `d2` probability |
 | `gamma` | Derived: Black-Scholes in shared app code | Transformed or Derived: provider `greeks.gamma` preserved, app fills gaps | Direct/Transformed: provider `gamma` preserved, app fills gaps |

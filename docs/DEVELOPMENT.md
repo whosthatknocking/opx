@@ -235,3 +235,26 @@ pylint $(git ls-files '*.py')
 - Quote timing and completeness depend on the upstream source and plan access.
 - The exported CSV is intended to be consumed by another tool, so the script favors schema clarity and enriched raw data over trade recommendations.
 - The viewer is intended for inspection and triage, not as a live trading terminal.
+
+## Versioning and Releases
+
+The package version is defined in `pyproject.toml` and is the single source of truth for releases.
+
+Rules:
+
+- Use plain semver `X.Y.Z` in `pyproject.toml`.
+- Runtime `SCRIPT_VERSION`, package `opx.__version__`, provider user-agent strings, and release validation all derive from that package version.
+- GitHub release tags must be named `vX.Y.Z` and must match the package version exactly.
+
+GitHub automation:
+
+- `.github/workflows/version.yml` validates version consistency on pull requests, pushes to `main`, and manual dispatches.
+- The same workflow creates a GitHub Release automatically when a matching `vX.Y.Z` tag is pushed.
+- Release artifacts include the built source distribution and wheel from `python -m build`.
+
+Local validation:
+
+```bash
+python scripts/check_version.py
+python scripts/check_version.py --tag v0.1.0
+```
