@@ -52,6 +52,7 @@ def test_write_options_csv_persists_only_canonical_columns(tmp_path: Path):
                 "open_interest": 100,
                 "implied_volatility": 0.3,
                 "option_quote_time": pd.Timestamp("2026-03-20T13:40:00Z"),
+                "delta_safety_pct": 75.0,
                 "option_score": 82.5,
                 "data_source": "stub",
                 "risk_free_rate_used": 0.045,
@@ -67,5 +68,7 @@ def test_write_options_csv_persists_only_canonical_columns(tmp_path: Path):
     assert "provider_debug_field" not in exported.columns
     assert set(exported.columns).issubset(set(CANONICAL_EXPORT_COLUMNS))
     assert "option_score" in exported.columns
+    assert "delta_safety_pct" in exported.columns
+    assert exported.loc[0, "delta_safety_pct"] == 75.0
     assert exported.loc[0, "option_score"] == 82.5
     assert exported.loc[0, "days_to_expiration"] == 28

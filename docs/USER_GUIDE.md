@@ -237,6 +237,7 @@ How to interpret it:
 
 - Higher `option_score` means the row looks stronger on a combined basis, not just on one metric like raw ROM or premium.
 - A lower score does not necessarily mean the contract is unusable; it usually means some combination of spread quality, strike positioning, DTE profile, or risk efficiency is weaker than the higher-ranked alternatives in the same export.
+- `delta_safety_pct` is exported as a simple inverse-delta companion to `delta_abs`. Higher values mean lower absolute delta and typically more distance from an at-the-money or in-the-money risk profile.
 - `final_score` is the better summary value when you want the score after the row-level validation adjustment has been applied.
 
 Current scoring logic:

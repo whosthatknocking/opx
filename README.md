@@ -36,7 +36,7 @@ The local viewer is organized around four primary tabs: `Dataset`, `Overview`, `
 - Fetches call and put chains for configured tickers
 - Filters out zero-bid and wide-spread contracts before export
 - Limits strikes to a configurable band around spot
-- Computes Greeks, expected move, ROM-style metrics, configurable option scoring, and volatility context
+- Computes Greeks, delta-safety, expected move, ROM-style metrics, configurable option scoring, and volatility context
 - Writes a timestamped CSV plus an append-only run log
 - Includes a local browser for exploring the output interactively, including dataset inspection, per-ticker overview cards, `Most Profitable`, `Moderate Risk`, `High Conviction Call`, and `High Conviction Put` highlights, plus chain visualizations with chart tooltips and click-through row details
 - Produces normalized output that can feed other tools and systems which apply their own decision logic on top of the exported data

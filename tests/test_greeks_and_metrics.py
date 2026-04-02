@@ -44,6 +44,35 @@ def test_compute_greeks_probability_itm_complements_for_matching_call_put():
     assert result["has_valid_greeks"].tolist() == [True, True]
 
 
+def test_compute_greeks_adds_delta_safety_pct_from_delta_abs():
+    """Delta safety should be the inverse absolute-delta percentage."""
+    frame = pd.DataFrame(
+        [
+            {
+                "strike": 100,
+                "time_to_expiration_years": 0.5,
+                "implied_volatility": 0.25,
+                "option_type": "call",
+            },
+            {
+                "strike": 100,
+                "time_to_expiration_years": 0.5,
+                "implied_volatility": 0.25,
+                "option_type": "put",
+            },
+        ]
+    )
+
+    result = compute_greeks(frame.copy(), underlying_price=110, risk_free_rate=0.045)
+
+    assert result.loc[0, "delta_safety_pct"] == pytest.approx(
+        (1 - result.loc[0, "delta_abs"]) * 100
+    )
+    assert result.loc[1, "delta_safety_pct"] == pytest.approx(
+        (1 - result.loc[1, "delta_abs"]) * 100
+    )
+
+
 def test_add_expected_move_by_expiration_uses_nearest_to_money_iv():
     """Expected move should use the average IV of the nearest-to-money contracts."""
     frame = pd.DataFrame(

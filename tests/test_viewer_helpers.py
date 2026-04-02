@@ -20,6 +20,7 @@ def test_extract_field_descriptions_reads_current_user_guide_entries():
     descriptions = viewer.extract_field_descriptions()
 
     assert "underlying_symbol" in descriptions
+    assert "delta_safety_pct" in descriptions
     assert "Use it to group rows by underlying." in descriptions["underlying_symbol"]
 
 
