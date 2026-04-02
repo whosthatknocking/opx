@@ -251,6 +251,12 @@ GitHub automation:
 - `.github/workflows/version.yml` validates version consistency on pull requests, pushes to `main`, and manual dispatches.
 - The same workflow creates a GitHub Release automatically when a matching `vX.Y.Z` tag is pushed.
 - Release artifacts include the built source distribution and wheel from `python -m build`.
+- The release job runs `twine check dist/*`, installs the built wheel, and re-runs version validation before publishing the GitHub Release.
+
+CI support window:
+
+- `.github/workflows/ci.yml` runs tests on Python `3.10`, `3.11`, `3.12`, and `3.13`.
+- Keep the CI matrix aligned with the supported runtime range declared in `pyproject.toml`.
 
 Local validation:
 
