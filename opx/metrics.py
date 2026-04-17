@@ -367,6 +367,36 @@ def add_derived_pricing_metrics(df, underlying_price):
     return df
 
 
+def add_event_risk_flags(df):
+    """Add earnings/dividend proximity flags and a composite event risk score."""
+    dte = df["days_to_earnings"] if "days_to_earnings" in df.columns else pd.Series(np.nan, index=df.index)
+    dtd = df["days_to_ex_div"] if "days_to_ex_div" in df.columns else pd.Series(np.nan, index=df.index)
+
+    df["earnings_within_5d"] = np.where(dte.notna(), dte <= 5, None)
+    df["earnings_within_10d"] = np.where(dte.notna(), dte <= 10, None)
+    df["ex_div_within_3d"] = np.where(dtd.notna(), dtd <= 3, None)
+
+    earnings_pts = np.where(
+        dte.notna(),
+        np.select([dte <= 5, dte <= 10], [60.0, 30.0], default=0.0),
+        np.nan,
+    )
+    div_pts = np.where(
+        dtd.notna(),
+        np.select([dtd <= 3, dtd <= 7], [40.0, 20.0], default=0.0),
+        np.nan,
+    )
+    has_either = dte.notna() | dtd.notna()
+    e_contrib = np.where(dte.notna(), earnings_pts, 0.0)
+    d_contrib = np.where(dtd.notna(), div_pts, 0.0)
+    df["event_risk_score"] = np.where(
+        has_either,
+        np.minimum(e_contrib + d_contrib, 100.0),
+        np.nan,
+    )
+    return df
+
+
 def add_screening_and_freshness_flags(df, fetched_at):
     """Mark stale quotes and tradability flags used by the viewer and screens."""
     config = get_runtime_config()
@@ -407,6 +437,7 @@ def add_screening_and_freshness_flags(df, fetched_at):
         + df["is_stale_quote"].fillna(False).eq(False).astype(int)
     )
     df = add_option_score(df)
+    df = add_event_risk_flags(df)
 
     return df
 

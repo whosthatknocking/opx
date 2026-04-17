@@ -37,6 +37,20 @@ The exported CSV contains both provider-supplied and app-derived fields. Some va
 - `option_quote_time`: Timestamp of the option quote or last trade update. Use it to measure quote freshness.
 - `is_in_the_money`: In-the-money classification from the provider when available, or derived from spot versus strike when the provider snapshot omits a direct flag. Use it as a quick classification check against derived moneyness fields.
 
+## Corporate Event Fields
+
+These fields are fetched once per ticker and broadcast to every option row for that underlying. They capture upcoming earnings and dividend events that elevate option risk and can distort standard pricing signals.
+
+- `next_earnings_date`: Next upcoming earnings report date in `YYYY-MM-DD` format. Use it to identify when the underlying is most likely to make a large move. Blank when no future earnings date is available or the provider does not support event data.
+- `days_to_earnings`: Whole calendar days until `next_earnings_date`. Use it to filter or down-rank option positions that span an earnings announcement. Lower values mean more immediate event exposure.
+- `earnings_within_5d`: True when an earnings report falls within the next 5 calendar days. Use it as a hard exclusion filter for strategies that cannot tolerate binary earnings risk.
+- `earnings_within_10d`: True when an earnings report falls within the next 10 calendar days. Use it to flag positions that enter an earnings window before expiration.
+- `next_ex_div_date`: Next upcoming ex-dividend date in `YYYY-MM-DD` format. Use it to detect contracts that will experience dividend-related price adjustments before expiration.
+- `days_to_ex_div`: Whole calendar days until `next_ex_div_date`. Use it to find contracts at risk of early assignment on dividend-paying underlyings. Lower values mean the ex-dividend date is approaching.
+- `ex_div_within_3d`: True when an ex-dividend date falls within the next 3 calendar days. Use it as a short-dated warning flag for early-assignment or price-gap risk on dividend underlyings.
+- `dividend_amount`: Per-share cash dividend amount associated with `next_ex_div_date`. Use it to assess the scale of the expected price adjustment at ex-date.
+- `event_risk_score`: Composite 0–100 event risk score derived from earnings and dividend proximity. Earnings within 5 days contributes 60 points; within 10 days contributes 30 points. Ex-dividend within 3 days contributes 40 points; within 7 days contributes 20 points. The total is capped at 100. Blank when neither earnings nor dividend data is available. Use it to rank and filter contracts by combined near-term catalyst exposure.
+
 ## Quote Quality and Liquidity Fields
 
 - `mark_price_mid`: Midpoint of bid and ask when the quote is valid. Use it as the default fair reference premium.
@@ -268,6 +282,20 @@ Legend:
 | `score_validation` | Derived: row-level alignment label for score review | Derived: row-level alignment label for score review | Derived: row-level alignment label for score review |
 | `score_adjustment` | Derived: numeric post-score adjustment | Derived: numeric post-score adjustment | Derived: numeric post-score adjustment |
 | `final_score` | Derived: `option_score + score_adjustment`, clamped to `0-100` | Derived: `option_score + score_adjustment`, clamped to `0-100` | Derived: `option_score + score_adjustment`, clamped to `0-100` |
+
+### Corporate Event Mapping
+
+| Field | yfinance | massive | marketdata |
+| --- | --- | --- | --- |
+| `next_earnings_date` | Blank: event fetching not implemented for this provider | Blank: event fetching not implemented for this provider | Transformed: minimum upcoming `reportDate` from `stocks/earnings/{symbol}/` via SDK |
+| `days_to_earnings` | Blank | Blank | Derived: `next_earnings_date` minus runtime `today` |
+| `earnings_within_5d` | Blank | Blank | Derived: `days_to_earnings <= 5` |
+| `earnings_within_10d` | Blank | Blank | Derived: `days_to_earnings <= 10` |
+| `next_ex_div_date` | Blank: event fetching not implemented for this provider | Blank: event fetching not implemented for this provider | Transformed: minimum upcoming `exDate` from `stocks/dividends/{symbol}/` via direct HTTP request |
+| `days_to_ex_div` | Blank | Blank | Derived: `next_ex_div_date` minus runtime `today` |
+| `ex_div_within_3d` | Blank | Blank | Derived: `days_to_ex_div <= 3` |
+| `dividend_amount` | Blank | Blank | Transformed: `amount` corresponding to `next_ex_div_date` from dividend payload |
+| `event_risk_score` | Blank | Blank | Derived: composite score from earnings and dividend proximity |
 
 ### Run Metadata Mapping
 

@@ -37,7 +37,7 @@ DATASET_CARD_COLUMNS = (
     "risk_free_rate_used",
     "data_source",
 )
-INTEGER_VIEWER_COLUMNS = frozenset({"days_to_expiration"})
+INTEGER_VIEWER_COLUMNS = frozenset({"days_to_expiration", "days_to_earnings", "days_to_ex_div", "event_risk_score"})
 REFERENCE_MISSING_DESCRIPTION = "No reference description available for this field."
 
 
@@ -88,6 +88,7 @@ class OpportunitySummary(TypedDict):
     option_score: float | None
     final_score: float | None
     bid_ask_spread_pct_of_mid: float | None
+    event_risk_score: float | None
     summary: str | None
 
 
@@ -104,6 +105,8 @@ class TickerSummary(TypedDict):
     median_implied_volatility_pct: float | None
     historical_volatility_pct: float | None
     iv_hv_ratio: float | None
+    next_earnings_date: str | None
+    event_risk_score: float | None
     latest_status: str
     market_context: str
     profitable_opportunity: OpportunitySummary | None
@@ -310,6 +313,7 @@ def normalize_opportunity(row: dict[str, Any] | None) -> OpportunitySummary | No
         "bid_ask_spread_pct_of_mid": format_percent(
             coerce_scalar_number(row.get("bid_ask_spread_pct_of_mid"))
         ),
+        "event_risk_score": coerce_scalar_number(row.get("event_risk_score")),
         "summary": row.get("_summary"),
     }
 
@@ -534,6 +538,14 @@ def build_ticker_summary(ticker: str, frame: pd.DataFrame) -> TickerSummary:
         None if implied_volatility.empty else round(float(implied_volatility.median()) * 100, 1)
     )
     hv_value = None if hv.empty else round(float(hv.iloc[0]) * 100, 1)
+    earnings_dates = (
+        frame["next_earnings_date"].dropna().astype(str).unique().tolist()
+        if "next_earnings_date" in frame.columns
+        else []
+    )
+    next_earnings_date_value = earnings_dates[0] if earnings_dates else None
+    event_risk_nums = coerce_number(frame.get("event_risk_score")).dropna()
+    event_risk_value = None if event_risk_nums.empty else float(event_risk_nums.iloc[0])
     return {
         "ticker": ticker,
         "row_count": int(len(frame.index)),
@@ -549,6 +561,8 @@ def build_ticker_summary(ticker: str, frame: pd.DataFrame) -> TickerSummary:
             if median_iv_value is None or hv_value in (None, 0)
             else round(median_iv_value / hv_value, 2)
         ),
+        "next_earnings_date": next_earnings_date_value,
+        "event_risk_score": event_risk_value,
         "latest_status": build_latest_status(day_change_value, median_iv_value, hv_value),
         "market_context": build_market_context(ticker, underlying_price_value, day_change_value),
         "profitable_opportunity": profitable,

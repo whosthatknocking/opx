@@ -45,6 +45,35 @@ def append_underlying_snapshot_fields(df, snapshot, fetched_at, stale_quote_seco
     return df
 
 
+def append_ticker_event_fields(df, events, today):
+    """Broadcast per-ticker corporate event data to all option rows."""
+    df["next_earnings_date"] = events.get("next_earnings_date")
+    df["next_ex_div_date"] = events.get("next_ex_div_date")
+    df["dividend_amount"] = events.get("dividend_amount", np.nan)
+
+    earnings_date_str = events.get("next_earnings_date")
+    if earnings_date_str:
+        try:
+            earnings_date = datetime.strptime(earnings_date_str, "%Y-%m-%d").date()
+            df["days_to_earnings"] = (earnings_date - today).days
+        except (ValueError, TypeError):
+            df["days_to_earnings"] = np.nan
+    else:
+        df["days_to_earnings"] = np.nan
+
+    ex_div_date_str = events.get("next_ex_div_date")
+    if ex_div_date_str:
+        try:
+            ex_div_date = datetime.strptime(ex_div_date_str, "%Y-%m-%d").date()
+            df["days_to_ex_div"] = (ex_div_date - today).days
+        except (ValueError, TypeError):
+            df["days_to_ex_div"] = np.nan
+    else:
+        df["days_to_ex_div"] = np.nan
+
+    return df
+
+
 def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements,broad-exception-caught
     ticker,
     logger=None,
@@ -108,6 +137,16 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
             logger=logger,
         )
 
+        events = provider.load_ticker_events(ticker)
+        _emit_fetch_info(
+            (
+                f"{ticker}: events next_earnings={events.get('next_earnings_date')} "
+                f"next_ex_div={events.get('next_ex_div_date')} "
+                f"dividend_amount={events.get('dividend_amount')}"
+            ),
+            logger=logger,
+        )
+
         for expiration_date in usable_expirations:
             chain = provider.load_option_chain(ticker, expiration_date)
             expiration_raw_count = len(chain.calls) + len(chain.puts)
@@ -164,6 +203,9 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
                     expiration_date=expiration_date,
                     option_type=option_type,
                     ticker=ticker,
+                )
+                vendor_normalized = append_ticker_event_fields(
+                    vendor_normalized, events, config.today
                 )
                 normalized = enrich_option_frame(
                     df=vendor_normalized,

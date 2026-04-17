@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from functools import lru_cache
 import logging
 import time
@@ -26,6 +27,24 @@ from opx.utils import coerce_float, normalize_timestamp
 
 CALLER_USER_AGENT = f"opx/{SCRIPT_VERSION}"
 DEFAULT_RETRY_BACKOFF_SECONDS = 1.0
+
+
+def _parse_event_date(raw_date) -> date | None:
+    """Convert a Unix timestamp int, date string, or date-like value into a date object."""
+    if raw_date is None:
+        return None
+    try:
+        if isinstance(raw_date, (int, float)):
+            return datetime.fromtimestamp(raw_date, tz=timezone.utc).date()
+        if isinstance(raw_date, str):
+            return datetime.strptime(raw_date[:10], "%Y-%m-%d").date()
+        if isinstance(raw_date, datetime):
+            return raw_date.date()
+        if isinstance(raw_date, date):
+            return raw_date
+    except (ValueError, TypeError, OSError):
+        pass
+    return None
 
 
 class OpxMarketDataClient(MarketDataClient):  # pylint: disable=too-few-public-methods
@@ -201,6 +220,10 @@ class MarketDataProvider(DataProvider):
         """Reduce SDK URL paths to a stable progress label."""
         if "options/chain/" in url:
             return "options_chain"
+        if "stocks/earnings/" in url:
+            return "stocks_earnings"
+        if "stocks/dividends/" in url:
+            return "stocks_dividends"
         return "request"
 
     @staticmethod
@@ -270,6 +293,60 @@ class MarketDataProvider(DataProvider):
             "underlying_price_time": option_quote_time,
             "underlying_day_change_pct": np.nan,
             "historical_volatility": np.nan,
+        }
+
+    def load_ticker_events(self, ticker: str) -> dict:
+        """Fetch upcoming earnings and dividend event data from the Market Data API."""
+        config = get_runtime_config()
+        today = config.today
+
+        next_earnings_date = None
+        next_ex_div_date = None
+        dividend_amount = np.nan
+
+        try:
+            result = self._client().stocks.earnings(
+                ticker.upper(),
+                output_format=OutputFormat.INTERNAL,
+                mode=self._mode(),
+            )
+            earnings_data = self._raise_if_error(result, context="earnings request")
+            report_dates = getattr(earnings_data, "reportDate", None) or []
+            upcoming = [
+                d for raw in report_dates if (d := _parse_event_date(raw)) is not None and d >= today
+            ]
+            if upcoming:
+                next_earnings_date = min(upcoming).isoformat()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+        try:
+            response = self._client()._make_request(  # pylint: disable=protected-access
+                method="GET",
+                url=f"stocks/dividends/{ticker.upper()}/",
+            )
+            div_data = self._decode_response_json(response) or {}
+            ex_dates = div_data.get("exDate") or []
+            amounts = div_data.get("amount") or []
+            upcoming_divs = [
+                (d, amt)
+                for raw, amt in zip(ex_dates, amounts)
+                if (d := _parse_event_date(raw)) is not None and d >= today
+            ]
+            if upcoming_divs:
+                upcoming_divs.sort(key=lambda x: x[0])
+                next_ex_div_date = upcoming_divs[0][0].isoformat()
+                try:
+                    dividend_amount = float(upcoming_divs[0][1])
+                except (TypeError, ValueError):
+                    dividend_amount = np.nan
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+        return {
+            "next_earnings_date": next_earnings_date,
+            "next_ex_div_date": next_ex_div_date,
+            "dividend_amount": dividend_amount,
         }
 
     def list_option_expirations(self, ticker: str) -> list[str]:

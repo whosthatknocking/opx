@@ -36,6 +36,7 @@ The project currently supports:
 - provider-aware field reference documentation
 - a local viewer for exported CSV files
 - provider debug payload dumps for raw-response inspection
+- per-ticker corporate event data (earnings dates and ex-dividend dates) fetched from the `marketdata` provider via `stocks/earnings/{symbol}/` (SDK) and `stocks/dividends/{symbol}/` (direct HTTP), broadcast to all option rows as event risk flags and a composite `event_risk_score`
 
 The project does not currently aim to:
 

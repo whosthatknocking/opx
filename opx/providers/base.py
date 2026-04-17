@@ -8,6 +8,7 @@ from datetime import date, datetime, timezone
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from opx.config import get_runtime_config
@@ -87,6 +88,14 @@ class DataProvider(ABC):
         dump_path.write_text(json.dumps(debug_payload, indent=2, sort_keys=True), encoding="utf-8")
         print(f"{self.name} debug: dumped {label} payload to {dump_path}")
         return dump_path
+
+    def load_ticker_events(self, ticker: str) -> dict:
+        """Return corporate event data for a ticker. Override for providers that support it."""
+        return {
+            "next_earnings_date": None,
+            "next_ex_div_date": None,
+            "dividend_amount": np.nan,
+        }
 
     @abstractmethod
     def load_underlying_snapshot(self, ticker: str) -> dict:

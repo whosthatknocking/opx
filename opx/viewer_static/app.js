@@ -74,7 +74,12 @@ const elements = {
 };
 
 let chainTooltipElement = null;
-const WHOLE_NUMBER_COLUMNS = new Set(['days_to_expiration']);
+const WHOLE_NUMBER_COLUMNS = new Set([
+  'days_to_expiration',
+  'days_to_earnings',
+  'days_to_ex_div',
+  'event_risk_score',
+]);
 
 function shouldRenderWholeNumber(columnName) {
   return WHOLE_NUMBER_COLUMNS.has(columnName) || String(columnName || '').endsWith('_seconds');
@@ -251,6 +256,8 @@ function getFieldDescription(label) {
     'DTE Score': 'Execution-quality score derived from DTE tiers. Higher is better.',
     'Theta Efficiency': 'Row-level daily theta capture per $1,000 of capital required. Higher is better.',
     'Calls / Puts': 'Count of call and put option rows available for this underlying symbol.',
+    'Next Earnings': 'Next scheduled earnings report date for the underlying ticker. Earnings events can cause significant IV expansion and gap risk in open positions.',
+    'Event Risk Score': 'Composite 0–100 corporate-event risk score. Earns 60 pts if earnings are within 5 days, 30 pts within 10 days; adds 40 pts if ex-dividend is within 3 days, 20 pts within 7 days. Capped at 100. Higher scores indicate elevated event risk.',
     'Most Profitable': 'Heuristic pick for the highest annualized return on margin among candidate contracts. Highest return is not always the safest setup.',
     'Moderate Risk': 'Heuristic pick balancing return on margin with lower delta and acceptable spread after primary-screen filtering.',
     'High Conviction Call': 'Bullish side-specific pick that emphasizes final score, quote quality, spread quality, cleaner strike positioning, and current upside alignment.',
@@ -298,6 +305,9 @@ function renderOpportunityCard(title, opportunity, tone = 'default') {
     ? `${Number(opportunity.theta_efficiency).toFixed(4)}`
     : '—';
   const riskLevel = opportunity.risk_level || '—';
+  const eventRiskScore = Number.isFinite(Number(opportunity.event_risk_score))
+    ? String(Math.round(Number(opportunity.event_risk_score)))
+    : '—';
   return `
     <article class="opportunity-card opportunity-card-${tone}">
       ${renderFieldLabel(title, 'opportunity-label')}
@@ -308,6 +318,7 @@ function renderOpportunityCard(title, opportunity, tone = 'default') {
       <span class="opportunity-detail">${renderFieldLabel('Risk Level')} ${escapeHtml(riskLevel)}</span>
       <span class="opportunity-detail">${renderFieldLabel('Spread Score')} ${escapeHtml(spreadScore)} · ${renderFieldLabel('DTE Score')} ${escapeHtml(dteScore)}</span>
       <span class="opportunity-detail">${renderFieldLabel('Theta Efficiency')} ${escapeHtml(thetaEfficiency)}</span>
+      <span class="opportunity-detail">${renderFieldLabel('Event Risk Score')} ${escapeHtml(eventRiskScore)}</span>
     </article>
   `;
 }
@@ -346,6 +357,14 @@ function renderSummaryTickerGrid(tickers) {
         <div class="ticker-summary-stat">
           ${renderFieldLabel('IV / HV')}
           <strong>${escapeHtml(formatNumber(item.iv_hv_ratio, 4))}</strong>
+        </div>
+        <div class="ticker-summary-stat">
+          ${renderFieldLabel('Next Earnings')}
+          <strong>${escapeHtml(item.next_earnings_date || '—')}</strong>
+        </div>
+        <div class="ticker-summary-stat">
+          ${renderFieldLabel('Event Risk Score')}
+          <strong>${escapeHtml(item.event_risk_score !== null && item.event_risk_score !== undefined ? String(Math.round(item.event_risk_score)) : '—')}</strong>
         </div>
         <div class="ticker-summary-stat">
           ${renderFieldLabel('Best ROM')}
