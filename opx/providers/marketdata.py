@@ -295,15 +295,8 @@ class MarketDataProvider(DataProvider):
             "historical_volatility": np.nan,
         }
 
-    def load_ticker_events(self, ticker: str) -> dict:
-        """Fetch upcoming earnings and dividend event data from the Market Data API."""
-        config = get_runtime_config()
-        today = config.today
-
-        next_earnings_date = None
-        next_ex_div_date = None
-        dividend_amount = np.nan
-
+    def _fetch_next_earnings_date(self, ticker: str, today: date) -> str | None:
+        """Return the next upcoming earnings date as an ISO string, or None."""
         try:
             result = self._client().stocks.earnings(
                 ticker.upper(),
@@ -313,13 +306,16 @@ class MarketDataProvider(DataProvider):
             earnings_data = self._raise_if_error(result, context="earnings request")
             report_dates = getattr(earnings_data, "reportDate", None) or []
             upcoming = [
-                d for raw in report_dates if (d := _parse_event_date(raw)) is not None and d >= today
+                d
+                for raw in report_dates
+                if (d := _parse_event_date(raw)) is not None and d >= today
             ]
-            if upcoming:
-                next_earnings_date = min(upcoming).isoformat()
+            return min(upcoming).isoformat() if upcoming else None
         except Exception:  # pylint: disable=broad-exception-caught
-            pass
+            return None
 
+    def _fetch_next_dividend(self, ticker: str, today: date) -> tuple[str | None, float]:
+        """Return the next upcoming ex-dividend date and amount, or (None, NaN)."""
         try:
             response = self._client()._make_request(  # pylint: disable=protected-access
                 method="GET",
@@ -328,21 +324,29 @@ class MarketDataProvider(DataProvider):
             div_data = self._decode_response_json(response) or {}
             ex_dates = div_data.get("exDate") or []
             amounts = div_data.get("amount") or []
-            upcoming_divs = [
-                (d, amt)
-                for raw, amt in zip(ex_dates, amounts)
-                if (d := _parse_event_date(raw)) is not None and d >= today
-            ]
-            if upcoming_divs:
-                upcoming_divs.sort(key=lambda x: x[0])
-                next_ex_div_date = upcoming_divs[0][0].isoformat()
-                try:
-                    dividend_amount = float(upcoming_divs[0][1])
-                except (TypeError, ValueError):
-                    dividend_amount = np.nan
+            upcoming_divs = sorted(
+                (
+                    (d, amt)
+                    for raw, amt in zip(ex_dates, amounts)
+                    if (d := _parse_event_date(raw)) is not None and d >= today
+                ),
+                key=lambda item: item[0],
+            )
+            if not upcoming_divs:
+                return None, np.nan
+            next_date, next_amount = upcoming_divs[0]
+            try:
+                return next_date.isoformat(), float(next_amount)
+            except (TypeError, ValueError):
+                return next_date.isoformat(), np.nan
         except Exception:  # pylint: disable=broad-exception-caught
-            pass
+            return None, np.nan
 
+    def load_ticker_events(self, ticker: str) -> dict:
+        """Fetch upcoming earnings and dividend event data from the Market Data API."""
+        today = get_runtime_config().today
+        next_earnings_date = self._fetch_next_earnings_date(ticker, today)
+        next_ex_div_date, dividend_amount = self._fetch_next_dividend(ticker, today)
         return {
             "next_earnings_date": next_earnings_date,
             "next_ex_div_date": next_ex_div_date,

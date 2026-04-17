@@ -397,6 +397,10 @@ Current validation coverage includes:
 - per-page Massive debug dump behavior
 - Market Data shared fetch-path behavior
 - viewer helper behavior tied to the field-reference docs
+- event risk flag computation and boolean dtype consistency
+- `append_ticker_event_fields` day-count broadcast behavior
+- Market Data `load_ticker_events` earnings and dividend parsing
+- base provider `load_ticker_events` blank-default behavior
 
 Current verification state:
 
@@ -452,6 +456,18 @@ Completed:
 - moved field reference into its own document
 - added provider mapping matrix
 - aligned viewer reference content with the field-reference document
+
+### 10.7 Corporate Event Risk Fields
+
+Completed:
+
+- added `load_ticker_events` base class default returning blank event data for all providers
+- implemented `load_ticker_events` in the Market Data provider using `stocks/earnings/{symbol}/` (SDK) and `stocks/dividends/{symbol}/` (direct HTTP)
+- added `append_ticker_event_fields` to `fetch.py` to broadcast per-ticker event data to all option rows
+- added `add_event_risk_flags` to `metrics.py` computing proximity flags and a composite `event_risk_score`
+- added 9 new canonical event fields to the export column order
+- updated `FIELD_REFERENCE.md` with field descriptions and provider mapping
+- updated viewer summary tab and opportunity cards to surface event risk data
 
 ### 10.6 Validation and Runtime UX
 

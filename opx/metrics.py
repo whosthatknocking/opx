@@ -369,8 +369,9 @@ def add_derived_pricing_metrics(df, underlying_price):
 
 def add_event_risk_flags(df):
     """Add earnings/dividend proximity flags and a composite event risk score."""
-    dte = df["days_to_earnings"] if "days_to_earnings" in df.columns else pd.Series(np.nan, index=df.index)
-    dtd = df["days_to_ex_div"] if "days_to_ex_div" in df.columns else pd.Series(np.nan, index=df.index)
+    blank = pd.Series(np.nan, index=df.index)
+    dte = df["days_to_earnings"] if "days_to_earnings" in df.columns else blank
+    dtd = df["days_to_ex_div"] if "days_to_ex_div" in df.columns else blank
 
     df["earnings_within_5d"] = np.where(dte.notna(), dte <= 5, None)
     df["earnings_within_10d"] = np.where(dte.notna(), dte <= 10, None)

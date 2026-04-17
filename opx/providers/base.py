@@ -89,7 +89,7 @@ class DataProvider(ABC):
         print(f"{self.name} debug: dumped {label} payload to {dump_path}")
         return dump_path
 
-    def load_ticker_events(self, ticker: str) -> dict:
+    def load_ticker_events(self, ticker: str) -> dict:  # pylint: disable=unused-argument
         """Return corporate event data for a ticker. Override for providers that support it."""
         return {
             "next_earnings_date": None,

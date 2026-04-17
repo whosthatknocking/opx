@@ -1,5 +1,6 @@
 """Market Data provider tests covering SDK parsing and shared fetch behavior."""
 
+from datetime import date, datetime, timezone
 from typing import cast
 
 import pandas as pd
@@ -10,7 +11,7 @@ from marketdata.sdk_error import MarketDataClientErrorResult
 
 from conftest import make_runtime_config
 from opx import fetch
-from opx.providers.base import ProviderAuthenticationError
+from opx.providers.base import DataProvider, ProviderAuthenticationError
 from opx.providers.marketdata import CALLER_USER_AGENT, MarketDataProvider
 
 
@@ -70,8 +71,16 @@ class FakeMarketDataClient:  # pylint: disable=too-few-public-methods,too-many-i
         self._chain_result = make_chain_result()
         self.last_chain_kwargs = None
         self.options.chain = self._options_chain
+        self._dividend_payload = {"s": "ok", "exDate": [], "amount": []}
+        self.stocks = type("StocksResource", (), {"earnings": self._stocks_earnings})()
+
+    def _stocks_earnings(self, _symbol, **_kwargs):
+        return type("StockEarnings", (), {"reportDate": [], "s": "ok"})()
+
 
     def _make_request(self, _method, url, *_args, **_kwargs):
+        if "stocks/dividends/" in url:
+            return FakeResponse(200, self._dividend_payload)
         if "options/chain/" in url:
             expiration_values = []
             for value in self._chain_result.expiration:
@@ -293,3 +302,93 @@ def test_fetch_ticker_option_chain_runs_with_marketdata_selected(monkeypatch, tm
     assert set(result["underlying_symbol"]) == {"TSLA"}
     assert "premium_reference_price" in result.columns
     assert result["delta"].notna().any()
+
+
+def test_marketdata_provider_load_ticker_events_parses_earnings_and_dividends(monkeypatch):
+    """load_ticker_events should parse upcoming earnings and dividend dates correctly."""
+    patch_marketdata_client(monkeypatch)
+    today = date(2026, 4, 16)
+    monkeypatch.setattr(
+        "opx.providers.marketdata.get_runtime_config",
+        lambda: make_runtime_config(today=today),
+    )
+    provider = MarketDataProvider()
+    client = fake_client(provider)
+
+    earnings_ts = int(datetime(2026, 4, 30, tzinfo=timezone.utc).timestamp())
+    past_earnings_ts = int(datetime(2026, 4, 1, tzinfo=timezone.utc).timestamp())
+    client.stocks = type(
+        "StocksResource",
+        (),
+        {
+            "earnings": lambda _self, _sym, **_kw: type(
+                "StockEarnings", (), {"reportDate": [past_earnings_ts, earnings_ts], "s": "ok"}
+            )(),
+        },
+    )()
+
+    ex_div_ts = int(datetime(2026, 4, 18, tzinfo=timezone.utc).timestamp())
+    client._dividend_payload = {  # pylint: disable=protected-access
+        "s": "ok",
+        "exDate": [ex_div_ts],
+        "amount": [0.88],
+    }
+
+    events = provider.load_ticker_events("TSLA")
+
+    assert events["next_earnings_date"] == "2026-04-30"
+    assert events["next_ex_div_date"] == "2026-04-18"
+    assert events["dividend_amount"] == pytest.approx(0.88)
+
+
+def test_marketdata_provider_load_ticker_events_returns_blanks_on_api_failure(monkeypatch):
+    """load_ticker_events should return blank values when the API call raises."""
+    patch_marketdata_client(monkeypatch)
+    monkeypatch.setattr(
+        "opx.providers.marketdata.get_runtime_config",
+        lambda: make_runtime_config(today=date(2026, 4, 16)),
+    )
+    provider = MarketDataProvider()
+    client = fake_client(provider)
+
+    def exploding_earnings(_sym, **_kw):
+        raise RuntimeError("API unreachable")
+
+    client.stocks = type("StocksResource", (), {"earnings": exploding_earnings})()
+
+    events = provider.load_ticker_events("TSLA")
+
+    assert events["next_earnings_date"] is None
+    assert events["next_ex_div_date"] is None
+    assert pd.isna(events["dividend_amount"])
+
+
+def test_base_provider_load_ticker_events_returns_blank_defaults():
+    """Base DataProvider default should return blank events for unsupported providers."""
+
+    class MinimalProvider(DataProvider):  # pylint: disable=too-few-public-methods
+        """Bare-minimum concrete provider to test the base class default."""
+
+        name = "minimal"
+
+        def load_underlying_snapshot(self, ticker):
+            return {}
+
+        def list_option_expirations(self, ticker):
+            return []
+
+        def load_option_chain(self, ticker, expiration_date):
+            return None
+
+        # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+        def normalize_option_frame(
+            self, df, underlying_price, expiration_date, option_type, ticker
+        ):
+            return df
+
+    provider = MinimalProvider()
+    events = provider.load_ticker_events("AAPL")
+
+    assert events["next_earnings_date"] is None
+    assert events["next_ex_div_date"] is None
+    assert pd.isna(events["dividend_amount"])

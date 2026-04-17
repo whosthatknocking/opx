@@ -1,11 +1,15 @@
 """Fetch-path tests covering raw provider row-count logging."""
 
 import logging
+from datetime import date
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from conftest import make_runtime_config
 from opx import fetch
+from opx.fetch import append_ticker_event_fields
 import opx.metrics
 import opx.normalize
 from opx.providers.base import OptionChainFrames
@@ -94,6 +98,14 @@ class StubProvider:
             ]
         )
         return OptionChainFrames(calls=calls, puts=puts)
+
+    def load_ticker_events(self, ticker):  # pylint: disable=unused-argument
+        """Return blank event data so fetch-path tests are not affected by event fetching."""
+        return {
+            "next_earnings_date": None,
+            "next_ex_div_date": None,
+            "dividend_amount": float("nan"),
+        }
 
     def normalize_option_frame(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
@@ -307,3 +319,40 @@ def test_fetch_ticker_option_chain_logs_provider_name_on_error(monkeypatch, capl
 
     assert result.empty
     assert "provider=broken status=error" in caplog.text
+
+
+def test_append_ticker_event_fields_broadcasts_day_counts_to_all_rows():
+    """Event fields should be broadcast to every row with correct day-count arithmetic."""
+    today = date(2026, 4, 16)
+    events = {
+        "next_earnings_date": "2026-04-23",
+        "next_ex_div_date": "2026-04-18",
+        "dividend_amount": 0.75,
+    }
+    frame = pd.DataFrame([{"strike": 100.0}, {"strike": 105.0}, {"strike": 110.0}])
+
+    result = append_ticker_event_fields(frame.copy(), events, today)
+
+    assert (result["next_earnings_date"] == "2026-04-23").all()
+    assert (result["next_ex_div_date"] == "2026-04-18").all()
+    assert result["dividend_amount"].tolist() == pytest.approx([0.75, 0.75, 0.75])
+    assert (result["days_to_earnings"] == 7).all()
+    assert (result["days_to_ex_div"] == 2).all()
+
+
+def test_append_ticker_event_fields_handles_blank_events():
+    """Missing event data should produce NaN day-count fields without raising."""
+    today = date(2026, 4, 16)
+    events = {
+        "next_earnings_date": None,
+        "next_ex_div_date": None,
+        "dividend_amount": np.nan,
+    }
+    frame = pd.DataFrame([{"strike": 100.0}])
+
+    result = append_ticker_event_fields(frame.copy(), events, today)
+
+    assert result.loc[0, "next_earnings_date"] is None
+    assert result.loc[0, "next_ex_div_date"] is None
+    assert pd.isna(result.loc[0, "days_to_earnings"])
+    assert pd.isna(result.loc[0, "days_to_ex_div"])

@@ -37,7 +37,12 @@ DATASET_CARD_COLUMNS = (
     "risk_free_rate_used",
     "data_source",
 )
-INTEGER_VIEWER_COLUMNS = frozenset({"days_to_expiration", "days_to_earnings", "days_to_ex_div", "event_risk_score"})
+INTEGER_VIEWER_COLUMNS = frozenset({
+    "days_to_expiration",
+    "days_to_earnings",
+    "days_to_ex_div",
+    "event_risk_score",
+})
 REFERENCE_MISSING_DESCRIPTION = "No reference description available for this field."
 
 
@@ -522,7 +527,22 @@ def build_latest_status(
     return " · ".join(status_parts) if status_parts else "Snapshot available"
 
 
-def build_ticker_summary(ticker: str, frame: pd.DataFrame) -> TickerSummary:
+def extract_ticker_event_fields(frame: pd.DataFrame) -> tuple[str | None, float | None]:
+    """Pull the per-ticker next-earnings date and event risk score from a ticker frame."""
+    earnings_dates = (
+        frame["next_earnings_date"].dropna().astype(str).unique().tolist()
+        if "next_earnings_date" in frame.columns
+        else []
+    )
+    next_earnings_date_value = earnings_dates[0] if earnings_dates else None
+    event_risk_nums = coerce_number(frame.get("event_risk_score")).dropna()
+    event_risk_value = None if event_risk_nums.empty else float(event_risk_nums.iloc[0])
+    return next_earnings_date_value, event_risk_value
+
+
+def build_ticker_summary(  # pylint: disable=too-many-locals
+    ticker: str, frame: pd.DataFrame,
+) -> TickerSummary:
     """Aggregate one ticker's rows into the Summary tab record shape."""
     underlying_price = coerce_number(frame.get("underlying_price")).dropna()
     day_change = coerce_number(frame.get("underlying_day_change_pct")).dropna()
@@ -538,14 +558,7 @@ def build_ticker_summary(ticker: str, frame: pd.DataFrame) -> TickerSummary:
         None if implied_volatility.empty else round(float(implied_volatility.median()) * 100, 1)
     )
     hv_value = None if hv.empty else round(float(hv.iloc[0]) * 100, 1)
-    earnings_dates = (
-        frame["next_earnings_date"].dropna().astype(str).unique().tolist()
-        if "next_earnings_date" in frame.columns
-        else []
-    )
-    next_earnings_date_value = earnings_dates[0] if earnings_dates else None
-    event_risk_nums = coerce_number(frame.get("event_risk_score")).dropna()
-    event_risk_value = None if event_risk_nums.empty else float(event_risk_nums.iloc[0])
+    next_earnings_date_value, event_risk_value = extract_ticker_event_fields(frame)
     return {
         "ticker": ticker,
         "row_count": int(len(frame.index)),

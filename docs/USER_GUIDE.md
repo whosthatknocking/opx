@@ -259,6 +259,33 @@ Default top-level weights:
 
 The four `option_score_*_weight` settings control how much each component contributes to the final score. All weights must be non-negative, and their total must stay positive or the loader falls back to the built-in defaults shown above.
 
+## Event Risk
+
+The fetcher fetches upcoming corporate event data once per ticker and broadcasts it to every option row for that underlying. This gives every exported row a consistent view of near-term catalyst exposure regardless of expiration or strike.
+
+What is fetched:
+
+- Next upcoming earnings report date and how many days away it is
+- Next upcoming ex-dividend date, how many days away it is, and the associated per-share dividend amount
+
+Derived flags:
+
+- `earnings_within_5d`: True when an earnings report falls within 5 calendar days
+- `earnings_within_10d`: True when an earnings report falls within 10 calendar days
+- `ex_div_within_3d`: True when an ex-dividend date falls within 3 calendar days
+- `event_risk_score`: Composite 0–100 score combining earnings and dividend proximity. Earnings within 5 days contributes 60 points, within 10 days contributes 30 points. Ex-dividend within 3 days adds 40 points, within 7 days adds 20 points. The total is capped at 100.
+
+Provider availability:
+
+- `marketdata`: earnings and dividend event data are fetched for every ticker
+- `yfinance`, `massive`: all event fields are blank for these providers
+
+How to use it:
+
+- Use `earnings_within_5d` or `earnings_within_10d` as a hard filter when screening contracts that must not span an earnings announcement
+- Use `ex_div_within_3d` as a warning for short call positions on dividend-paying underlyings where early assignment risk is elevated near the ex-date
+- Use `event_risk_score` as a secondary ranking signal to down-weight otherwise attractive contracts that carry near-term binary event exposure
+
 ## Runtime Behavior
 
 - The fetcher prints the config path it read, whether the file exists, and the full set of resolved runtime values it will apply.

@@ -8,6 +8,7 @@ import pytest
 from opx.greeks import compute_greeks
 from opx.metrics import (
     add_derived_pricing_metrics,
+    add_event_risk_flags,
     add_expected_move_by_expiration,
     add_option_score,
     add_quote_quality_metrics,
@@ -448,3 +449,57 @@ def test_add_option_score_returns_nan_when_required_inputs_are_missing(monkeypat
     result = add_option_score(frame.copy())
 
     assert result["option_score"].iloc[0] == pytest.approx(float("nan"), nan_ok=True)
+
+
+def test_add_event_risk_flags_scores_earnings_and_dividend_tiers():
+    """Event risk score should follow the defined point tiers and cap at 100."""
+    frame = pd.DataFrame(
+        [
+            {"days_to_earnings": 3.0, "days_to_ex_div": 2.0},   # 60 + 40 = 100
+            {"days_to_earnings": 8.0, "days_to_ex_div": 5.0},   # 30 + 20 = 50
+            {"days_to_earnings": 15.0, "days_to_ex_div": 10.0}, # 0 + 0 = 0
+            {"days_to_earnings": 3.0, "days_to_ex_div": float("nan")},  # 60 + 0 = 60
+            {"days_to_earnings": float("nan"), "days_to_ex_div": 2.0},  # 0 + 40 = 40
+            {"days_to_earnings": float("nan"), "days_to_ex_div": float("nan")},  # NaN
+        ]
+    )
+
+    result = add_event_risk_flags(frame.copy())
+
+    assert result.loc[0, "event_risk_score"] == pytest.approx(100.0)
+    assert result.loc[1, "event_risk_score"] == pytest.approx(50.0)
+    assert result.loc[2, "event_risk_score"] == pytest.approx(0.0)
+    assert result.loc[3, "event_risk_score"] == pytest.approx(60.0)
+    assert result.loc[4, "event_risk_score"] == pytest.approx(40.0)
+    assert pd.isna(result.loc[5, "event_risk_score"])
+
+
+def test_add_event_risk_flags_boolean_flags_use_object_dtype_not_float():
+    """Proximity flags should be object dtype with True/False so they export as bool strings."""
+    frame = pd.DataFrame(
+        [
+            {"days_to_earnings": 3.0, "days_to_ex_div": 2.0},
+            {"days_to_earnings": 15.0, "days_to_ex_div": float("nan")},
+            {"days_to_earnings": float("nan"), "days_to_ex_div": float("nan")},
+        ]
+    )
+
+    result = add_event_risk_flags(frame.copy())
+
+    assert result["earnings_within_5d"].dtype == object
+    assert result["earnings_within_10d"].dtype == object
+    assert result["ex_div_within_3d"].dtype == object
+    assert result.loc[0, "earnings_within_5d"] is True
+    assert result.loc[1, "earnings_within_5d"] is False
+    assert result.loc[2, "earnings_within_5d"] is None
+
+
+def test_add_event_risk_flags_handles_missing_columns_gracefully():
+    """Event risk flags should still be added when source columns are absent."""
+    frame = pd.DataFrame([{"strike": 100.0, "days_to_expiration": 14}])
+
+    result = add_event_risk_flags(frame.copy())
+
+    assert "earnings_within_5d" in result.columns
+    assert "event_risk_score" in result.columns
+    assert pd.isna(result.loc[0, "event_risk_score"])
