@@ -141,8 +141,7 @@ def drop_unwanted_columns(df):
 
 def reorder_export_columns(df):
     """Pin the export to the canonical schema without leaking provider-specific extras."""
-    ordered = [column for column in CANONICAL_EXPORT_COLUMNS if column in df.columns]
-    return df[ordered]
+    return df.reindex(columns=CANONICAL_EXPORT_COLUMNS)
 
 
 def coerce_export_column_types(df):

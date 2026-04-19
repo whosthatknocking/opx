@@ -241,6 +241,7 @@ Requirements:
 
 - exported rows include `data_source`
 - shared export stays pinned to the canonical column set
+- the CSV always emits the full canonical column set in canonical order, even when some fields are blank for the active provider
 - unexpected provider-specific scratch fields are dropped from export
 - provider-specific branches should not create different CSV shapes
 - shared derived fields such as `quote_quality_score` and `option_score` must be computed consistently across providers
@@ -251,7 +252,7 @@ Canonical field sources may be:
 - direct provider values
 - transformed provider values
 - app-derived values
-- blank when the provider does not expose the required source data
+- blank when the provider does not expose the required source data or the current implementation intentionally leaves that field unpopulated for the active provider
 
 Provider-specific field availability and mapping behavior are documented in:
 

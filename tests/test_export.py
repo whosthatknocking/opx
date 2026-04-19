@@ -23,13 +23,12 @@ def test_reorder_export_columns_drops_noncanonical_provider_fields():
 
     result = reorder_export_columns(frame)
 
-    assert result.columns.tolist() == [
-        "underlying_symbol",
-        "contract_symbol",
-        "data_source",
-        "risk_free_rate_used",
-    ]
+    assert result.columns.tolist() == list(CANONICAL_EXPORT_COLUMNS)
     assert "provider_debug_field" not in result.columns
+    assert result.loc[0, "underlying_symbol"] == "TSLA"
+    assert pd.isna(result.loc[0, "historical_volatility"])
+    assert pd.isna(result.loc[0, "change"])
+    assert pd.isna(result.loc[0, "percent_change"])
 
 
 def test_write_options_csv_persists_only_canonical_columns(tmp_path: Path):
@@ -66,9 +65,13 @@ def test_write_options_csv_persists_only_canonical_columns(tmp_path: Path):
     exported = pd.read_csv(output_path)
 
     assert "provider_debug_field" not in exported.columns
-    assert set(exported.columns).issubset(set(CANONICAL_EXPORT_COLUMNS))
+    assert exported.columns.tolist() == list(CANONICAL_EXPORT_COLUMNS)
     assert "option_score" in exported.columns
     assert "delta_safety_pct" in exported.columns
     assert exported.loc[0, "delta_safety_pct"] == 75.0
     assert exported.loc[0, "option_score"] == 82.5
     assert exported.loc[0, "days_to_expiration"] == 28
+    assert pd.isna(exported.loc[0, "historical_volatility"])
+    assert pd.isna(exported.loc[0, "change"])
+    assert pd.isna(exported.loc[0, "percent_change"])
+    assert pd.isna(exported.loc[0, "next_earnings_date_is_estimated"])

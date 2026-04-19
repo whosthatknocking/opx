@@ -202,6 +202,26 @@ def test_marketdata_provider_snapshot_falls_back_to_latest_chain_row(monkeypatch
     assert str(snapshot["underlying_price_time"]) == "2024-03-20 13:40:10+00:00"
 
 
+def test_marketdata_provider_snapshot_uses_latest_stock_quote_row(monkeypatch):
+    """Stock quote snapshots should keep last, changepct, and updated from one row."""
+    patch_marketdata_client(monkeypatch)
+    provider = MarketDataProvider()
+    client = fake_client(provider)
+    client._quote_payload = {  # pylint: disable=protected-access,no-member
+        "s": "ok",
+        "symbol": ["TSLA", "TSLA"],
+        "last": [101.5, 104.0],
+        "changepct": [0.01, 0.03],
+        "updated": [1710942000, 1710942030],
+    }
+
+    snapshot = provider.load_underlying_snapshot("TSLA")
+
+    assert snapshot["underlying_price"] == 104.0
+    assert snapshot["underlying_day_change_pct"] == pytest.approx(0.03)
+    assert str(snapshot["underlying_price_time"]) == "2024-03-20 13:40:30+00:00"
+
+
 def test_marketdata_provider_normalizes_string_expiration_values(monkeypatch):
     """String-form expiration values should still normalize into canonical dates."""
     patch_marketdata_client(monkeypatch)
@@ -339,6 +359,8 @@ def test_fetch_ticker_option_chain_runs_with_marketdata_selected(monkeypatch, tm
     assert set(result["underlying_symbol"]) == {"TSLA"}
     assert "premium_reference_price" in result.columns
     assert result["delta"].notna().any()
+    assert result["underlying_day_change_pct"].tolist() == pytest.approx([0.025, 0.025])
+    assert result["historical_volatility"].isna().all()
 
 
 def test_marketdata_provider_load_ticker_events_parses_earnings_and_dividends(monkeypatch):
