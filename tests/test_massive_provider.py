@@ -1,7 +1,8 @@
 """Massive provider tests covering snapshot parsing and retry behavior."""
 
-from pathlib import Path
 import json
+from datetime import date, timedelta
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -14,15 +15,23 @@ from opx.config import reset_runtime_config
 from opx.providers.base import ProviderAuthenticationError
 from opx.providers.massive import CALLER_USER_AGENT, DEFAULT_SNAPSHOT_PAGE_LIMIT, MassiveProvider
 
+TEST_EXPIRATION_DATE = date.today() + timedelta(days=30)
+TEST_EXPIRATION = TEST_EXPIRATION_DATE.isoformat()
+TEST_EXPIRATION_COMPACT = TEST_EXPIRATION_DATE.strftime("%y%m%d")
+TEST_CALL_SYMBOL = f"TSLA{TEST_EXPIRATION_COMPACT}C00100000"
+TEST_PUT_SYMBOL = f"TSLA{TEST_EXPIRATION_COMPACT}P00095000"
+TEST_CALL_TICKER = f"O:{TEST_CALL_SYMBOL}"
+TEST_PUT_TICKER = f"O:{TEST_PUT_SYMBOL}"
+
 
 def make_snapshot_results():
     """Build a small Massive snapshot payload for one underlying and expiration."""
     return (
         {
             "details": {
-                "ticker": "O:TSLA260417C00100000",
+                "ticker": TEST_CALL_TICKER,
                 "contract_type": "call",
-                "expiration_date": "2026-04-17",
+                "expiration_date": TEST_EXPIRATION,
                 "strike_price": 100.0,
                 "shares_per_contract": "REGULAR",
             },
@@ -58,9 +67,9 @@ def make_snapshot_results():
         },
         {
             "details": {
-                "ticker": "O:TSLA260417P00095000",
+                "ticker": TEST_PUT_TICKER,
                 "contract_type": "put",
-                "expiration_date": "2026-04-17",
+                "expiration_date": TEST_EXPIRATION,
                 "strike_price": 95.0,
                 "shares_per_contract": "REGULAR",
             },
@@ -102,9 +111,9 @@ def make_snapshot_model_results():
     raw_results = (
         {
             "details": {
-                "ticker": "O:TSLA260417C00100000",
+                "ticker": TEST_CALL_TICKER,
                 "contract_type": "call",
-                "expiration_date": "2026-04-17",
+                "expiration_date": TEST_EXPIRATION,
                 "strike_price": 100.0,
                 "shares_per_contract": 100,
             },
@@ -141,9 +150,9 @@ def make_snapshot_model_results():
         },
         {
             "details": {
-                "ticker": "O:TSLA260417P00095000",
+                "ticker": TEST_PUT_TICKER,
                 "contract_type": "put",
-                "expiration_date": "2026-04-17",
+                "expiration_date": TEST_EXPIRATION,
                 "strike_price": 95.0,
                 "shares_per_contract": 100,
             },
@@ -193,19 +202,19 @@ def test_massive_provider_builds_snapshot_and_option_chain(monkeypatch):
 
     snapshot = provider.load_underlying_snapshot("TSLA")
     expirations = provider.list_option_expirations("TSLA")
-    chain = provider.load_option_chain("TSLA", "2026-04-17")
+    chain = provider.load_option_chain("TSLA", TEST_EXPIRATION)
 
     assert snapshot["underlying_price"] == 102.5
     assert snapshot["underlying_day_change_pct"] == 0.025
     assert str(snapshot["underlying_price_time"]) == "2026-03-20 13:39:59+00:00"
-    assert expirations == ["2026-04-17"]
+    assert expirations == [TEST_EXPIRATION]
     assert len(chain.calls) == 1
     assert len(chain.puts) == 1
     assert chain.calls.iloc[0]["underlying_symbol"] == "TSLA"
     assert bool(chain.calls.iloc[0]["is_in_the_money"]) is True
     assert bool(chain.puts.iloc[0]["is_in_the_money"]) is False
     assert chain.calls.iloc[0]["delta"] == 0.42
-    assert chain.puts.iloc[0]["contract_symbol"] == "TSLA260417P00095000"
+    assert chain.puts.iloc[0]["contract_symbol"] == TEST_PUT_SYMBOL
     assert chain.puts.iloc[0]["contract_symbol"].startswith(chain.puts.iloc[0]["underlying_symbol"])
 
 
@@ -219,11 +228,11 @@ def test_massive_provider_parses_official_client_model_objects(monkeypatch):
     provider = MassiveProvider()
 
     snapshot = provider.load_underlying_snapshot("TSLA")
-    chain = provider.load_option_chain("TSLA", "2026-04-17")
+    chain = provider.load_option_chain("TSLA", TEST_EXPIRATION)
     normalized = provider.normalize_option_frame(
         df=chain.calls,
         underlying_price=102.5,
-        expiration_date="2026-04-17",
+        expiration_date=TEST_EXPIRATION,
         option_type="call",
         ticker="TSLA",
     )
@@ -231,7 +240,7 @@ def test_massive_provider_parses_official_client_model_objects(monkeypatch):
     assert snapshot["underlying_price"] == 102.5
     assert str(snapshot["underlying_price_time"]) == "2024-03-20 13:39:59+00:00"
     assert normalized.iloc[0]["underlying_symbol"] == "TSLA"
-    assert normalized.iloc[0]["contract_symbol"] == "TSLA260417C00100000"
+    assert normalized.iloc[0]["contract_symbol"] == TEST_CALL_SYMBOL
     assert normalized.iloc[0]["contract_symbol"].startswith(normalized.iloc[0]["underlying_symbol"])
     assert bool(normalized.iloc[0]["is_in_the_money"]) is True
     assert chain.calls.iloc[0]["bid"] == 1.2
@@ -329,11 +338,11 @@ def test_massive_provider_normalization_keeps_provider_greeks(monkeypatch):
     )
     provider = MassiveProvider()
 
-    chain = provider.load_option_chain("TSLA", "2026-04-17")
+    chain = provider.load_option_chain("TSLA", TEST_EXPIRATION)
     normalized = provider.normalize_option_frame(
         df=chain.calls,
         underlying_price=102.5,
-        expiration_date="2026-04-17",
+        expiration_date=TEST_EXPIRATION,
         option_type="call",
         ticker="TSLA",
     )
@@ -503,7 +512,6 @@ def test_fetch_ticker_option_chain_runs_with_massive_selected(monkeypatch, tmp_p
 [settings]
 tickers = ["TSLA"]
 data_provider = "massive"
-max_expiration = "2026-06-30"
 
 [providers.massive]
 api_key = "secret"
