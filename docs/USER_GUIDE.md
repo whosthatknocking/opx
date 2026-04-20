@@ -54,6 +54,20 @@ opx-fetcher --enable-filters
 
 These flags override `settings.filters_enable` only for that process. If neither flag is passed, the fetcher uses the configured `filters_enable` value.
 
+Check that every option position in `filter/positions.csv` appears in the latest output CSV:
+
+```bash
+opx-check
+```
+
+Pass `--positions` or `--output` to override the defaults:
+
+```bash
+opx-check --positions ~/my-positions.csv --output output/options_engine_output_20260418_120000.csv
+```
+
+`opx-check` exits with code `0` when all positions are found and `1` when any are missing, so it can be used in scripts.
+
 Run the local viewer:
 
 ```

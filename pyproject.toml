@@ -29,6 +29,7 @@ dev = [
 [project.scripts]
 opx-fetcher = "opx.fetcher:main"
 opx-viewer = "opx.viewer:main"
+opx-check = "opx.check_positions:main"
 
 [tool.setuptools.packages.find]
 include = ["opx*"]
