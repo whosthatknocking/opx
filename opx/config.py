@@ -612,45 +612,42 @@ def get_provider_credentials(provider_name: str) -> dict[str, str]:
 
 def describe_runtime_config(config: RuntimeConfig) -> tuple[str, ...]:
     """Return human-readable lines describing the resolved runtime configuration."""
-    masked_massive_key = "set" if config.massive_api_key else "not set"
-    masked_marketdata_token = "set" if config.marketdata_api_token else "not set"
-    return (
-        f"Config path: {config.config_path}",
-        f"Config file exists: {config.config_path.exists()}",
-        f"Applied provider: {config.data_provider}",
-        f"Applied tickers: {', '.join(config.tickers)}",
-        f"Applied filters_min_bid: {config.min_bid if config.min_bid is not None else 'disabled'}",
-        f"Applied filters_min_open_interest: {config.min_open_interest}",
-        f"Applied filters_min_volume: {config.min_volume}",
-        f"Applied filters_max_spread_pct_of_mid: {config.max_spread_pct_of_mid}",
-        f"Applied filters_max_strike_distance_pct: {config.max_strike_distance_pct}",
-        f"Applied risk_free_rate: {config.risk_free_rate}",
-        f"Applied hv_lookback_days: {config.hv_lookback_days}",
-        f"Applied trading_days_per_year: {config.trading_days_per_year}",
-        f"Applied option_score_income_weight: {config.option_score_income_weight}",
-        f"Applied option_score_liquidity_weight: {config.option_score_liquidity_weight}",
-        f"Applied option_score_risk_weight: {config.option_score_risk_weight}",
-        f"Applied option_score_efficiency_weight: {config.option_score_efficiency_weight}",
-        f"Applied stale_quote_seconds: {config.stale_quote_seconds}",
-        f"Applied filters_enable: {config.enable_filters}",
-        f"Applied enable_validation: {config.enable_validation}",
-        f"Applied debug_dump_provider_payload: {config.debug_dump_provider_payload}",
-        f"Applied debug_dump_dir: {config.debug_dump_dir}",
-        f"Applied viewer_host: {config.viewer_host}",
-        f"Applied viewer_port: {config.viewer_port}",
-        f"Applied max_expiration_weeks: {config.max_expiration_weeks if config.max_expiration_weeks is not None else 'disabled'}",  # pylint: disable=line-too-long
-        f"Applied max_expiration: {config.max_expiration or 'disabled'}",
-        f"Applied providers.massive.api_key: {masked_massive_key}",
-        f"Applied providers.marketdata.api_token: {masked_marketdata_token}",
-        f"Applied providers.marketdata.mode: {config.marketdata_mode or 'default'}",
-        f"Applied providers.marketdata.max_retries: {config.marketdata_max_retries}",
-        (
-            "Applied providers.marketdata.request_interval_seconds: "
-            f"{config.marketdata_request_interval_seconds}"
-        ),
-        f"Applied providers.massive.snapshot_page_limit: {config.massive_snapshot_page_limit}",
-        (
-            "Applied providers.massive.request_interval_seconds: "
-            f"{config.massive_request_interval_seconds}"
-        ),
-    )
+    min_bid_label = config.min_bid if config.min_bid is not None else "disabled"
+    max_exp_weeks = config.max_expiration_weeks
+    max_exp_label = max_exp_weeks if max_exp_weeks is not None else "disabled"
+    config_exists = "exists" if config.config_path.exists() else "missing"
+    lines: list[str] = [
+        f"config: {config.config_path} ({config_exists})",
+        f"provider: {config.data_provider}",
+        f"tickers: {', '.join(config.tickers)}",
+        f"max_expiration_weeks: {max_exp_label}"
+        f"  max_expiration: {config.max_expiration or 'disabled'}",
+        "",
+        f"filters_enable: {config.enable_filters}",
+        f"filters_min_bid: {min_bid_label}",
+        f"filters_min_open_interest: {config.min_open_interest}",
+        f"filters_min_volume: {config.min_volume}",
+        f"filters_max_spread_pct_of_mid: {config.max_spread_pct_of_mid}",
+        f"filters_max_strike_distance_pct: {config.max_strike_distance_pct}",
+        "",
+        f"enable_validation: {config.enable_validation}",
+        f"debug_dump_provider_payload: {config.debug_dump_provider_payload}",
+    ]
+    if config.data_provider == "marketdata":
+        token_label = "set" if config.marketdata_api_token else "not set"
+        lines += [
+            "",
+            f"providers.marketdata.api_token: {token_label}",
+            f"providers.marketdata.mode: {config.marketdata_mode or 'default'}",
+            f"providers.marketdata.max_retries: {config.marketdata_max_retries}",
+        ]
+    elif config.data_provider == "massive":
+        key_label = "set" if config.massive_api_key else "not set"
+        lines += [
+            "",
+            f"providers.massive.api_key: {key_label}",
+            f"providers.massive.snapshot_page_limit: {config.massive_snapshot_page_limit}",
+            f"providers.massive.request_interval_seconds: "
+            f"{config.massive_request_interval_seconds}",
+        ]
+    return tuple(lines)

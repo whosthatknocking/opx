@@ -89,7 +89,7 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
         config = get_runtime_config()
         fetched_at = pd.Timestamp.now(tz=timezone.utc)
         provider = get_data_provider()
-        _emit_fetch_info(f"{ticker}: fetch start provider={provider.name}", logger=logger)
+        _emit_fetch_info(f"Loading {ticker}  ({provider.name})", logger=logger)
         snapshot = provider.load_underlying_snapshot(ticker)
         underlying_price = snapshot["underlying_price"]
         _emit_fetch_info(

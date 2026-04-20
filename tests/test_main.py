@@ -88,8 +88,8 @@ def test_main_prints_rows_written_after_saved(monkeypatch, capsys, tmp_path: Pat
 
     stdout = capsys.readouterr().out
     assert exit_code == 0
-    assert "Resolved config:" in stdout
-    assert "Applied provider: yfinance" in stdout
+    assert "Config:" in stdout
+    assert "provider: yfinance" in stdout
     assert f"Saved: {written['path']}" in stdout
     assert "Rows written: 3 | File size: 2.0 KB" in stdout
     assert stdout.index(f"Saved: {written['path']}") < stdout.index(
@@ -174,9 +174,9 @@ def test_main_can_disable_filters_via_cli(monkeypatch, capsys, tmp_path: Path):
     stdout = capsys.readouterr().out
     assert exit_code == 0
     assert captured["config"].enable_filters is False
-    assert "CLI overrides:" in stdout
+    assert "CLI override:" in stdout
     assert "filters_enable=false" in stdout
-    assert "Applied filters_enable: False" in stdout
+    assert "filters_enable: False" in stdout
 
 
 def test_main_can_enable_filters_via_cli(monkeypatch, capsys, tmp_path: Path):
@@ -223,9 +223,9 @@ def test_main_can_enable_filters_via_cli(monkeypatch, capsys, tmp_path: Path):
     stdout = capsys.readouterr().out
     assert exit_code == 0
     assert captured["config"].enable_filters is True
-    assert "CLI overrides:" in stdout
+    assert "CLI override:" in stdout
     assert "filters_enable=true" in stdout
-    assert "Applied filters_enable: True" in stdout
+    assert "filters_enable: True" in stdout
 
 
 def test_main_prints_validation_summary_before_export(monkeypatch, capsys, tmp_path: Path):

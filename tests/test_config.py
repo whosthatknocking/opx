@@ -465,10 +465,13 @@ def test_load_runtime_config_defaults_invalid_toml(tmp_path: Path):
 
 
 def test_describe_runtime_config_masks_massive_key(tmp_path: Path):
-    """Resolved config output should avoid printing secrets."""
+    """Resolved config output should avoid printing secrets for the active provider."""
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         """
+[settings]
+data_provider = "massive"
+
 [providers.massive]
 api_key = "secret"
 
@@ -484,10 +487,7 @@ api_token = "market-token"
     assert all("secret" not in line for line in lines)
     assert all("market-token" not in line for line in lines)
     assert any("debug_dump_provider_payload" in line for line in lines)
-    assert any("debug_dump_dir" in line for line in lines)
-    assert any("viewer_host" in line for line in lines)
-    assert any("viewer_port" in line for line in lines)
-    assert any("providers.marketdata.api_token" in line for line in lines)
+    assert not any("providers.marketdata" in line for line in lines)
 
 
 def test_provider_registry_exposes_supported_providers():

@@ -183,7 +183,7 @@ def test_fetch_ticker_option_chain_prints_stage_counts(monkeypatch, capsys):
 
     stdout = capsys.readouterr().out
     assert not result.empty
-    assert "TEST: fetch start provider=stub" in stdout
+    assert "Loading TEST  (stub)" in stdout
     assert "TEST: expirations available=1 usable=1" in stdout
     assert (
         "TEST: expiration=2026-04-17 raw call_rows=2 put_rows=1 total_rows=3 "

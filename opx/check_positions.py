@@ -182,8 +182,8 @@ def main(argv=None):
         print(f"No output CSV found in {OUTPUTS_DIR}/")
         return 1
 
-    print(f"Positions : {positions_path}")
-    print(f"Output    : {resolved_output}")
+    print(f"Positions: {positions_path}")
+    print(f"Output:    {resolved_output}")
     print()
 
     found, missing = check_positions(positions_path, resolved_output)

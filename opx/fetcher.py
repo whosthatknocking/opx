@@ -99,13 +99,10 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
         config, cli_override = apply_cli_overrides(get_runtime_config(), args)
         set_runtime_config_override(config)
         logger, log_path = create_run_logger()
-        print(f"Today: {config.today}")
-        print(f"Max expiration: {config.max_expiration}")
-        print(f"Log: {log_path}")
+        print(f"Today: {config.today}  Log: {log_path}")
         if cli_override:
-            print("CLI overrides:")
-            print(f"  {cli_override}")
-        print("Resolved config:")
+            print(f"CLI override: {cli_override}")
+        print("Config:")
         for line in describe_runtime_config(config):
             print(f"  {line}")
         if config.config_warnings:
@@ -153,7 +150,6 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
         validation_findings = []
         filtered_row_counts = []
         for ticker in effective_tickers:
-            print(f"Loading {ticker}")
             ticker_df = fetch_ticker_option_chain(
                 ticker,
                 logger=logger,
