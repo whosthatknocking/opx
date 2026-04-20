@@ -3,8 +3,6 @@
 import textwrap
 from pathlib import Path
 
-import pytest
-
 from opx.positions import (
     DEFAULT_POSITIONS_PATH,
     EMPTY_POSITION_SET,
@@ -21,15 +19,18 @@ def write_positions_csv(tmp_path: Path, content: str) -> Path:
 
 
 def test_load_positions_returns_empty_when_file_missing(tmp_path):
+    """Returns the empty sentinel when the positions file does not exist."""
     result = load_positions(tmp_path / "nonexistent.csv")
     assert result == EMPTY_POSITION_SET
 
 
 def test_default_positions_path_points_to_repo_data_directory():
+    """DEFAULT_POSITIONS_PATH resolves to data/positions.csv."""
     assert DEFAULT_POSITIONS_PATH == Path("data/positions.csv")
 
 
 def test_load_positions_parses_stock_tickers(tmp_path):
+    """Stock ticker rows are collected into stock_tickers."""
     path = write_positions_csv(tmp_path, """\
         Account Number,Account Name,Symbol,Description,Quantity,Last Price,Last Price Change,Current Value,Today's Gain/Loss Dollar,Today's Gain/Loss Percent,Total Gain/Loss Dollar,Total Gain/Loss Percent,Percent Of Account,Cost Basis Total,Average Cost Basis,Type
         Z1,INDIVIDUAL,TSLA,TESLA INC,100,$391.00,-$1.00,$39100.00,,,,,10.00%,$39000.00,$390.00,Margin,
@@ -41,6 +42,7 @@ def test_load_positions_parses_stock_tickers(tmp_path):
 
 
 def test_load_positions_parses_option_keys(tmp_path):
+    """Option symbol rows are parsed into OptionPositionKey instances."""
     path = write_positions_csv(tmp_path, """\
         Account Number,Account Name,Symbol,Description,Quantity,Last Price,Last Price Change,Current Value,Today's Gain/Loss Dollar,Today's Gain/Loss Percent,Total Gain/Loss Dollar,Total Gain/Loss Percent,Percent Of Account,Cost Basis Total,Average Cost Basis,Type
         Z1,INDIVIDUAL, -TSLA260821P360,TSLA AUG 21 2026 $360 PUT,-2,$25.00,$2.22,-$5000.00,,,,,,,,,Margin,
@@ -57,6 +59,7 @@ def test_load_positions_parses_option_keys(tmp_path):
 
 
 def test_load_positions_excludes_cash_and_pending(tmp_path):
+    """SPAXX and Pending activity rows are silently skipped."""
     path = write_positions_csv(tmp_path, """\
         Account Number,Account Name,Symbol,Description,Quantity,Last Price,Last Price Change,Current Value,Today's Gain/Loss Dollar,Today's Gain/Loss Percent,Total Gain/Loss Dollar,Total Gain/Loss Percent,Percent Of Account,Cost Basis Total,Average Cost Basis,Type
         Z1,INDIVIDUAL,SPAXX**,HELD IN MONEY MARKET,,,,$60000.00,,,,,6.00%,,,Cash,
@@ -69,6 +72,7 @@ def test_load_positions_excludes_cash_and_pending(tmp_path):
 
 
 def test_load_positions_parses_mixed_stocks_and_options(tmp_path):
+    """Mixed rows are split correctly into stock_tickers and option_keys."""
     path = write_positions_csv(tmp_path, """\
         Account Number,Account Name,Symbol,Description,Quantity,Last Price,Last Price Change,Current Value,Today's Gain/Loss Dollar,Today's Gain/Loss Percent,Total Gain/Loss Dollar,Total Gain/Loss Percent,Percent Of Account,Cost Basis Total,Average Cost Basis,Type
         Z1,INDIVIDUAL,GOOGL,ALPHABET INC,100,$338.00,-$3.00,$33800.00,,,,,,,,,Margin,
@@ -83,6 +87,7 @@ def test_load_positions_parses_mixed_stocks_and_options(tmp_path):
 
 
 def test_load_positions_returns_empty_on_missing_symbol_column(tmp_path):
+    """Returns the empty sentinel when the Symbol column is absent."""
     path = write_positions_csv(tmp_path, """\
         Account,Name
         Z1,INDIVIDUAL
@@ -92,6 +97,7 @@ def test_load_positions_returns_empty_on_missing_symbol_column(tmp_path):
 
 
 def test_position_set_empty_property():
+    """PositionSet.empty is True only when both collections are empty."""
     assert EMPTY_POSITION_SET.empty
     non_empty = EMPTY_POSITION_SET.__class__(frozenset({"TSLA"}), frozenset())
     assert not non_empty.empty

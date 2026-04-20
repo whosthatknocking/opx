@@ -29,10 +29,10 @@ def test_filter_zero_bid_quotes_excludes_only_explicit_zero_bid_rows():
 
 def test_filter_strikes_near_spot_keeps_only_rows_within_configured_band(monkeypatch):
     """Only strikes inside the configured percentage band should survive."""
-    monkeypatch.setattr(
-        "opx.normalize.get_runtime_config",
-        lambda: type("Config", (), {"max_strike_distance_pct": 0.30})(),
-    )
+    def _config():
+        return type("Config", (), {"max_strike_distance_pct": 0.30})()
+
+    monkeypatch.setattr("opx.normalize.get_runtime_config", _config)
     frame = pd.DataFrame(
         [
             {"strike": 69.9},
@@ -115,7 +115,9 @@ def test_apply_post_download_filters_position_keys_bypass_all_filters(monkeypatc
     ])
 
     position_keys = frozenset([
-        OptionPositionKey(ticker="TSLA", expiration_date="2026-08-21", option_type="put", strike=360.0)
+        OptionPositionKey(
+            ticker="TSLA", expiration_date="2026-08-21", option_type="put", strike=360.0
+        )
     ])
 
     result = apply_post_download_filters(frame, underlying_price=391.0, position_keys=position_keys)

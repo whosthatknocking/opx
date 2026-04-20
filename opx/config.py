@@ -638,7 +638,7 @@ def describe_runtime_config(config: RuntimeConfig) -> tuple[str, ...]:
         f"Applied debug_dump_dir: {config.debug_dump_dir}",
         f"Applied viewer_host: {config.viewer_host}",
         f"Applied viewer_port: {config.viewer_port}",
-        f"Applied max_expiration_weeks: {config.max_expiration_weeks if config.max_expiration_weeks is not None else 'disabled'}",
+        f"Applied max_expiration_weeks: {config.max_expiration_weeks if config.max_expiration_weeks is not None else 'disabled'}",  # pylint: disable=line-too-long
         f"Applied max_expiration: {config.max_expiration or 'disabled'}",
         f"Applied providers.massive.api_key: {masked_massive_key}",
         f"Applied providers.marketdata.api_token: {masked_marketdata_token}",

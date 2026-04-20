@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import re
@@ -20,6 +21,7 @@ import pandas as pd
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 from opx.config import get_runtime_config
 from opx.export import UNWANTED_EXPORT_COLUMNS
+from opx.positions import DEFAULT_POSITIONS_PATH
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -27,6 +29,7 @@ STATIC_ROOT = Path(__file__).resolve().parent / "viewer_static"
 USER_GUIDE_PATH = REPO_ROOT / "docs" / "USER_GUIDE.md"
 FIELD_REFERENCE_PATH = REPO_ROOT / "docs" / "FIELD_REFERENCE.md"
 OUTPUTS_DIR = REPO_ROOT / "output"
+POSITIONS_PATH = REPO_ROOT / DEFAULT_POSITIONS_PATH
 CSV_PATTERN = "options_engine_output_*.csv"
 HIDDEN_COLUMNS = {
     "roll_from_days_to_expiration",
@@ -44,6 +47,24 @@ INTEGER_VIEWER_COLUMNS = frozenset({
     "event_risk_score",
 })
 REFERENCE_MISSING_DESCRIPTION = "No reference description available for this field."
+POSITIONS_FIELD_DESCRIPTIONS = {
+    "Account Number": "Broker-provided account identifier for the holding row.",
+    "Account Name": "Broker-provided account label for the position row.",
+    "Symbol": "Ticker symbol or broker-formatted option contract symbol from the positions export.",
+    "Description": "Broker-supplied security description for the position row.",
+    "Quantity": "Position size reported by the broker export.",
+    "Last Price": "Most recent broker-supplied mark or last price shown in the positions export.",
+    "Last Price Change": "Session price change shown in the positions export.",
+    "Current Value": "Current market value reported for the position row.",
+    "Today's Gain/Loss Dollar": "Session gain or loss in dollars from the positions export.",
+    "Today's Gain/Loss Percent": "Session gain or loss in percent from the positions export.",
+    "Total Gain/Loss Dollar": "Total unrealized gain or loss in dollars from the positions export.",
+    "Total Gain/Loss Percent": "Total unrealized gain or loss in percent from the positions export.",  # pylint: disable=line-too-long
+    "Percent Of Account": "Portfolio weight reported for the position row.",
+    "Cost Basis Total": "Total cost basis reported by the broker export.",
+    "Average Cost Basis": "Average cost basis per unit reported by the broker export.",
+    "Type": "Broker account or position type label for the holding row.",
+}
 
 
 class FreshnessSummary(TypedDict):
@@ -121,6 +142,15 @@ class TickerSummary(TypedDict):
     high_conviction_put: OpportunitySummary | None
 
 
+class TablePayload(TypedDict):
+    """Serialized table payload returned by a viewer table endpoint."""
+
+    selected_file: str
+    row_count: int
+    columns: list[ColumnDefinition]
+    rows: list[dict[str, Any]]
+
+
 class CsvPayload(TypedDict):
     """Serialized table payload returned by the CSV data endpoint."""
 
@@ -174,6 +204,14 @@ def resolve_csv_path(csv_name: str | None = None) -> Path:
         return candidate
 
     raise FileNotFoundError(f"CSV file not found: {csv_name}")
+
+
+def resolve_positions_path(path: Path | None = None) -> Path:
+    """Resolve the positions CSV path and require that it exists."""
+    candidate = (path or POSITIONS_PATH).expanduser()
+    if candidate.exists() and candidate.is_file():
+        return candidate
+    raise FileNotFoundError(f"Positions CSV file not found: {candidate}")
 
 
 def load_user_guide_text() -> str:
@@ -683,6 +721,39 @@ def build_column_definitions(
     ]
 
 
+def read_positions_rows(path: Path | None = None) -> tuple[Path, pd.DataFrame]:
+    """Load the positions CSV into a table-shaped frame without footer notices."""
+    positions_path = resolve_positions_path(path)
+    with positions_path.open(newline="", encoding="utf-8-sig") as fh:
+        reader = csv.reader(fh)
+        header: list[str] | None = None
+        records: list[dict[str, str]] = []
+        saw_data_row = False
+        for raw_row in reader:
+            values = [cell.strip() for cell in raw_row]
+            if header is None:
+                if any(values):
+                    header = values
+                continue
+            if not any(values):
+                if saw_data_row:
+                    break
+                continue
+            saw_data_row = True
+            padded = values + [""] * max(0, len(header) - len(values))
+            records.append(
+                {
+                    column: padded[index] if index < len(padded) else ""
+                    for index, column in enumerate(header)
+                }
+            )
+
+    if header is None:
+        return positions_path, pd.DataFrame()
+
+    return positions_path, pd.DataFrame(records, columns=header)
+
+
 def load_csv_payload(csv_name: str | None = None) -> CsvPayload:
     """Load the current CSV and serialize the table payload consumed by the browser."""
     csv_path = resolve_csv_path(csv_name)
@@ -704,6 +775,26 @@ def load_csv_payload(csv_name: str | None = None) -> CsvPayload:
         "rows": rows,
         "freshness_summary": freshness_summary,
         "dataset_cards": dataset_cards,
+    }
+
+
+def load_positions_payload(path: Path | None = None) -> TablePayload:
+    """Load the local positions CSV and serialize it for the viewer table."""
+    positions_path, frame = read_positions_rows(path)
+    descriptions = {
+        **POSITIONS_FIELD_DESCRIPTIONS,
+        **extract_field_descriptions(),
+    }
+    rows = [
+        {column: normalize_row_value(column, value) for column, value in record.items()}
+        for record in frame.to_dict(orient="records")
+    ]
+    columns = build_column_definitions(frame, descriptions)
+    return {
+        "selected_file": str(positions_path.relative_to(REPO_ROOT)),
+        "row_count": len(rows),
+        "columns": columns,
+        "rows": rows,
     }
 
 
@@ -750,6 +841,9 @@ class ViewerRequestHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/files":
             self.respond_json({"files": make_file_listing()})
+            return
+        if parsed.path == "/api/positions":
+            self._respond_payload(lambda _csv_name: load_positions_payload())
             return
         if parsed.path == "/api/data":
             query = parse_qs(parsed.query)

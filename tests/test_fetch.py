@@ -391,13 +391,18 @@ class TodayExpirationProvider(StubProvider):
         return OptionChainFrames(calls=calls, puts=make_vendor_frame([]))
 
 
-def test_today_expiration_dropped_without_position_set(monkeypatch):
-    """Expirations on today's date must be skipped when the ticker is not a portfolio stock."""
-    monkeypatch.setattr(fetch, "get_data_provider", TodayExpirationProvider)
-    config_factory = lambda: make_runtime_config(today=pd.Timestamp("2026-03-20").date())
+def _patch_config_20260320(monkeypatch):
+    def config_factory():
+        return make_runtime_config(today=pd.Timestamp("2026-03-20").date())
     monkeypatch.setattr(fetch, "get_runtime_config", config_factory)
     monkeypatch.setattr(opx.normalize, "get_runtime_config", config_factory)
     monkeypatch.setattr(opx.metrics, "get_runtime_config", config_factory)
+
+
+def test_today_expiration_dropped_without_position_set(monkeypatch):
+    """Expirations on today's date must be skipped when the ticker is not a portfolio stock."""
+    monkeypatch.setattr(fetch, "get_data_provider", TodayExpirationProvider)
+    _patch_config_20260320(monkeypatch)
 
     result = fetch.fetch_ticker_option_chain("TEST", position_set=EMPTY_POSITION_SET)
 
@@ -407,10 +412,7 @@ def test_today_expiration_dropped_without_position_set(monkeypatch):
 def test_today_expiration_kept_for_portfolio_stock(monkeypatch):
     """Expirations on today's date must be kept when the ticker is a portfolio stock."""
     monkeypatch.setattr(fetch, "get_data_provider", TodayExpirationProvider)
-    config_factory = lambda: make_runtime_config(today=pd.Timestamp("2026-03-20").date())
-    monkeypatch.setattr(fetch, "get_runtime_config", config_factory)
-    monkeypatch.setattr(opx.normalize, "get_runtime_config", config_factory)
-    monkeypatch.setattr(opx.metrics, "get_runtime_config", config_factory)
+    _patch_config_20260320(monkeypatch)
 
     position_set = PositionSet(stock_tickers=frozenset({"TEST"}), option_keys=frozenset())
     result = fetch.fetch_ticker_option_chain("TEST", position_set=position_set)
@@ -422,17 +424,16 @@ def test_today_expiration_kept_for_portfolio_stock(monkeypatch):
 def test_position_option_survives_filters(monkeypatch):
     """An option matching a portfolio position must not be dropped even with bid==0."""
     monkeypatch.setattr(fetch, "get_data_provider", StubProvider)
-    config_factory = lambda: make_runtime_config(today=pd.Timestamp("2026-03-20").date())
-    monkeypatch.setattr(fetch, "get_runtime_config", config_factory)
-    monkeypatch.setattr(opx.normalize, "get_runtime_config", config_factory)
-    monkeypatch.setattr(opx.metrics, "get_runtime_config", config_factory)
+    _patch_config_20260320(monkeypatch)
 
     # TESTC2 has bid=0 and strike=140 (outside 30% band) — normally filtered;
     # it should survive because it matches a position key.
     position_set = PositionSet(
         stock_tickers=frozenset(),
         option_keys=frozenset([
-            OptionPositionKey(ticker="TEST", expiration_date="2026-04-17", option_type="call", strike=140.0)
+            OptionPositionKey(
+                ticker="TEST", expiration_date="2026-04-17", option_type="call", strike=140.0
+            )
         ]),
     )
     result = fetch.fetch_ticker_option_chain("TEST", position_set=position_set)
