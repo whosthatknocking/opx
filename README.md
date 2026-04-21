@@ -2,7 +2,7 @@
 
 `opx` downloads near-term option chains, enriches them with pricing and screening metrics, writes a timestamped CSV, and serves the local Options Screener UI for inspection.
 
-Its objective is to produce a cleaner, more executable options dataset that can be reviewed directly or fed into downstream tools that make decisions from the data, such as a trading system, portfolio workflow, or other automation layer. `opx` is the data and screening layer, not the decision engine itself.
+Its objective is to collect, normalize, export, and inspect option-chain information. This repository is not the strategy engine, portfolio workflow, or trading-automation layer.
 
 ## Quick Start
 
@@ -23,6 +23,8 @@ If you want the viewer to launch the page automatically, run `opx-viewer --open`
 
 For one-off fetch runs, you can override the shared filter toggle from the CLI with `opx-fetcher --disable-filters` or `opx-fetcher --enable-filters` instead of editing `~/.config/opx/config.toml`.
 
+`opx-fetcher` also accepts `--positions /path/to/positions.csv` when you want one run to use a non-default Fidelity positions file instead of `data/positions.csv`.
+
 For local development setup, including `.[dev]` extras and Playwright, use [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 This repo can also enforce local quality checks before each commit through the tracked Git pre-commit hook described in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
@@ -40,8 +42,8 @@ The local viewer is organized around five primary tabs: `Dataset`, `Positions`, 
 - Limits strikes to a configurable band around spot
 - Computes Greeks, delta-safety, expected move, ROM-style metrics, configurable option scoring, and volatility context
 - Writes a timestamped CSV plus an append-only run log
-- Includes a local browser for exploring the output interactively, including dataset inspection, a positions browser for `data/positions.csv`, per-ticker overview cards, `Most Profitable`, `Moderate Risk`, `High Conviction Call`, and `High Conviction Put` highlights, plus chain visualizations with chart tooltips and click-through row details
-- Produces normalized output that can feed other tools and systems which apply their own decision logic on top of the exported data
+- Includes a local browser for exploring the output interactively, including dataset inspection, an optional positions browser for `data/positions.csv` when that user-local file is present, per-ticker overview cards, `Most Profitable`, `Moderate Risk`, `High Conviction Call`, and `High Conviction Put` highlights, plus chain visualizations with chart tooltips and click-through row details
+- Produces normalized option-chain output for inspection, comparison, and archival
 
 Generated files are standardized under:
 
@@ -55,9 +57,11 @@ Generated files are standardized under:
 - Field reference: [docs/FIELD_REFERENCE.md](docs/FIELD_REFERENCE.md)
 - Development guide: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 - Project spec: [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md)
-- Storage proposal: [docs/STORAGE_PROPOSAL.md](docs/STORAGE_PROPOSAL.md)
-- System spec: [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md)
 - Design spec: [docs/DESIGN_SPEC.md](docs/DESIGN_SPEC.md)
+
+Optional feature docs:
+
+- Storage spec: [docs/STORAGE_SPEC.md](docs/STORAGE_SPEC.md)
 
 ## Important Notes
 

@@ -45,6 +45,7 @@ The project does not currently aim to:
 - auto-fallback between providers during a fetch
 - expose provider-specific scratch fields in the CSV by default
 - act as a live trading terminal
+- implement a strategy engine, portfolio action engine, or trade-decision workflow
 - implement a secret-management system beyond local user config
 
 ## 3. Naming and Packaging
@@ -290,7 +291,7 @@ Requirements:
 - the current score combines IV-adjusted income quality, spread execution quality, DTE execution quality, delta-only risk, and theta efficiency
 - `premium_per_day` is derived from a prompt-aligned `expected_fill_price`
 - `probability_itm` is validation-only and should not directly drive row ranking
-- it should help users surface richer, cleaner, and more executable candidates without pretending to be a standalone trade recommendation
+- it should help users surface richer, cleaner, and more inspectable option-chain rows without pretending to be a trade recommendation system
 - score weights are configurable through runtime config so tuning does not require code changes
 - the configured weights must remain non-negative and sum to a positive total; otherwise defaults are used
 - score output is visible both in the exported CSV and in the local viewer
@@ -342,6 +343,7 @@ Current behavior:
 - matching option contracts bypass post-download quality filters when filters are enabled
 - if the file is absent or cannot be parsed, the run continues without position-aware behavior
 - the resolved positions path is logged at startup for run auditability
+- `--positions` and `--enable-filters` / `--disable-filters` are independent; supplying a positions path does not change the filter toggle
 
 ### 7.4 Shared Validation
 
@@ -356,15 +358,17 @@ Current behavior:
 - validation errors do not stop the run or block CSV export
 - when validation is enabled, the run prints a validation summary before the CSV write
 
-### 7.5 Import Freshness Check
+### 7.5 Read-Time Freshness Check
 
-Consumers of the exported CSV (e.g. the strategy engine) must revalidate data freshness at import time. The `is_stale_underlying_price` and `quote_age_seconds` fields are computed relative to the moment opx ran, not relative to when the file is read. A CSV that was fresh at generation can be arbitrarily old by the time it is consumed.
+This requirement applies to downstream consumers of the exported CSV — it is not enforced by `opx` itself. `opx` publishes freshness fields in the export; what consumers do with them is governed by `docs/EXTERNAL_INTERFACE_SPEC.md` §6.
+
+Any consumer of the exported CSV should revalidate data freshness at read time. The `is_stale_underlying_price` and `quote_age_seconds` fields are computed relative to the moment opx ran, not relative to when the file is read. A CSV that was fresh at generation can be arbitrarily old by the time it is consumed.
 
 Required behavior on import:
 
 - Compute age of the dataset by comparing `underlying_price_time` (the oldest value across all rows) against the current wall-clock time at import.
 - Emit a **warning** when the oldest underlying price is more than 3 hours old; proceed but flag affected tickers.
-- Emit a **hard block** (abort the run with a clear error) when the oldest underlying price is more than 24 hours old; stale-by-a-day data produces unreliable Greeks, skewed roll credits, and misleading candidate rankings.
+- Emit a **hard block** (abort the read or import with a clear error) when the oldest underlying price is more than 24 hours old; stale-by-a-day data produces unreliable Greeks, skewed screening metrics, and misleading inspection results.
 - Report per-ticker staleness when tickers differ materially in age (e.g. one ticker's underlying was captured a day earlier than the rest).
 - The hard-block threshold should be configurable; the 24-hour default is conservative enough to catch overnight-stale files while allowing intraday re-runs.
 
@@ -639,7 +643,9 @@ themselves fall outside the ±35% distance threshold.
    surviving rows.
 2. Compute the 25th percentile (p25) of that group.
 3. Set `True` for rows where `theta_efficiency < p25`; `False` otherwise.
-4. Used by the strategy engine to label existing positions SUBOPTIMAL.
+4. Can be used by external consumers to label relatively weak rows within one
+   (underlying, option_type) group, but that downstream interpretation is out of
+   scope for `opx` itself.
 
 **Filter timing:** Post-filter. The percentile should reflect only tradeable rows so
 untradeable contracts (zero bid, wide spread) do not distort the distribution.

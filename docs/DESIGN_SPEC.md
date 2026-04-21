@@ -51,12 +51,13 @@ The viewer uses a single functional header instead of a persistent sidebar.
 
 Header contents:
 * Viewer title: `Options Screener`
-* Primary tabs: `Dataset`, `Overview`, `Chain View`, `Reference`
+* Primary tabs: `Dataset`, `Positions`, `Overview`, `Chain View`, `Reference`
 * Dataset selector: current CSV file chooser
 * Theme toggle: `Light` / `Dark`
 
 ### B. Main Surfaces
 * **Dataset tab:** toolbar, freshness cards, dataset cards, options table, pagination
+* **Positions tab:** sortable/filterable table of held positions from `data/positions.csv` with the same row-detail modal pattern used for exported datasets; hidden when the file is absent
 * **Overview tab:** ticker summary cards and four opportunity cards per ticker for profitability, moderate-risk balance, bullish conviction, and bearish conviction
 * **Chain View tab:** one chart card per row, stacked vertically, using the same panel language as the rest of the viewer
 * **Reference tab:** rendered documentation/readme content
@@ -101,9 +102,10 @@ Chain View behavior:
 Use the current functional UI labels:
 * Title: `Options Screener`
 * Tab 1: `Dataset`
-* Tab 2: `Overview`
-* Tab 3: `Chain View`
-* Tab 4: `Reference`
+* Tab 2: `Positions`
+* Tab 3: `Overview`
+* Tab 4: `Chain View`
+* Tab 5: `Reference`
 
 Avoid reintroducing older names such as `Ledger`, `Portfolio`, or `Equity Ledger` unless the UI changes again.
 

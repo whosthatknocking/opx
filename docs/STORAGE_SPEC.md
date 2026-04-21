@@ -1,5 +1,10 @@
 # Storage Specification
 
+Scope note: this document remains valid as an optional feature specification for
+this repository. It is not required for the current filesystem-based runtime,
+and it is independent from the downstream strategy or decision engine, which is
+out of scope for `opx`.
+
 This document specifies the storage design for `opx`. It defines the storage
 interfaces, domain records, implementation strategy, and the order in which
 changes should be executed.
