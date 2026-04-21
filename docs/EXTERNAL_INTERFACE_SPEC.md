@@ -222,7 +222,10 @@ dependency.
 
 ### 7.1 Add `SCHEMA_VERSION` public constant
 
-- add `SCHEMA_VERSION: int = 1` to `opx/__init__.py` (or `opx/export.py`)
+- add `SCHEMA_VERSION: int = 1` to `opx/__init__.py`; this is the
+  canonical location — `from opx import SCHEMA_VERSION` must work
+- also update `opx/export.py` to reference this constant rather than
+  defining its own, so there is one source of truth
 - write it into `DatasetRecord.schema_version` on every `write_dataset` call
 - this is already described in STORAGE_SPEC §3.4 and §16 step 1; this spec
   makes it a named public constant importable from `opx` directly
