@@ -36,6 +36,13 @@ enable_validation = true
 debug_dump_provider_payload = false
 debug_dump_dir = "debug"
 
+[storage]
+# Set enable = true to activate the storage port for pipeline integration.
+# When disabled (default), the existing filesystem write path is used unchanged.
+enable = false
+backend = "filesystem"   # "filesystem" | "sqlite" (when enable = true)
+retention_keep_last = 0  # 0 = keep all datasets; positive integer = keep last N
+
 [providers.massive]
 api_key = "replace-me"
 snapshot_page_limit = 250

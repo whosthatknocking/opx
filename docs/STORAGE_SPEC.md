@@ -435,17 +435,28 @@ class DatasetSerializer(Protocol):
 
 ## 11. Dataset Retention
 
-The storage layer should enforce a retention policy to bound disk growth.
+Retention is configurable through `[storage]` in `~/.config/opx/config.toml`.
 
-Suggested defaults:
+```toml
+[storage]
+enable = false
+backend = "filesystem"
+retention_keep_last = 0   # 0 = keep all (default); positive integer = keep last N
+```
 
-- keep the last 30 datasets (configurable)
-- on `write_dataset`, prune datasets beyond the retention limit
+Behavior:
+
+- `retention_keep_last = 0` (the default) disables pruning; all datasets are kept
+- a positive value causes `write_dataset` to prune the oldest datasets beyond
+  the limit after each successful write
 - pruning removes both the artifact file and the metadata record
-- run records are retained independently of dataset retention (they are small)
+- run records are retained independently of dataset pruning; they are small and
+  their loss would break run-diffing queries
+- malformed or negative values fall back to `0` (no pruning) with a warning
 
-The filesystem backend implements pruning by scanning the output directory.
-The SQLite backend implements pruning with a `DELETE WHERE` on the dataset table.
+The filesystem backend implements pruning by scanning the output directory and
+sorting by filename timestamp. The SQLite backend implements pruning with a
+`DELETE WHERE` on the dataset table ordered by `created_at`.
 
 ## 12. Run Diffing
 
