@@ -161,8 +161,6 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
                 ticker_frames.append(ticker_df)
 
         filtered_out_rows = sum(filtered_row_counts)
-        print("Filter summary:")
-        print(f"  filtered_out_rows: {filtered_out_rows}")
         if logger:
             logger.info("filter_summary filtered_out_rows=%s", filtered_out_rows)
 
@@ -188,7 +186,8 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
             file_size_bytes,
         )
         print(f"\nSaved: {output_path}")
-        print(f"Rows written: {row_count} | File size: {format_file_size(file_size_bytes)}")
+        file_size = format_file_size(file_size_bytes)
+        print(f"rows={row_count}  size={file_size}  dropped={filtered_out_rows}")
         return 0
     except KeyboardInterrupt:
         print("\nInterrupted.")

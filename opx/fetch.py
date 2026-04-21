@@ -98,11 +98,9 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
         _emit_fetch_info(f"Loading {ticker}  ({provider.name})", logger=logger)
         snapshot = provider.load_underlying_snapshot(ticker)
         underlying_price = snapshot["underlying_price"]
+        snap_time = snapshot["underlying_price_time"]
         _emit_fetch_info(
-            (
-                f"{ticker}: underlying snapshot price={underlying_price} "
-                f"quote_time={snapshot['underlying_price_time']}"
-            ),
+            f"{ticker}: snapshot  price={underlying_price}  time={snap_time}",
             logger=logger,
         )
 
@@ -140,23 +138,20 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
                 continue
             usable_expirations.append(expiration_date)
 
-        _emit_fetch_info(
-            (
-                f"{ticker}: expirations available={len(available_expirations)} "
-                f"usable={len(usable_expirations)} "
-                f"skipped_max_expiration={skipped_for_max_expiration} "
-                f"skipped_expired={skipped_for_past_expiration}"
-            ),
-            logger=logger,
+        skipped_total = skipped_for_max_expiration + skipped_for_past_expiration
+        exp_msg = (
+            f"{ticker}: expirations  usable={len(usable_expirations)}"
+            f"/{len(available_expirations)}"
         )
+        if skipped_total:
+            exp_msg += f"  skipped={skipped_total}"
+        _emit_fetch_info(exp_msg, logger=logger)
 
         events = provider.load_ticker_events(ticker)
+        earnings = events.get("next_earnings_date") or "none"
+        ex_div = events.get("next_ex_div_date") or "none"
         _emit_fetch_info(
-            (
-                f"{ticker}: events next_earnings={events.get('next_earnings_date')} "
-                f"next_ex_div={events.get('next_ex_div_date')} "
-                f"dividend_amount={events.get('dividend_amount')}"
-            ),
+            f"{ticker}: events  earnings={earnings}  ex_div={ex_div}",
             logger=logger,
         )
 
@@ -172,20 +167,7 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
             call_trade_count = _frame_value_count(chain.calls, "last_trade_price")
             put_trade_count = _frame_value_count(chain.puts, "last_trade_price")
             _emit_fetch_info(
-                (
-                    f"{ticker}: expiration={expiration_date} raw call_rows={len(chain.calls)} "
-                    f"put_rows={len(chain.puts)} total_rows={expiration_raw_count} "
-                    f"call_bid_rows={call_bid_count} put_bid_rows={put_bid_count} "
-                    f"call_ask_rows={call_ask_count} put_ask_rows={put_ask_count} "
-                    f"call_trade_rows={call_trade_count} put_trade_rows={put_trade_count}"
-                ),
-                logger=logger,
-            )
-            _emit_fetch_info(
-                (
-                    f"{ticker}: progress expirations_processed={raw_expiration_count}/"
-                    f"{len(usable_expirations)} raw_rows_so_far={raw_contract_count}"
-                ),
+                f"{ticker}: chain  {expiration_date}  rows={expiration_raw_count}",
                 logger=logger,
             )
             if logger:
@@ -235,13 +217,6 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
                 )
                 if config.enable_validation and validation_findings is not None:
                     validation_findings.extend(validate_option_rows(normalized))
-                _emit_fetch_info(
-                    (
-                        f"{ticker}: expiration={expiration_date} side={option_type} "
-                        f"normalized_rows={len(normalized)}"
-                    ),
-                    logger=logger,
-                )
                 all_normalized_rows.append(normalized)
 
         if not all_normalized_rows:
@@ -264,11 +239,15 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
 
         # Pre-filter cross-row enrichment on the full unfiltered chain.
         all_normalized = pd.concat(all_normalized_rows, ignore_index=True)
+        pre_filter_count = len(all_normalized)
+        _emit_fetch_info(
+            f"{ticker}: normalize  rows={pre_filter_count}",
+            logger=logger,
+        )
         all_normalized = add_iv_state_level(all_normalized)
         all_normalized = add_iv_state_term(all_normalized)
         all_normalized = add_listed_strike_increment(all_normalized)
 
-        pre_filter_count = len(all_normalized)
         combined = apply_post_download_filters(
             all_normalized, underlying_price,
             position_keys=(position_set or EMPTY_POSITION_SET).option_keys,
@@ -287,12 +266,13 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
             )
         else:
             _emit_fetch_info(
-                (
-                    f"{ticker}: fetch complete rows={len(combined)} "
-                    "expirations="
-                    f"{combined['expiration_date'].nunique() if not combined.empty else 0} "
-                    f"raw_provider_rows={raw_contract_count}"
-                ),
+                f"{ticker}: filter  rows={len(combined)}  dropped={dropped_rows}",
+                logger=logger,
+            )
+            exp_count = combined["expiration_date"].nunique() if not combined.empty else 0
+            _emit_fetch_info(
+                f"{ticker}: done  rows={len(combined)}"
+                f"  expirations={exp_count}  raw={raw_contract_count}",
                 logger=logger,
             )
 

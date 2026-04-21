@@ -91,10 +91,8 @@ def test_main_prints_rows_written_after_saved(monkeypatch, capsys, tmp_path: Pat
     assert "Config:" in stdout
     assert "provider: yfinance" in stdout
     assert f"Saved: {written['path']}" in stdout
-    assert "Rows written: 3 | File size: 2.0 KB" in stdout
-    assert stdout.index(f"Saved: {written['path']}") < stdout.index(
-        "Rows written: 3 | File size: 2.0 KB"
-    )
+    assert "rows=3  size=2.0 KB" in stdout
+    assert stdout.index(f"Saved: {written['path']}") < stdout.index("rows=3  size=2.0 KB")
 
 
 def test_main_prints_config_fallbacks(monkeypatch, capsys, tmp_path: Path):
@@ -282,8 +280,6 @@ def test_main_prints_validation_summary_before_export(monkeypatch, capsys, tmp_p
 
     stdout = capsys.readouterr().out
     assert exit_code == 0
-    assert "Filter summary:" in stdout
-    assert "filtered_out_rows: 0" in stdout
     assert "Validation summary:" in stdout
     assert "errors: 1" in stdout
 
@@ -322,8 +318,6 @@ def test_main_can_disable_validation_summary(monkeypatch, capsys, tmp_path: Path
 
     stdout = capsys.readouterr().out
     assert exit_code == 0
-    assert "Filter summary:" in stdout
-    assert "filtered_out_rows: 0" in stdout
     assert "Validation summary:" not in stdout
 
 

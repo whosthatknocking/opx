@@ -184,15 +184,11 @@ def test_fetch_ticker_option_chain_prints_stage_counts(monkeypatch, capsys):
     stdout = capsys.readouterr().out
     assert not result.empty
     assert "Loading TEST  (stub)" in stdout
-    assert "TEST: expirations available=1 usable=1" in stdout
-    assert (
-        "TEST: expiration=2026-04-17 raw call_rows=2 put_rows=1 total_rows=3 "
-        "call_bid_rows=2 put_bid_rows=1 call_ask_rows=2 put_ask_rows=1 "
-        "call_trade_rows=2 put_trade_rows=1"
-    ) in stdout
-    assert "TEST: progress expirations_processed=1/1 raw_rows_so_far=3" in stdout
-    assert "TEST: expiration=2026-04-17 side=call normalized_rows=2" in stdout
-    assert "TEST: fetch complete rows=1 expirations=1 raw_provider_rows=3" in stdout
+    assert "TEST: expirations  usable=1/1" in stdout
+    assert "TEST: chain  2026-04-17  rows=3" in stdout
+    assert "TEST: normalize  rows=3" in stdout
+    assert "TEST: filter  rows=1  dropped=2" in stdout
+    assert "TEST: done  rows=1  expirations=1  raw=3" in stdout
 
 
 def test_fetch_ticker_option_chain_explains_when_filters_remove_everything(monkeypatch, capsys):
@@ -213,12 +209,8 @@ def test_fetch_ticker_option_chain_explains_when_filters_remove_everything(monke
 
     stdout = capsys.readouterr().out
     assert result.empty
-    assert (
-        "TEST: expiration=2026-04-17 raw call_rows=2 put_rows=1 total_rows=3 "
-        "call_bid_rows=2 put_bid_rows=1 call_ask_rows=2 put_ask_rows=1 "
-        "call_trade_rows=2 put_trade_rows=1"
-    ) in stdout
-    assert "TEST: expiration=2026-04-17 side=call normalized_rows=2" in stdout
+    assert "TEST: chain  2026-04-17  rows=3" in stdout
+    assert "TEST: normalize  rows=3" in stdout
     assert (
         "TEST: all provider rows were filtered out by the shared normalization and "
         "screening pipeline"
