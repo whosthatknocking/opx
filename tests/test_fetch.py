@@ -191,7 +191,7 @@ def test_fetch_ticker_option_chain_prints_stage_counts(monkeypatch, capsys):
         "call_trade_rows=2 put_trade_rows=1"
     ) in stdout
     assert "TEST: progress expirations_processed=1/1 raw_rows_so_far=3" in stdout
-    assert "TEST: expiration=2026-04-17 side=call normalized_rows=2 post_filter_rows=1" in stdout
+    assert "TEST: expiration=2026-04-17 side=call normalized_rows=2" in stdout
     assert "TEST: fetch complete rows=1 expirations=1 raw_provider_rows=3" in stdout
 
 
@@ -218,7 +218,7 @@ def test_fetch_ticker_option_chain_explains_when_filters_remove_everything(monke
         "call_bid_rows=2 put_bid_rows=1 call_ask_rows=2 put_ask_rows=1 "
         "call_trade_rows=2 put_trade_rows=1"
     ) in stdout
-    assert "TEST: expiration=2026-04-17 side=call normalized_rows=2 post_filter_rows=0" in stdout
+    assert "TEST: expiration=2026-04-17 side=call normalized_rows=2" in stdout
     assert (
         "TEST: all provider rows were filtered out by the shared normalization and "
         "screening pipeline"

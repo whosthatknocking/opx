@@ -38,6 +38,9 @@ Implementation-status note:
 - `volume`: Current session option volume. Use it as a liquidity signal. Higher usually means better trading activity and easier fills.
 - `open_interest`: Open contracts outstanding. Use it to judge market participation and contract depth. Higher usually means deeper, more established trading interest.
 - `implied_volatility`: Vendor-supplied implied volatility. Use it as the volatility input for Greeks and relative richness checks. Higher means richer option pricing, but usually also more underlying uncertainty.
+- `iv_state_level`: Per-underlying IV level classification derived from the full unfiltered chain: `HIGH` when the representative ATM IV is at or above the 70th percentile of that underlying's IV distribution, `LOW` at or below the 30th percentile, `NEUTRAL` in between, and `UNKNOWN` when the underlying has fewer than 5 rows. Broadcast to all rows for the underlying. Use it to quickly identify whether the current market is pricing rich or cheap vol.
+- `iv_state_term`: Per-underlying IV term structure classification derived from the full unfiltered chain. Compares median IV at the nearest expiration (`near_iv`) to median IV at the next expiration (`far_iv`): `RISING` when `near_iv >= far_iv * 1.05`, `FALLING` when `near_iv <= far_iv * 0.95`, `FLAT` otherwise, and `UNKNOWN` when fewer than two distinct expirations are available. Broadcast to all rows for the underlying. Use it to detect near-term vol spikes (e.g. earnings crush) or backwardation.
+- `listed_strike_increment`: Per-(underlying, option_type) minimum adjacent strike spacing, derived from the nearest expiration that has at least three distinct strikes. Broadcast to all rows for the (underlying, option_type) pair. Blank when no qualifying expiration is found. Use it to understand the resolution of the strike ladder for a given underlying and to detect non-standard increments.
 - `change`: Absolute price change reported by the vendor. Use it to understand the contract's move during the session. This is currently expected to be blank for `marketdata`.
 - `percent_change`: Percentage price change reported by the vendor. Use it for relative move comparisons. This is currently expected to be blank for `marketdata`.
 - `option_quote_time`: Timestamp of the option quote or last trade update. Use it to measure quote freshness.
@@ -116,6 +119,7 @@ For Market Data, numeric event dates are interpreted on the `America/New_York` m
 - `theta_to_premium_ratio`: Absolute theta divided by premium. Use it to compare time decay efficiency relative to premium collected or paid. Higher means faster daily decay relative to the option price.
 - `capital_required`: Simplified one-contract capital proxy. Calls use `last_trade_price * 100`; puts use `strike * 100`.
 - `theta_efficiency`: `theta_dollars_per_day / (capital_required / 1000)`. Use it to compare daily theta generation per `$1,000` of row-level capital.
+- `theta_efficiency_below_p25`: Boolean flag that is `True` when a row's `theta_efficiency` falls below the 25th percentile of all post-filter rows for the same (underlying, option_type) pair, `False` otherwise, and blank when `theta_efficiency` is unavailable. Use it to quickly exclude the lowest-efficiency rows in a scan without hard-coding an absolute threshold.
 
 ## Validation, Freshness, and Screening Fields
 
@@ -192,6 +196,9 @@ Legend:
 | `volume` | Direct: `volume` | Direct: `day.volume` | Direct: `volume` |
 | `open_interest` | Transformed: `openInterest` -> `open_interest` | Direct: `open_interest` | Transformed: `openInterest` -> `open_interest` |
 | `implied_volatility` | Transformed: `impliedVolatility` -> `implied_volatility` | Direct/Transformed: top-level `implied_volatility`, coerced numeric | Direct/Transformed: `iv` -> `implied_volatility` |
+| `iv_state_level` | Derived: pre-filter IV level classification per underlying | Derived: pre-filter IV level classification per underlying | Derived: pre-filter IV level classification per underlying |
+| `iv_state_term` | Derived: pre-filter IV term structure classification per underlying | Derived: pre-filter IV term structure classification per underlying | Derived: pre-filter IV term structure classification per underlying |
+| `listed_strike_increment` | Derived: minimum adjacent strike spacing per (underlying, option_type) | Derived: minimum adjacent strike spacing per (underlying, option_type) | Derived: minimum adjacent strike spacing per (underlying, option_type) |
 | `change` | Direct: `change` | Direct: `day.change` | Blank: expected in the current implementation because the Market Data fetch path does not populate option-contract change |
 | `percent_change` | Transformed: `percentChange` -> `percent_change` | Direct: `day.change_percent` | Blank: expected in the current implementation because the Market Data fetch path does not populate option-contract percent change |
 | `option_quote_time` | Transformed: `lastTradeDate` -> UTC timestamp | Transformed: `last_quote.last_updated`, fallback `last_trade.sip_timestamp` / `day.last_updated` | Transformed: `updated` -> `option_quote_time` |
@@ -261,6 +268,7 @@ Legend:
 | `theta_to_premium_ratio` | Derived: absolute theta divided by premium reference | Derived: absolute theta divided by premium reference | Derived: absolute theta divided by premium reference |
 | `capital_required` | Derived: calls use `last_trade_price * 100`, puts use `strike * 100` | Derived: calls use `last_trade_price * 100`, puts use `strike * 100` | Derived: calls use `last_trade_price * 100`, puts use `strike * 100` |
 | `theta_efficiency` | Derived: theta dollars per day per `$1,000` of capital required | Derived: theta dollars per day per `$1,000` of capital required | Derived: theta dollars per day per `$1,000` of capital required |
+| `theta_efficiency_below_p25` | Derived: post-filter p25 flag per (underlying, option_type) | Derived: post-filter p25 flag per (underlying, option_type) | Derived: post-filter p25 flag per (underlying, option_type) |
 
 ### Validation, Freshness, and Screening Mapping
 

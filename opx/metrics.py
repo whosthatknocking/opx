@@ -546,6 +546,158 @@ def add_expected_move_by_expiration(df):
     )
 
 
+def add_iv_state_level(df):
+    """Classify IV level per underlying as LOW/NEUTRAL/HIGH/UNKNOWN; broadcast to all rows.
+
+    Must run pre-filter so the full IV distribution is used for percentile ranking.
+    """
+    df = df.copy()
+    df["iv_state_level"] = "UNKNOWN"
+    required = {"underlying_symbol", "implied_volatility", "expiration_date", "strike_distance_pct"}
+    if not required.issubset(df.columns):
+        return df
+
+    for _, group in df.groupby("underlying_symbol"):
+        valid_iv = group["implied_volatility"].notna() & (group["implied_volatility"] > 0)
+        iv_vals = group.loc[valid_iv, "implied_volatility"]
+        if len(iv_vals) < 5:
+            continue
+
+        p30 = iv_vals.quantile(0.30)
+        p70 = iv_vals.quantile(0.70)
+
+        # Use ATM row at nearest expiration as the representative IV.
+        rep_iv = None
+        for exp in sorted(group["expiration_date"].unique()):
+            exp_rows = group[group["expiration_date"] == exp]
+            candidates = exp_rows[
+                exp_rows["implied_volatility"].notna()
+                & (exp_rows["implied_volatility"] > 0)
+                & exp_rows["strike_distance_pct"].notna()
+            ]
+            if candidates.empty:
+                continue
+            atm_idx = candidates["strike_distance_pct"].idxmin()
+            rep_iv = candidates.loc[atm_idx, "implied_volatility"]
+            break
+
+        if rep_iv is None or pd.isna(rep_iv):
+            rep_iv = iv_vals.median()
+        if pd.isna(rep_iv):
+            continue
+
+        if rep_iv >= p70:
+            level = "HIGH"
+        elif rep_iv <= p30:
+            level = "LOW"
+        else:
+            level = "NEUTRAL"
+
+        df.loc[group.index, "iv_state_level"] = level
+
+    return df
+
+
+def add_iv_state_term(df):
+    """Classify IV term structure per underlying as RISING/FALLING/FLAT/UNKNOWN; broadcast.
+
+    Compares median IV at the nearest expiration to the next expiration.
+    Must run pre-filter so far-dated rows are not dropped before the comparison.
+    """
+    df = df.copy()
+    df["iv_state_term"] = "UNKNOWN"
+    required = {"underlying_symbol", "implied_volatility", "expiration_date"}
+    if not required.issubset(df.columns):
+        return df
+
+    for _, group in df.groupby("underlying_symbol"):
+        valid_rows = group[group["implied_volatility"].notna() & (group["implied_volatility"] > 0)]
+        if valid_rows.empty:
+            continue
+
+        by_exp = valid_rows.groupby("expiration_date")["implied_volatility"].median()
+        exps = sorted(by_exp.index)
+        if len(exps) < 2:
+            continue
+
+        near_iv = by_exp[exps[0]]
+        far_iv = by_exp[exps[1]]
+        if pd.isna(near_iv) or pd.isna(far_iv) or far_iv <= 0:
+            continue
+
+        if near_iv >= far_iv * 1.05:
+            term = "RISING"
+        elif near_iv <= far_iv * 0.95:
+            term = "FALLING"
+        else:
+            term = "FLAT"
+
+        df.loc[group.index, "iv_state_term"] = term
+
+    return df
+
+
+def add_listed_strike_increment(df):
+    """Derive the minimum adjacent strike step per (underlying, option_type); broadcast.
+
+    Uses the nearest expiration with at least 3 rows. Must run pre-filter so adjacent
+    strikes outside the distance band are still present when the increment is computed.
+    """
+    df = df.copy()
+    df["listed_strike_increment"] = np.nan
+    required = {"underlying_symbol", "option_type", "expiration_date", "strike"}
+    if not required.issubset(df.columns):
+        return df
+
+    for _, group in df.groupby(["underlying_symbol", "option_type"]):
+        valid_rows = group[group["strike"].notna() & (group["strike"] > 0)]
+        if valid_rows.empty:
+            continue
+
+        increment = None
+        for exp in sorted(valid_rows["expiration_date"].unique()):
+            exp_rows = valid_rows[valid_rows["expiration_date"] == exp]
+            strikes = np.sort(exp_rows["strike"].unique())
+            if len(strikes) < 3:
+                continue
+            pos_diffs = np.diff(strikes)
+            pos_diffs = pos_diffs[pos_diffs > 0]
+            if pos_diffs.size == 0:
+                continue
+            min_diff = float(np.min(pos_diffs))
+            if min_diff > 0:
+                increment = min_diff
+                break
+
+        if increment is not None:
+            df.loc[group.index, "listed_strike_increment"] = increment
+
+    return df
+
+
+def add_theta_efficiency_below_p25(df):
+    """Flag rows below the 25th percentile of theta_efficiency within (underlying, option_type).
+
+    Must run post-filter so untradeable rows do not distort the percentile distribution.
+    """
+    df = df.copy()
+    df["theta_efficiency_below_p25"] = pd.array([pd.NA] * len(df), dtype="boolean")
+    required = {"underlying_symbol", "option_type", "theta_efficiency"}
+    if not required.issubset(df.columns):
+        return df
+
+    for (_, _), group in df.groupby(["underlying_symbol", "option_type"]):
+        valid_rows = group[group["theta_efficiency"].notna()]
+        if valid_rows.empty:
+            continue
+        p25 = valid_rows["theta_efficiency"].quantile(0.25)
+        df.loc[valid_rows.index, "theta_efficiency_below_p25"] = (
+            valid_rows["theta_efficiency"] < p25
+        )
+
+    return df
+
+
 def add_roll_yield_metrics(df):
     """Compare each expiry to the nearest earlier expiry at the same strike and side."""
     df = df.copy()

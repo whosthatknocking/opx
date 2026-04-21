@@ -507,6 +507,18 @@ Completed:
 - updated `FIELD_REFERENCE.md` with field descriptions and provider mapping
 - updated viewer summary tab and opportunity cards to surface event risk data
 
+### 10.9 Strategy Engine Offload Fields
+
+Completed:
+
+- reshaped per-ticker loop in `fetch.py` to accumulate all normalized rows before filtering, enabling pre-filter cross-row enrichment
+- implemented `add_iv_state_level` (pre-filter, per underlying, p30/p70 ATM IV classification)
+- implemented `add_iv_state_term` (pre-filter, per underlying, near/far expiration median IV comparison)
+- implemented `add_listed_strike_increment` (pre-filter, per (underlying, option_type), minimum adjacent strike spacing)
+- implemented `add_theta_efficiency_below_p25` (post-filter, per (underlying, option_type), p25 percentile flag)
+- added all 4 fields to the canonical export column order
+- updated `FIELD_REFERENCE.md` with field descriptions and provider mapping
+
 ## 11. Current Change Rules
 
 Future changes should preserve these project rules:
@@ -530,3 +542,83 @@ As of the current repository state:
 - validation coverage for shipped behavior: complete
 
 There are no open milestone sections remaining in this specification. Future work, if any, should be added as new scoped proposals rather than re-opening the completed migration plan.
+
+---
+
+## 13. Strategy Engine Offload Fields (Landed)
+
+The following computations were specified as future improvements and have been
+implemented and landed in the pipeline. All four are computed within a single fetch run.
+Each entry notes whether it runs before or after the pre-filter step.
+
+### 13.1 IV State Level
+
+**Field:** `iv_state_level` — per underlying; values: `LOW`, `NEUTRAL`, `HIGH`, `UNKNOWN`
+
+**Computation:**
+1. For each underlying, collect all `implied_volatility` values across its rows.
+2. If fewer than 5 rows exist for the underlying, set `UNKNOWN` for all its rows.
+3. Compute p30 and p70 of the IV distribution within that underlying.
+4. Classify the underlying's representative IV (ATM row at nearest expiration, or median
+   of all rows if ATM is ambiguous):
+   - `HIGH` if representative IV ≥ p70
+   - `LOW` if representative IV ≤ p30
+   - `NEUTRAL` otherwise
+5. Broadcast the single classified level to all rows for that underlying.
+
+**Filter timing:** Pre-filter. Must run on the full unfiltered chain so the IV
+distribution is not skewed by dropping wide-spread or low-volume rows before ranking.
+
+---
+
+### 13.2 IV State Term
+
+**Field:** `iv_state_term` — per underlying; values: `RISING`, `FALLING`, `FLAT`, `UNKNOWN`
+
+**Computation:**
+1. For each underlying, group rows by expiration and compute the median
+   `implied_volatility` per expiration.
+2. Identify the nearest expiration (`near_exp`) and the next available expiration
+   (`far_exp`). If fewer than 2 distinct expirations exist, set `UNKNOWN`.
+3. `near_iv` = median IV at `near_exp`; `far_iv` = median IV at `far_exp`.
+4. Classify:
+   - `RISING` if `near_iv ≥ far_iv × 1.05` (near-term IV at least 5% above longer DTE)
+   - `FALLING` if `near_iv ≤ far_iv × 0.95`
+   - `FLAT` otherwise
+5. Broadcast the classified term to all rows for that underlying.
+
+**Filter timing:** Pre-filter. Needs the full term structure before the expiration
+ceiling filter drops far-dated rows that are part of the comparison.
+
+---
+
+### 13.3 Listed Strike Increment
+
+**Field:** `listed_strike_increment` — per underlying per option type; float
+
+**Computation:**
+1. For each (underlying, option_type) pair, find the nearest expiration that has ≥ 3
+   rows. If none qualify, use the next nearest with ≥ 3 rows.
+2. Sort those rows by strike ascending.
+3. Compute all positive differences between adjacent strikes; take the minimum.
+4. Broadcast the result to all rows for that (underlying, option_type).
+
+**Filter timing:** Pre-filter. The full strike ladder is required before the strike
+distance filter drops rows. Adjacent strikes needed for the increment calculation may
+themselves fall outside the ±35% distance threshold.
+
+---
+
+### 13.4 Theta Efficiency Percentile Flag
+
+**Field:** `theta_efficiency_below_p25` — boolean; per underlying per option type
+
+**Computation:**
+1. For each (underlying, option_type) group, collect `theta_efficiency` values from
+   surviving rows.
+2. Compute the 25th percentile (p25) of that group.
+3. Set `True` for rows where `theta_efficiency < p25`; `False` otherwise.
+4. Used by the strategy engine to label existing positions SUBOPTIMAL.
+
+**Filter timing:** Post-filter. The percentile should reflect only tradeable rows so
+untradeable contracts (zero bid, wide spread) do not distort the distribution.

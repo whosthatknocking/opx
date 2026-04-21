@@ -6,7 +6,13 @@ import numpy as np
 import pandas as pd
 
 from opx.config import get_runtime_config
-from opx.metrics import add_expected_move_by_expiration
+from opx.metrics import (
+    add_expected_move_by_expiration,
+    add_iv_state_level,
+    add_iv_state_term,
+    add_listed_strike_increment,
+    add_theta_efficiency_below_p25,
+)
 from opx.normalize import apply_post_download_filters, enrich_option_frame
 from opx.positions import EMPTY_POSITION_SET, PositionSet
 from opx.providers.base import ProviderAuthenticationError
@@ -112,7 +118,7 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
                 )
             return pd.DataFrame()
 
-        rows = []
+        all_normalized_rows = []
         raw_contract_count = 0
         raw_expiration_count = 0
         available_expirations = provider.list_option_expirations(ticker)
@@ -229,25 +235,16 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
                 )
                 if config.enable_validation and validation_findings is not None:
                     validation_findings.extend(validate_option_rows(normalized))
-                filtered = apply_post_download_filters(
-                    normalized, underlying_price,
-                    position_keys=(position_set or EMPTY_POSITION_SET).option_keys,
-                )
-                dropped_rows = len(vendor_normalized) - len(filtered)
-                if filtered_row_counts is not None:
-                    filtered_row_counts.append(dropped_rows)
                 _emit_fetch_info(
                     (
                         f"{ticker}: expiration={expiration_date} side={option_type} "
-                        f"normalized_rows={len(vendor_normalized)} "
-                        f"post_filter_rows={len(filtered)} "
-                        f"dropped_rows={dropped_rows}"
+                        f"normalized_rows={len(normalized)}"
                     ),
                     logger=logger,
                 )
-                rows.append(filtered)
+                all_normalized_rows.append(normalized)
 
-        if not rows:
+        if not all_normalized_rows:
             _emit_fetch_info(
                 f"{ticker}: provider returned no usable option frames",
                 logger=logger,
@@ -265,7 +262,21 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
                 )
             return pd.DataFrame()
 
-        combined = pd.concat(rows, ignore_index=True)
+        # Pre-filter cross-row enrichment on the full unfiltered chain.
+        all_normalized = pd.concat(all_normalized_rows, ignore_index=True)
+        all_normalized = add_iv_state_level(all_normalized)
+        all_normalized = add_iv_state_term(all_normalized)
+        all_normalized = add_listed_strike_increment(all_normalized)
+
+        pre_filter_count = len(all_normalized)
+        combined = apply_post_download_filters(
+            all_normalized, underlying_price,
+            position_keys=(position_set or EMPTY_POSITION_SET).option_keys,
+        )
+        dropped_rows = pre_filter_count - len(combined)
+        if filtered_row_counts is not None:
+            filtered_row_counts.append(dropped_rows)
+
         if combined.empty and raw_contract_count > 0:
             _emit_fetch_info(
                 (
@@ -284,6 +295,9 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
                 ),
                 logger=logger,
             )
+
+        # Post-filter enrichment on surviving rows.
+        combined = add_theta_efficiency_below_p25(combined)
         combined = add_expected_move_by_expiration(combined)
         if logger:
             logger.info(
