@@ -79,7 +79,7 @@ must be incremented.
 
 Rules:
 
-- schema version is an integer, starting at `1`, stored in `opx/export.py`
+- schema version is an integer, starting at `1`, defined as `SCHEMA_VERSION` in `opx/__init__.py`
 - it is written into every `DatasetRecord` at write time
 - the viewer and downstream consumers use it to detect schema drift between datasets
 - backward-compatibility is not guaranteed across schema versions; consumers should
@@ -441,12 +441,12 @@ Retention is configurable through `[storage]` in `~/.config/opx/config.toml`.
 [storage]
 enable = false
 backend = "filesystem"
-retention_keep_last = 0   # 0 = keep all (default); positive integer = keep last N
+max_runs_retained = 0   # 0 = keep all (default); positive integer = keep last N
 ```
 
 Behavior:
 
-- `retention_keep_last = 0` (the default) disables pruning; all datasets are kept
+- `max_runs_retained = 0` (the default) disables pruning; all datasets are kept
 - a positive value causes `write_dataset` to prune the oldest datasets beyond
   the limit after each successful write
 - pruning removes both the artifact file and the metadata record
@@ -534,7 +534,7 @@ independently shippable and leaves the system in a working state.
 - introduce `opx/storage/base.py` with `StorageBackend` and `ProviderCache` protocols
 - introduce `opx/storage/models.py` with all records and write payloads
 - introduce `opx/storage/serializers.py` with `DatasetSerializer` protocol and CSV implementation
-- add `SCHEMA_VERSION` integer constant to `opx/export.py`
+- add `SCHEMA_VERSION: int = 1` to `opx/__init__.py`; update `opx/export.py` to import and reference it
 - add `MemoryBackend` in `opx/storage/memory.py`
 - no changes to `fetcher.py`, `fetch.py`, or `viewer.py`
 - tests: verify `MemoryBackend` satisfies the protocol and roundtrips all write operations

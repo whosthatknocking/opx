@@ -176,7 +176,7 @@ consumers must not construct or infer artifact paths independently — always us
 ### 5.1 `SCHEMA_VERSION` constant
 
 ```python
-# opx/__init__.py  (or opx/export.py)
+# opx/__init__.py
 SCHEMA_VERSION: int = 1   # incremented on every breaking schema change
 ```
 
