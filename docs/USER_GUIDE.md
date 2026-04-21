@@ -54,6 +54,14 @@ opx-fetcher --enable-filters
 
 These flags override `settings.filters_enable` only for that process. If neither flag is passed, the fetcher uses the configured `filters_enable` value.
 
+You can also override the positions-file path for one run:
+
+```bash
+opx-fetcher --positions data/runs/<run_id>/positions.csv
+```
+
+When `--positions` is omitted, the fetcher still defaults to `data/positions.csv`. If the override path does not exist or cannot be parsed, the run continues without position-aware ticker expansion or filter bypass, matching the existing graceful fallback behavior.
+
 Check that every option position in `data/positions.csv` appears in the latest output CSV:
 
 ```bash
@@ -215,6 +223,8 @@ At the start of every run, `opx-fetcher` reads `data/positions.csv` (Fidelity ex
 - **Option filter bypass** _(active only when filters are enabled)_: any option contract that matches a row in the file (by ticker, expiration date, option type, and strike) bypasses all post-download quality filters. These rows are always included in the output regardless of bid, spread, or strike-distance settings. When `filters_enable = false` or `--disable-filters` is used, all rows are already kept unconditionally so the bypass has no effect.
 
 The file is re-read on every run. If the file does not exist or cannot be parsed, the run continues with normal behavior.
+
+If you need a one-off override, pass `opx-fetcher --positions /path/to/positions.csv`. That changes only the file path used for that process; it does not change `filters_enable`, and it does not affect later runs.
 
 `data/positions.csv` is excluded from version control — place your own export there without risk of committing personal data. The expected format is a standard Fidelity brokerage export. Stock rows use a plain ticker in the Symbol column; option rows use a leading dash followed by the OCC-style symbol:
 

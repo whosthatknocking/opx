@@ -336,10 +336,12 @@ The fetcher can consume a user-supplied portfolio positions file.
 Current behavior:
 
 - the default input path is `data/positions.csv`
+- `opx-fetcher` accepts an optional `--positions <path>` CLI override for one run
 - the file is treated as user-managed input, not generated output
 - stock tickers found in the file are added to the effective fetch list for the run
 - matching option contracts bypass post-download quality filters when filters are enabled
 - if the file is absent or cannot be parsed, the run continues without position-aware behavior
+- the resolved positions path is logged at startup for run auditability
 
 ### 7.4 Shared Validation
 
