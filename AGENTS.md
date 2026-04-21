@@ -183,3 +183,16 @@ Common files to update:
 - Do not include assistant/tool attribution in commit messages, PR bodies, or other artifacts.
 - Commit subject line: ≤72 characters, imperative mood.
 - Commit body: explain what changed and the motivation. Do not describe the task or reference issue numbers.
+
+## No Personal Information in Tracked Files
+
+Never write local machine paths, usernames, or host identifiers into any tracked file.
+
+Rules:
+- Markdown links must use repo-relative paths, never absolute filesystem paths.
+  - From the repo root: `[text](docs/FILE.md)`, `[text](config/example.toml)`
+  - From `docs/`: `[text](../config/example.toml)`, `[text](OTHER.md)`
+- Do not embed hostnames, local usernames, or machine-specific paths in docs, config examples, scripts, or test fixtures.
+- `127.0.0.1` is acceptable as a documented default bind address; it is not personal information.
+
+Before committing any `.md`, `.toml`, or `.py` file that contains a path or link, verify it does not start with `/Users/`, `/home/`, or any other absolute filesystem prefix.
