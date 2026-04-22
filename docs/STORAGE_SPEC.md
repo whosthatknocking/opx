@@ -88,7 +88,7 @@ Rules:
 ## 4. Config-Driven Enable/Disable
 
 The storage layer is controlled by a `[storage]` section in
-`~/.config/opx/config.toml`.
+`~/.config/opx-chain/config.toml`.
 
 ```toml
 [storage]
@@ -97,7 +97,7 @@ backend = "filesystem"         # "filesystem" (default when enabled) | "sqlite"
 dataset_format = "csv"         # "csv" (default) | "parquet"
 max_runs_retained = 0          # 0 = keep all (default); positive integer = keep last N
 write_legacy_csv = true        # write <data-dir>/output/options_engine_output_<ts>.csv alongside storage artifact
-# dir = "~/.local/share/opx-chain"  # override XDG data dir (default: $XDG_DATA_HOME/opx-chain or ~/.local/share/opx-chain)
+# dir = "/path/to/custom/dir"  # override XDG data dir (default: $XDG_DATA_HOME/opx-chain or ~/.local/share/opx-chain)
 
 # Provider response cache (optional)
 cache_backend = "none"         # "none" (default) | "filesystem"
@@ -118,7 +118,7 @@ Behavior:
 - `backend` is only read when `enable = true`; it is ignored otherwise
 - `write_legacy_csv = false` suppresses the timestamped legacy CSV; only the
   storage-managed artifact (e.g. `~/.local/share/opx-chain/output/<uuid>.parquet`)
-  is written; the viewer reaches it via `opx-view --data-dir <path>`; only
+  is written; the viewer discovers it automatically via the storage backend; only
   meaningful when `enable = true`
 - startup output always prints the resolved `Storage:` section; when disabled,
   it prints `enable: false`
@@ -500,7 +500,7 @@ based on the `dataset_format` config option (`"csv"` default). The
 
 ## 12. Dataset Retention
 
-Retention is configurable through `[storage]` in `~/.config/opx/config.toml`.
+Retention is configurable through `[storage]` in `~/.config/opx-chain/config.toml`.
 
 ```toml
 [storage]
@@ -619,7 +619,7 @@ All seven steps are complete and shipped.
 
 - `opx-view --data-dir DIR` scans an arbitrary directory for `.csv` and
   `.parquet` files; default discovery remains the legacy CSV glob
-- viewer preference store: `~/.config/opx/viewer_prefs.json`,
+- viewer preference store: `~/.config/opx-chain/viewer_prefs.json`,
   GET/POST `/api/prefs`
 
 ## 18. Open Questions

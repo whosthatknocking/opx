@@ -26,8 +26,8 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e .
-mkdir -p ~/.config/opx
-cp config/example.toml ~/.config/opx/config.toml
+mkdir -p ~/.config/opx-chain
+cp config/example.toml ~/.config/opx-chain/config.toml
 opx-fetch
 opx-view
 ```
@@ -45,7 +45,7 @@ Then open `http://127.0.0.1:8000` in your browser.
 
 Fetch data with `opx-fetch`.
 
-You can force the shared post-download filter toggle for a single run without editing `~/.config/opx/config.toml`:
+You can force the shared post-download filter toggle for a single run without editing `~/.config/opx-chain/config.toml`:
 
 ```bash
 opx-fetch --disable-filters
@@ -68,10 +68,16 @@ Check that every option position in `data/positions.csv` appears in the latest o
 opx-check
 ```
 
+The output line shows the path and when the file was fetched:
+
+```
+Output:    ~/.local/share/opx-chain/output/<uuid>.parquet  (fetched 2026-04-22 07:07)
+```
+
 Pass `--positions` or `--output` to override the defaults:
 
 ```bash
-opx-check --positions ~/my-positions.csv --output output/options_engine_output_20260418_120000.csv
+opx-check --positions ~/my-positions.csv --output /path/to/artifact.parquet
 ```
 
 `opx-check` exits with code `0` when all positions are found and `1` when any are missing, so it can be used in scripts.
@@ -97,7 +103,7 @@ Open the viewer and launch the page in your default browser:
 opx-view --open
 ```
 
-The viewer binds to `settings.viewer_host` and `settings.viewer_port` from `~/.config/opx/config.toml` by default. `OPX_VIEWER_HOST` and `OPX_VIEWER_PORT` still override those values when you need a one-off launch target.
+The viewer binds to `settings.viewer_host` and `settings.viewer_port` from `~/.config/opx-chain/config.toml` by default. `OPX_VIEWER_HOST` and `OPX_VIEWER_PORT` still override those values when you need a one-off launch target.
 
 The viewer includes:
 
@@ -116,15 +122,26 @@ The viewer includes:
 
 ## Output
 
-Each run writes a CSV file to the XDG data directory using a timestamped filename:
+`$XDG_DATA_HOME/opx-chain/` (defaulting to `~/.local/share/opx-chain/`) is the
+standard data directory used by all three tools.
+
+When storage is enabled (`[storage] enable = true`), each run writes a dataset artifact
+to the output directory. The exact filename depends on the configured format:
+
+```text
+~/.local/share/opx-chain/output/<uuid>.parquet   # dataset_format = "parquet" (default)
+~/.local/share/opx-chain/output/<uuid>.csv       # dataset_format = "csv"
+```
+
+When `write_legacy_csv = true` (the default), a timestamped legacy CSV is also written
+alongside the storage artifact:
 
 ```text
 ~/.local/share/opx-chain/output/options_engine_output_YYYYMMDD_HHMMSS.csv
 ```
 
-`$XDG_DATA_HOME/opx-chain/` (defaulting to `~/.local/share/opx-chain/`) is the
-standard data directory used by all three tools. Override it with `dir` in the
-`[storage]` config section.
+All three tools (`opx-fetch`, `opx-check`, `opx-view`) discover artifacts through the
+storage backend automatically — no `--data-dir` flag is needed.
 
 Operational details that are not row-specific are written to:
 
@@ -143,18 +160,18 @@ If `debug_dump_provider_payload = true`, raw provider payload JSON files are als
 
 ## Configuration
 
-Runtime configuration lives in `~/.config/opx/config.toml`. If the file is absent, the app falls back to built-in defaults and uses `yfinance` as the active provider.
+Runtime configuration lives in `~/.config/opx-chain/config.toml`. If the file is absent, the app falls back to built-in defaults and uses `yfinance` as the active provider.
 
 If individual config values are missing, malformed, or out of range, the loader applies built-in defaults for those fields and the fetcher prints the resolved values plus any fallback warnings at startup.
 
 Start from the tracked example at [`config/example.toml`](config/example.toml):
 
 ```
-mkdir -p ~/.config/opx
-cp config/example.toml ~/.config/opx/config.toml
+mkdir -p ~/.config/opx-chain
+cp config/example.toml ~/.config/opx-chain/config.toml
 ```
 
-Then update provider placeholders in `~/.config/opx/config.toml` for the provider you actually use.
+Then update provider placeholders in `~/.config/opx-chain/config.toml` for the provider you actually use.
 
 ### Shared Settings
 

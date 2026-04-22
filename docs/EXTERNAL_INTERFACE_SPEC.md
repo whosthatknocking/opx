@@ -106,6 +106,8 @@ releases.
 from opx_chain.fetcher import run_fetch
 
 run_fetch(positions_path=Path("data/runs/<run_id>/positions.csv"))
+run_fetch(tickers=("TSLA", "NVDA"))
+run_fetch(positions_path=Path("data/positions.csv"), tickers=("AAPL",))
 ```
 
 `run_fetch()` is the in-process equivalent of invoking `opx-fetch` as a subprocess.
@@ -114,6 +116,11 @@ to storage. The caller blocks until the fetch completes.
 
 **`positions_path` (optional `Path`)** — overrides the default positions file, identical
 in semantics to the `--positions` CLI flag. When absent, the configured default is used.
+
+**`tickers` (optional `tuple[str, ...]`)** — overrides the ticker list from config for
+this run only. The override replaces `settings.tickers` entirely; the positions file
+can still add additional tickers via stock-ticker expansion. When absent, the configured
+`settings.tickers` is used unchanged.
 
 **Errors:**
 
