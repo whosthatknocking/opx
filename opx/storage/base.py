@@ -12,6 +12,7 @@ from opx.storage.models import (
     DatasetRecord,
     DatasetWrite,
     RunContext,
+    RunRecord,
     RunSummary,
     TickerFetchResult,
 )
@@ -34,6 +35,7 @@ class StorageBackend(Protocol):  # pylint: disable=too-few-public-methods
         ticker: str | None = None,
     ) -> list[DatasetRecord]: ...
     def get_dataset(self, dataset_id: str) -> DatasetHandle: ...  # pylint: disable=missing-function-docstring
+    def get_run(self, run_id: str) -> RunRecord: ...  # pylint: disable=missing-function-docstring
     def finalize_run(self, run_id: str, summary: RunSummary) -> None: ...  # pylint: disable=missing-function-docstring
     def fail_run(self, run_id: str, error: str) -> None: ...  # pylint: disable=missing-function-docstring
 

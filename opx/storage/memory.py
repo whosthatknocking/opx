@@ -131,6 +131,12 @@ class MemoryBackend:
                 return record_to_handle(record)
         raise KeyError(f"dataset not found: {dataset_id}")
 
+    def get_run(self, run_id: str) -> RunRecord:
+        """Return the RunRecord for the given run_id."""
+        if run_id not in self._runs:
+            raise KeyError(f"run not found: {run_id}")
+        return self._runs[run_id]
+
     def finalize_run(self, run_id: str, summary: RunSummary) -> None:
         """Mark run as complete or interrupted with the given summary."""
         if run_id in self._runs:

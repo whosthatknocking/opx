@@ -88,7 +88,7 @@ The stable public surface is limited to:
 
 ```python
 from opx.storage.base import StorageBackend
-from opx.storage.models import DatasetHandle, DatasetRecord
+from opx.storage.models import DatasetHandle, DatasetRecord, RunRecord
 from opx.storage.factory import get_storage_backend
 from opx import SCHEMA_VERSION
 ```
@@ -130,7 +130,27 @@ handle: DatasetHandle = backend.get_dataset(dataset_id)
 Returns a `DatasetHandle` for the given `dataset_id`. The consumer reads the chain
 artifact at `handle.location`.
 
-### 3.5 Reading the chain artifact
+### 3.5 Retrieving a run record
+
+```python
+run: RunRecord = backend.get_run(run_id)
+```
+
+Returns the `RunRecord` for the given `run_id`. Raises `KeyError` when the run
+does not exist. Downstream consumers use this to retrieve
+`RunRecord.positions_fingerprint` — the SHA-256 of the positions file that was
+active when the chain was fetched — for cross-checking against the consumer's
+own positions fingerprint.
+
+`run_id` is available on `DatasetRecord.run_id` (returned by `list_datasets`).
+
+```python
+records = backend.list_datasets(limit=1)
+run = backend.get_run(records[0].run_id)
+assert run.positions_fingerprint == pipeline_positions_fingerprint
+```
+
+### 3.6 Reading the chain artifact
 
 ```python
 from opx.utils import read_dataset_file
@@ -270,6 +290,14 @@ writing the timestamped `output/options_engine_output_<ts>.csv` file. Only the
 storage-managed artifact is written. Downstream orchestrators that depend on the
 legacy filename pattern must either keep `write_legacy_csv = true` or switch to
 reading through `get_storage_backend().list_datasets()`.
+
+### 7.7 Add `get_run()` to `StorageBackend` protocol
+
+Add `get_run(run_id: str) -> RunRecord` to the `StorageBackend` protocol in
+`opx/storage/base.py`. The method already exists on `FilesystemBackend` and
+`SqliteIndexedBackend`; this change promotes it to the formal protocol so
+downstream consumers can call it through the typed interface. `MemoryBackend`
+must also implement it so the protocol conformance test passes.
 
 ### 7.6 `opx-viewer --data-dir`
 
