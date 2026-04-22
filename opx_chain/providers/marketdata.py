@@ -26,6 +26,7 @@ from opx_chain.providers.base import (
     DataProvider,
     OptionChainFrames,
     ProviderAuthenticationError,
+    ProviderQuotaError,
     normalize_provider_frame,
 )
 from opx_chain.utils import coerce_float, normalize_timestamp
@@ -255,6 +256,8 @@ class MarketDataProvider(DataProvider):
                 "Market Data authentication failed. Check [providers.marketdata] api_token "
                 "in ~/.config/opx-chain/config.toml."
             )
+        if "request limit" in normalized or "rate limit" in normalized:
+            raise ProviderQuotaError(f"Market Data {context} failed: {message}")
         raise RuntimeError(f"Market Data {context} failed: {message}")
 
     @lru_cache(maxsize=32)

@@ -13,7 +13,7 @@ from marketdata.sdk_error import MarketDataClientErrorResult
 from conftest import make_runtime_config
 from opx_chain import SCHEMA_VERSION, fetch
 from opx_chain.export import prepare_export_frame
-from opx_chain.providers.base import DataProvider, ProviderAuthenticationError
+from opx_chain.providers.base import DataProvider, ProviderAuthenticationError, ProviderQuotaError
 from opx_chain.providers.marketdata import CALLER_USER_AGENT, MarketDataProvider
 from opx_chain.storage.filesystem import FilesystemBackend
 from opx_chain.storage.models import DatasetWrite, RunContext, RunSummary
@@ -342,6 +342,30 @@ def test_marketdata_provider_invalid_credentials_fail_clearly(monkeypatch):
 
     with pytest.raises(ProviderAuthenticationError):
         provider.load_underlying_snapshot("TSLA")
+
+
+def test_marketdata_provider_request_limit_raises_quota_error(monkeypatch):
+    """Daily request-limit responses must raise ProviderQuotaError, not be swallowed."""
+
+    class LimitedClient(FakeMarketDataClient):  # pylint: disable=too-few-public-methods
+        """Fake SDK client that returns a request-limit error for chain calls."""
+
+        def _options_chain(self, _symbol, **_kwargs):
+            return MarketDataClientErrorResult(
+                BaseMarketdataException(
+                    "You've reached the daily request limit for your Market Data account."
+                )
+            )
+
+    monkeypatch.setattr("opx_chain.providers.marketdata.OpxMarketDataClient", LimitedClient)
+    monkeypatch.setattr(
+        "opx_chain.providers.marketdata.get_provider_credentials",
+        lambda provider_name: {"api_token": "token"} if provider_name == "marketdata" else {},
+    )
+    provider = MarketDataProvider()
+
+    with pytest.raises(ProviderQuotaError):
+        provider.load_option_chain("TSLA", "2026-06-20")
 
 
 def test_fetch_ticker_option_chain_runs_with_marketdata_selected(monkeypatch, tmp_path):

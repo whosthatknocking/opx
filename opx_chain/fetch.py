@@ -17,7 +17,11 @@ from opx_chain.metrics import (
 )
 from opx_chain.normalize import apply_post_download_filters, enrich_option_frame
 from opx_chain.positions import EMPTY_POSITION_SET, PositionSet
-from opx_chain.providers.base import OptionChainFrames, ProviderAuthenticationError
+from opx_chain.providers.base import (
+    OptionChainFrames,
+    ProviderAuthenticationError,
+    ProviderQuotaError,
+)
 from opx_chain.providers import get_data_provider
 from opx_chain.storage.cache import get_provider_cache
 from opx_chain.validate import validate_option_rows
@@ -349,7 +353,7 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
             )
         return combined
 
-    except ProviderAuthenticationError as exc:
+    except (ProviderAuthenticationError, ProviderQuotaError) as exc:
         print(f"{ticker} error: {exc}")
         if logger:
             logger.exception(

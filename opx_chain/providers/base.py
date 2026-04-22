@@ -19,6 +19,10 @@ class ProviderAuthenticationError(RuntimeError):
     """Raised when provider authentication fails and the run should stop clearly."""
 
 
+class ProviderQuotaError(RuntimeError):
+    """Raised when the provider rejects the request due to a quota or rate limit."""
+
+
 @dataclass(frozen=True)
 class OptionChainFrames:
     """Vendor option-chain payload split into calls and puts."""
