@@ -292,6 +292,49 @@ def test_check_positions_skips_records_with_missing_artifact(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
+# --dry-run
+# ---------------------------------------------------------------------------
+
+def test_dry_run_makes_no_api_calls_and_no_writes(tmp_path: Path):
+    """--dry-run must not call fetch_ticker_option_chain or write any output."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True)
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in patches]
+        result = fetcher.main(["--dry-run"])
+
+    assert result == 0
+    mock_fetch = mocks[9]  # fetch_ticker_option_chain
+    mock_fetch.assert_not_called()
+    assert not backend.list_datasets()
+    assert not list(backend._runs.values())  # pylint: disable=protected-access
+
+
+def test_dry_run_prints_would_fetch_summary(tmp_path: Path, capsys):
+    """--dry-run must print the tickers it would fetch and storage backend class."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True, tickers=("AAPL", "TSLA"))
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        fetcher.main(["--dry-run"])
+
+    captured = capsys.readouterr()
+    assert "DRY RUN" in captured.out
+    assert "AAPL" in captured.out
+    assert "TSLA" in captured.out
+    assert "Dry-run complete" in captured.out
+
+
+# ---------------------------------------------------------------------------
 # run_fetch API
 # ---------------------------------------------------------------------------
 

@@ -53,6 +53,14 @@ def parse_args(argv=None):
         default=None,
         help="Path to positions CSV. Defaults to data/positions.csv.",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Validate config, resolve positions, and verify the storage backend "
+            "without making any API calls or writing any output."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -126,10 +134,28 @@ def release_fetcher_lock(lock_handle):
             pass
 
 
+class _NullLogger:
+    """Discards all log output — used in --dry-run mode to avoid writing log files."""
+
+    def info(self, *_a, **_kw):
+        """No-op."""
+
+    def warning(self, *_a, **_kw):
+        """No-op."""
+
+    def exception(self, *_a, **_kw):
+        """No-op."""
+
+    def error(self, *_a, **_kw):
+        """No-op."""
+
+
 def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
     config,
     positions_path: Path | None,
     cli_override: str | None,
+    *,
+    dry_run: bool = False,
 ) -> None:
     """Execute the fetch pipeline. Lock must already be held by caller. Raises on failure."""
     logger = None
@@ -137,8 +163,12 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
     run_id = None
     try:
         storage = get_storage_backend(config)
-        logger, log_path = create_run_logger()
-        print(f"Today: {config.today}  Log: {log_path}")
+        if dry_run:
+            logger = _NullLogger()
+            print(f"Today: {config.today}  [DRY RUN — no API calls or writes]")
+        else:
+            logger, log_path = create_run_logger()
+            print(f"Today: {config.today}  Log: {log_path}")
         if cli_override:
             print(f"CLI override: {cli_override}")
         runs_today = storage.count_runs_today(config.data_provider) if storage else 0
@@ -191,6 +221,15 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
             len(position_set.option_keys),
             len(extra_tickers),
         )
+
+        if dry_run:
+            print()
+            print(f"Would fetch {len(effective_tickers)} ticker(s): {', '.join(effective_tickers)}")
+            if storage is not None:
+                print(f"Storage: {type(storage).__name__} (reachable)")
+            print()
+            print("Dry-run complete.")
+            return
 
         if storage is not None:
             run_id = storage.create_run(RunContext(
@@ -324,6 +363,8 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
 def run_fetch(
     positions_path: Path | None = None,
     tickers: tuple[str, ...] | None = None,
+    max_expiration_weeks: int | None = None,
+    stale_quote_seconds: int | None = None,
 ) -> None:
     """Trigger a fresh option-chain fetch and write the result to storage.
 
@@ -331,8 +372,10 @@ def run_fetch(
     opx-strategy stage 3) that import opx_chain directly rather than
     invoking opx-fetch as a subprocess.
 
-    positions_path: override the default data/positions.csv location.
+    positions_path: override the default positions.csv location.
     tickers: override the ticker list from config for this run only.
+    max_expiration_weeks: override the expiration window from config for this run only.
+    stale_quote_seconds: override the staleness threshold from config for this run only.
 
     Raises RuntimeError if another fetch run is already active.
     Raises RuntimeError if the fetch produces no data.
@@ -345,6 +388,10 @@ def run_fetch(
         config = get_runtime_config()
         if tickers is not None:
             config = replace(config, tickers=tuple(tickers))
+        if max_expiration_weeks is not None:
+            config = replace(config, max_expiration_weeks=max_expiration_weeks)
+        if stale_quote_seconds is not None:
+            config = replace(config, stale_quote_seconds=stale_quote_seconds)
         set_runtime_config_override(config)
         _do_fetch_with_lock_held(config, positions_path, cli_override=None)
     finally:
@@ -362,7 +409,8 @@ def main(argv=None):
     try:
         config, cli_override = apply_cli_overrides(get_runtime_config(), args)
         set_runtime_config_override(config)
-        _do_fetch_with_lock_held(config, args.positions, cli_override=cli_override)
+        _do_fetch_with_lock_held(config, args.positions, cli_override=cli_override,
+                                 dry_run=args.dry_run)
         return 0
     except KeyboardInterrupt:
         return 130
