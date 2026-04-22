@@ -956,7 +956,7 @@ def parse_args(argv=None):
     if argv is None and "PYTEST_CURRENT_TEST" in os.environ:
         argv = []
     parser = argparse.ArgumentParser(
-        prog="opx-viewer",
+        prog="opx-view",
         description="Serve the local Options Screener UI.",
     )
     parser.add_argument(
