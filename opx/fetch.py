@@ -1,6 +1,8 @@
 """Fetch orchestration using the configured market-data provider."""
 
 from datetime import datetime, timezone
+import json
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -15,9 +17,48 @@ from opx.metrics import (
 )
 from opx.normalize import apply_post_download_filters, enrich_option_frame
 from opx.positions import EMPTY_POSITION_SET, PositionSet
-from opx.providers.base import ProviderAuthenticationError
+from opx.providers.base import OptionChainFrames, ProviderAuthenticationError
 from opx.providers import get_data_provider
+from opx.storage.cache import get_provider_cache
 from opx.validate import validate_option_rows
+
+
+def _cache_get_json(cache, key: str) -> dict | None:
+    """Return a cached dict if the key is present and unexpired, else None."""
+    data = cache.get(key)
+    if data is None:
+        return None
+    try:
+        return json.loads(data)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _cache_put_json(cache, key: str, value: dict, ttl: int) -> None:
+    """Serialise value to JSON and store in cache. Silently skips on serialisation error."""
+    try:
+        cache.put(key, json.dumps(value).encode(), ttl)
+    except (TypeError, ValueError):
+        pass
+
+
+def _cache_get_chain(cache, key: str) -> OptionChainFrames | None:
+    """Return a cached OptionChainFrames if present and unexpired, else None."""
+    data = cache.get(key)
+    if data is None:
+        return None
+    try:
+        return pickle.loads(data)  # nosec pickle — local filesystem cache only
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None
+
+
+def _cache_put_chain(cache, key: str, value: OptionChainFrames, ttl: int) -> None:
+    """Pickle an OptionChainFrames and store in cache."""
+    try:
+        cache.put(key, pickle.dumps(value), ttl)
+    except Exception:  # pylint: disable=broad-exception-caught
+        pass
 
 
 def _emit_fetch_info(message, logger=None):
@@ -93,10 +134,15 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
     provider = None
     try:
         config = get_runtime_config()
+        cache = get_provider_cache(config)
         fetched_at = pd.Timestamp.now(tz=timezone.utc)
         provider = get_data_provider()
         _emit_fetch_info(f"Loading {ticker}  ({provider.name})", logger=logger)
-        snapshot = provider.load_underlying_snapshot(ticker)
+        snap_key = f"snapshot:{provider.name}:{ticker}"
+        snapshot = _cache_get_json(cache, snap_key)
+        if snapshot is None:
+            snapshot = provider.load_underlying_snapshot(ticker)
+            _cache_put_json(cache, snap_key, snapshot, config.provider_snapshot_ttl)
         underlying_price = snapshot["underlying_price"]
         snap_time = snapshot["underlying_price_time"]
         _emit_fetch_info(
@@ -147,7 +193,11 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
             exp_msg += f"  skipped={skipped_total}"
         _emit_fetch_info(exp_msg, logger=logger)
 
-        events = provider.load_ticker_events(ticker)
+        events_key = f"events:{provider.name}:{ticker}"
+        events = _cache_get_json(cache, events_key)
+        if events is None:
+            events = provider.load_ticker_events(ticker)
+            _cache_put_json(cache, events_key, events, config.provider_events_ttl)
         earnings = events.get("next_earnings_date") or "none"
         ex_div = events.get("next_ex_div_date") or "none"
         _emit_fetch_info(
@@ -156,7 +206,11 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
         )
 
         for expiration_date in usable_expirations:
-            chain = provider.load_option_chain(ticker, expiration_date)
+            chain_key = f"chain:{provider.name}:{ticker}:{expiration_date}"
+            chain = _cache_get_chain(cache, chain_key)
+            if chain is None:
+                chain = provider.load_option_chain(ticker, expiration_date)
+                _cache_put_chain(cache, chain_key, chain, config.provider_chain_ttl)
             expiration_raw_count = len(chain.calls) + len(chain.puts)
             raw_contract_count += expiration_raw_count
             raw_expiration_count += 1
