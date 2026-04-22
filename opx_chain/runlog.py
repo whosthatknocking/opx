@@ -3,10 +3,10 @@
 import logging
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 from opx_chain.config import SCRIPT_VERSION, get_runtime_config
 from opx_chain.providers import get_data_provider
+from opx_chain.storage.factory import get_data_dir
 
 
 def configure_external_loggers(file_handler):
@@ -24,8 +24,8 @@ def create_run_logger():
     """Create the append-only run logger and return it with its file path."""
     config = get_runtime_config()
     timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
-    logs_dir = Path("logs")
-    logs_dir.mkdir(exist_ok=True)
+    logs_dir = get_data_dir() / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
     log_path = logs_dir / "opx_runs.log"
 
     logger = logging.getLogger("opx.run")
