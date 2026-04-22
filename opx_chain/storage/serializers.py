@@ -42,7 +42,7 @@ class ParquetSerializer:  # pylint: disable=too-few-public-methods
         except ImportError as exc:
             raise RuntimeError(
                 "Parquet serialization requires pyarrow. "
-                "Install it with: pip install 'opx[parquet]'"
+                "Install it with: pip install 'opx-chain[parquet]'"
             ) from exc
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)

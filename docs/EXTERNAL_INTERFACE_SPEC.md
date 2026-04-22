@@ -12,11 +12,13 @@ integrate without coupling to internal implementation details.
 
 ## 1. Scope
 
-Two integration points are in scope:
+Three integration points are in scope:
 
 1. **CLI invocation** — a downstream orchestrator can invoke `opx-fetcher` as a
    subprocess to trigger a fresh chain fetch
-2. **Storage interface** — a downstream consumer can import `opx_chain` as a Python
+2. **Programmatic fetch** — a downstream consumer running in the same process can call
+   `opx_chain.fetcher.run_fetch()` to trigger a fetch without spawning a subprocess
+3. **Storage interface** — a downstream consumer can import `opx_chain` as a Python
    package and use `StorageBackend` to discover and read the latest chain dataset
 
 Everything else — internal storage layout, provider adapters, scoring weights,
@@ -84,20 +86,47 @@ layer without shelling out or scanning the filesystem directly.
 
 ### 3.1 Public surface
 
-The stable public surface is limited to:
+The stable public surface is:
 
 ```python
+from opx_chain.fetcher import run_fetch
 from opx_chain.storage.base import StorageBackend
 from opx_chain.storage.models import DatasetHandle, DatasetRecord, RunRecord
 from opx_chain.storage.factory import get_storage_backend
 from opx_chain import SCHEMA_VERSION
 ```
 
-All other modules are internal. Importing from `opx_chain.fetcher`, `opx_chain.normalize`,
-`opx_chain.provider`, or any other internal module is not supported and may break across
+All other names within `opx_chain.fetcher`, `opx_chain.normalize`, `opx_chain.provider`,
+and other internal modules are not part of the stable interface and may change across
 releases.
 
-### 3.2 Obtaining a backend instance
+### 3.2 Triggering a fresh fetch programmatically
+
+```python
+from opx_chain.fetcher import run_fetch
+
+run_fetch(positions_path=Path("data/runs/<run_id>/positions.csv"))
+```
+
+`run_fetch()` is the in-process equivalent of invoking `opx-fetcher` as a subprocess.
+It acquires the same exclusive lock, runs the full fetch pipeline, and writes the result
+to storage. The caller blocks until the fetch completes.
+
+**`positions_path` (optional `Path`)** — overrides the default positions file, identical
+in semantics to the `--positions` CLI flag. When absent, the configured default is used.
+
+**Errors:**
+
+| Condition | Raised |
+|---|---|
+| Another fetch is already active (lock held) | `RuntimeError` |
+| Fetch produces no data | `RuntimeError` |
+| Provider or storage failure | provider-specific exception |
+
+After `run_fetch()` returns without error, the result is available via `get_storage_backend()`
+exactly as it would be after a successful `opx-fetcher` subprocess exit.
+
+### 3.3 Obtaining a backend instance
 
 ```python
 backend: StorageBackend = get_storage_backend()
@@ -107,7 +136,7 @@ backend: StorageBackend = get_storage_backend()
 on the `opx-chain` config. No arguments are required. The consumer must not construct a
 backend directly.
 
-### 3.3 Discovering the latest dataset
+### 3.4 Discovering the latest dataset
 
 ```python
 records: list[DatasetRecord] = backend.list_datasets(limit=1)
@@ -121,7 +150,7 @@ The consumer should validate:
 - `records[0].schema_version == SCHEMA_VERSION` (schema drift → must re-fetch or
   update the consumer to handle the new schema before proceeding)
 
-### 3.4 Obtaining a dataset handle
+### 3.5 Obtaining a dataset handle
 
 ```python
 handle: DatasetHandle = backend.get_dataset(dataset_id)
@@ -130,7 +159,7 @@ handle: DatasetHandle = backend.get_dataset(dataset_id)
 Returns a `DatasetHandle` for the given `dataset_id`. The consumer reads the chain
 artifact at `handle.location`.
 
-### 3.5 Retrieving a run record
+### 3.6 Retrieving a run record
 
 ```python
 run: RunRecord = backend.get_run(run_id)
@@ -150,7 +179,7 @@ run = backend.get_run(records[0].run_id)
 assert run.positions_fingerprint == pipeline_positions_fingerprint
 ```
 
-### 3.6 Reading the chain artifact
+### 3.7 Reading the chain artifact
 
 ```python
 from opx_chain.utils import read_dataset_file

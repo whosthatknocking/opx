@@ -126,20 +126,16 @@ def release_fetcher_lock(lock_handle):
             pass
 
 
-def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
-    """Fetch configured tickers and write the consolidated CSV output."""
-    args = parse_args(argv)
-    lock_handle = acquire_fetcher_lock()
-    if lock_handle is None:
-        print(f"Another fetcher run is already active: {FETCHER_LOCK_PATH}")
-        return 1
-
+def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+    config,
+    positions_path: Path | None,
+    cli_override: str | None,
+) -> None:
+    """Execute the fetch pipeline. Lock must already be held by caller. Raises on failure."""
     logger = None
     storage = None
     run_id = None
     try:
-        config, cli_override = apply_cli_overrides(get_runtime_config(), args)
-        set_runtime_config_override(config)
         storage = get_storage_backend(config)
         logger, log_path = create_run_logger()
         print(f"Today: {config.today}  Log: {log_path}")
@@ -166,21 +162,21 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
         for warning in config.config_warnings:
             logger.warning("config_fallback %s", warning)
 
-        positions_path = (args.positions or DEFAULT_POSITIONS_PATH).expanduser()
-        logger.info("positions path: %s", positions_path)
-        position_set = load_positions(positions_path)
+        resolved_positions_path = (positions_path or DEFAULT_POSITIONS_PATH).expanduser()
+        logger.info("positions path: %s", resolved_positions_path)
+        position_set = load_positions(resolved_positions_path)
         extra_tickers = tuple(
             t for t in sorted(position_set.stock_tickers) if t not in set(config.tickers)
         )
         effective_tickers = config.tickers + extra_tickers
-        if positions_path.exists():
+        if resolved_positions_path.exists():
             print(
-                f"Positions ({positions_path}): "
+                f"Positions ({resolved_positions_path}): "
                 f"{len(position_set.stock_tickers)} stocks, "
                 f"{len(position_set.option_keys)} options"
             )
         else:
-            print(f"Positions ({positions_path}): file not found, skipping")
+            print(f"Positions ({resolved_positions_path}): file not found, skipping")
         if extra_tickers:
             print(f"  Added from positions: {', '.join(extra_tickers)}")
         logger.info(
@@ -195,7 +191,7 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
                 provider=config.data_provider,
                 tickers=effective_tickers,
                 config_fingerprint=_config_fingerprint(config),
-                positions_fingerprint=_positions_fingerprint(positions_path),
+                positions_fingerprint=_positions_fingerprint(resolved_positions_path),
             ))
 
         ticker_frames = []
@@ -238,7 +234,8 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
             logger.warning("run_finished no_data_fetched=true")
             if storage is not None and run_id is not None:
                 storage.fail_run(run_id, "no data fetched")
-            return 1
+                run_id = None
+            raise RuntimeError("No data fetched.")
 
         combined = pd.concat(ticker_frames, ignore_index=True)
         if config.enable_validation:
@@ -297,7 +294,6 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
             write_csv,
             run_id,
         )
-        return 0
     except KeyboardInterrupt:
         print("\nInterrupted.")
         if logger:
@@ -306,13 +302,54 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
             storage.finalize_run(
                 run_id, RunSummary(status="interrupted", error_summary="interrupted")
             )
-        return 130
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+        raise
+    except Exception as exc:
         print(f"\nFatal error: {exc}")
         if logger:
             logger.exception("run_finished fatal error: %s", exc)
         if storage is not None and run_id is not None:
             storage.fail_run(run_id, str(exc))
+        raise
+
+
+def run_fetch(positions_path: Path | None = None) -> None:
+    """Trigger a fresh option-chain fetch and write the result to storage.
+
+    This is the programmatic entry point for downstream consumers (e.g.
+    opx-strategy stage 3) that import opx_chain directly rather than
+    invoking opx-fetcher as a subprocess.
+
+    Raises RuntimeError if another fetch run is already active.
+    Raises RuntimeError if the fetch produces no data.
+    Propagates any provider-level exception on fatal failure.
+    """
+    lock_handle = acquire_fetcher_lock()
+    if lock_handle is None:
+        raise RuntimeError(f"Another fetcher run is already active: {FETCHER_LOCK_PATH}")
+    try:
+        config = get_runtime_config()
+        set_runtime_config_override(config)
+        _do_fetch_with_lock_held(config, positions_path, cli_override=None)
+    finally:
+        set_runtime_config_override(None)
+        release_fetcher_lock(lock_handle)
+
+
+def main(argv=None):
+    """Fetch configured tickers and write the consolidated CSV output."""
+    args = parse_args(argv)
+    lock_handle = acquire_fetcher_lock()
+    if lock_handle is None:
+        print(f"Another fetcher run is already active: {FETCHER_LOCK_PATH}")
+        return 1
+    try:
+        config, cli_override = apply_cli_overrides(get_runtime_config(), args)
+        set_runtime_config_override(config)
+        _do_fetch_with_lock_held(config, args.positions, cli_override=cli_override)
+        return 0
+    except KeyboardInterrupt:
+        return 130
+    except Exception:  # pylint: disable=broad-exception-caught
         return 1
     finally:
         set_runtime_config_override(None)

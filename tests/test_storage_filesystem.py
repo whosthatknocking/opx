@@ -334,6 +334,7 @@ def test_factory_returns_filesystem_backend_when_enabled(tmp_path: Path):
 
 def test_write_dataset_parquet_creates_parquet_file(tmp_path: Path):
     """write_dataset with dataset_format='parquet' must create a .parquet artifact."""
+    pytest.importorskip("pyarrow")
     backend = _make_backend(tmp_path, dataset_format="parquet")
     run_id = backend.create_run(_make_context())
     record = backend.write_dataset(
@@ -347,6 +348,7 @@ def test_write_dataset_parquet_creates_parquet_file(tmp_path: Path):
 
 def test_write_dataset_parquet_is_readable(tmp_path: Path):
     """A parquet artifact written by FilesystemBackend must be readable by pandas."""
+    pytest.importorskip("pyarrow")
     backend = _make_backend(tmp_path, dataset_format="parquet")
     run_id = backend.create_run(_make_context())
     df = _make_dataframe()
