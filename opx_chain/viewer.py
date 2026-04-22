@@ -35,7 +35,7 @@ OUTPUTS_DIR = get_data_dir() / "output"
 POSITIONS_PATH = DEFAULT_POSITIONS_PATH
 CSV_PATTERN = "options_engine_output_*.csv"
 _DATA_DIR_OVERRIDE: Path | None = None
-_LEGACY_CSV_MODE: bool = False
+_CSV_MODE: bool = False
 VIEWER_PREFS_PATH = Path("~/.config/opx-chain/viewer_prefs.json").expanduser()
 ALLOWED_DATASET_SUFFIXES = frozenset({".csv", ".parquet"})
 HIDDEN_COLUMNS = {
@@ -190,7 +190,7 @@ def discover_dataset_paths() -> list[Path]:
     When --data-dir was supplied on the CLI, scans that directory for .csv and
     .parquet files. When storage is enabled, queries the storage backend for
     registered artifact locations. Falls back to globbing the output directory
-    for legacy CSV exports matching the standard filename pattern.
+    for timestamped CSV exports matching the standard filename pattern.
     """
     if _DATA_DIR_OVERRIDE is not None:
         candidates = [
@@ -199,7 +199,7 @@ def discover_dataset_paths() -> list[Path]:
         ]
         return sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
 
-    if not _LEGACY_CSV_MODE:
+    if not _CSV_MODE:
         storage = get_storage_backend()
         if storage is not None:
             records = storage.list_datasets()
@@ -987,7 +987,7 @@ def parse_args(argv=None):
         ),
     )
     parser.add_argument(
-        "--legacy-csv",
+        "--csv",
         action="store_true",
         help=(
             "Skip the storage backend and read timestamped CSV exports "
@@ -1004,13 +1004,13 @@ def open_viewer_in_browser(host: str, port: int) -> None:
 
 def main(argv=None) -> None:
     """Start the local viewer using runtime config with optional env overrides."""
-    global _DATA_DIR_OVERRIDE, _LEGACY_CSV_MODE  # pylint: disable=global-statement
+    global _DATA_DIR_OVERRIDE, _CSV_MODE  # pylint: disable=global-statement
     args = parse_args(argv)
     if args.data_dir is not None:
         _DATA_DIR_OVERRIDE = args.data_dir.expanduser().resolve()
     else:
         _DATA_DIR_OVERRIDE = None
-    _LEGACY_CSV_MODE = args.legacy_csv
+    _CSV_MODE = args.csv
     config = get_runtime_config()
     host = os.environ.get("OPX_VIEWER_HOST", config.viewer_host)
     port = int(os.environ.get("OPX_VIEWER_PORT", str(config.viewer_port)))

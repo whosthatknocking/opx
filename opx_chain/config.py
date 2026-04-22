@@ -95,7 +95,7 @@ class RuntimeConfig:
     storage_backend: str = "filesystem"
     storage_max_runs_retained: int = 0
     storage_dataset_format: str = "csv"
-    storage_write_legacy_csv: bool = True
+    storage_also_write_csv: bool = True
     storage_dir: Path | None = None       # absolute base for output/data/logs dirs; defaults to cwd
     provider_cache_backend: str = "none"
     provider_cache_dir: Path = field(default_factory=lambda: Path("cache"))
@@ -540,9 +540,9 @@ def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:  # py
             warnings=warnings,
             validator=lambda v: v in {"csv", "parquet"},
         ),
-        storage_write_legacy_csv=_resolve_config_value(
-            storage_settings.get("write_legacy_csv"),
-            field_name="storage.write_legacy_csv",
+        storage_also_write_csv=_resolve_config_value(
+            storage_settings.get("also_write_csv"),
+            field_name="storage.also_write_csv",
             default=True,
             coercer=_coerce_bool,
             warnings=warnings,
@@ -767,7 +767,7 @@ def describe_runtime_config(config: RuntimeConfig) -> tuple[str, ...]:
             (
                 f"backend: {config.storage_backend}"
                 f"  dataset_format: {config.storage_dataset_format}"
-                f"  write_legacy_csv: {config.storage_write_legacy_csv}"
+                f"  also_write_csv: {config.storage_also_write_csv}"
             ),
             f"cache: {config.provider_cache_backend}",
         ]

@@ -133,7 +133,7 @@ to the output directory. The exact filename depends on the configured format:
 ~/.local/share/opx-chain/output/<uuid>.csv       # dataset_format = "csv"
 ```
 
-When `write_legacy_csv = true` (the default), a timestamped legacy CSV is also written
+When `also_write_csv = true` (the default), a timestamped CSV is also written
 alongside the storage artifact:
 
 ```text

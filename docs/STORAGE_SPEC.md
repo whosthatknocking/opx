@@ -96,7 +96,7 @@ enable = false                 # default: storage disabled; existing runtime unc
 backend = "filesystem"         # "filesystem" (default when enabled) | "sqlite"
 dataset_format = "csv"         # "csv" (default) | "parquet"
 max_runs_retained = 0          # 0 = keep all (default); positive integer = keep last N
-write_legacy_csv = true        # write <data-dir>/output/options_engine_output_<ts>.csv alongside storage artifact
+also_write_csv = true          # also write <data-dir>/output/options_engine_output_<ts>.csv alongside the storage artifact
 # dir = "/path/to/custom/dir"  # override XDG data dir (default: $XDG_DATA_HOME/opx-chain or ~/.local/share/opx-chain)
 
 # Provider response cache (optional)
@@ -116,7 +116,7 @@ Behavior:
   `StorageBackend`, `opx-check` uses `list_datasets(limit=1)`, and the Python
   package interface becomes available to downstream consumers
 - `backend` is only read when `enable = true`; it is ignored otherwise
-- `write_legacy_csv = false` suppresses the timestamped legacy CSV; only the
+- `also_write_csv = false` suppresses the timestamped CSV; only the
   storage-managed artifact (e.g. `~/.local/share/opx-chain/output/<uuid>.parquet`)
   is written; the viewer discovers it automatically via the storage backend; only
   meaningful when `enable = true`
@@ -594,8 +594,8 @@ All seven steps are complete and shipped.
 - `fetcher.py` calls `create_run` / `record_ticker_result` / `write_dataset` /
   `finalize_run` / `fail_run` when storage is enabled
 - `opx-check` uses `list_datasets(limit=1)` when storage is enabled
-- `write_legacy_csv` config key (default `true`) controls whether the timestamped
-  `output/options_engine_output_<ts>.csv` is also written
+- `also_write_csv` config key (default `true`) controls whether the timestamped
+  `output/options_engine_output_<ts>.csv` is also written alongside the storage artifact
 
 ### Step 4 — Parquet serializer ✓
 
@@ -618,7 +618,7 @@ All seven steps are complete and shipped.
 ### Step 7 — Viewer enhancements ✓
 
 - `opx-view --data-dir DIR` scans an arbitrary directory for `.csv` and
-  `.parquet` files; default discovery remains the legacy CSV glob
+  `.parquet` files; default discovery queries the storage backend, falling back to the timestamped CSV glob
 - viewer preference store: `~/.config/opx-chain/viewer_prefs.json`,
   GET/POST `/api/prefs`
 

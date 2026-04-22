@@ -288,7 +288,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
             emit_validation_report(validation_findings, logger=logger)
         row_count = len(combined)
 
-        write_csv = storage is None or config.storage_write_legacy_csv
+        write_csv = storage is None or config.storage_also_write_csv
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = OUTPUTS_DIR / f"options_engine_output_{timestamp}.csv"
         if write_csv:
@@ -332,7 +332,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
 
         logger.info(
             "run_finished ticker_frames=%s rows_written=%s file_size_bytes=%s"
-            " legacy_csv=%s run_id=%s",
+            " also_csv=%s run_id=%s",
             len(ticker_frames),
             row_count,
             file_size_bytes,

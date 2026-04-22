@@ -319,12 +319,12 @@ Implemented. `opx_chain.storage.factory.get_storage_backend()` returns a
 `StorageBackend` instance configured from the `opx-chain` config, or `None` when
 storage is disabled.
 
-### 7.5 `write_legacy_csv` config option
+### 7.5 `also_write_csv` config option
 
-When `[storage] write_legacy_csv = false` (default `true`), `opx-fetch` skips
+When `[storage] also_write_csv = false` (default `true`), `opx-fetch` skips
 writing the timestamped `output/options_engine_output_<ts>.csv` file. Only the
-storage-managed artifact is written. Downstream orchestrators that depend on the
-legacy filename pattern must either keep `write_legacy_csv = true` or switch to
+storage-managed artifact is written. Downstream orchestrators that read the
+timestamped filename pattern must either keep `also_write_csv = true` or switch to
 reading through `get_storage_backend().list_datasets()`.
 
 ### 7.7 Add `get_run()` to `StorageBackend` protocol
@@ -335,13 +335,14 @@ Add `get_run(run_id: str) -> RunRecord` to the `StorageBackend` protocol in
 downstream consumers can call it through the typed interface. `MemoryBackend`
 must also implement it so the protocol conformance test passes.
 
-### 7.6 `opx-view --data-dir`
+### 7.6 `opx-view --data-dir` and `--csv`
 
 `opx-view` accepts a `--data-dir DIR` argument that overrides all dataset
 discovery — it scans `DIR` for `.csv` and `.parquet` files ordered by
-modification time. This is the primary way to view datasets when legacy CSV
-output is disabled. The default viewer behavior (no `--data-dir`) is to glob
-`output/options_engine_output_*.csv` as before.
+modification time. The `--csv` flag skips the storage backend and reads
+timestamped CSV exports directly from the output directory. The default
+behavior queries the storage backend first, falling back to the timestamped
+CSV glob when no storage records exist.
 
 ---
 
