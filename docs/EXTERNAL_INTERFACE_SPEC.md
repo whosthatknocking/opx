@@ -133,13 +133,13 @@ artifact at `handle.location`.
 ### 3.5 Reading the chain artifact
 
 ```python
-import pandas as pd
-df = pd.read_csv(handle.location)  # when handle.format == "csv"
+from opx.utils import read_dataset_file
+df = read_dataset_file(handle.location)  # dispatches on .csv / .parquet extension
 ```
 
-The consumer is responsible for choosing the correct reader based on `handle.format`.
-When Parquet support is added (STORAGE_SPEC §17, step 4), `handle.format` will be
-`"parquet"` for new datasets.
+`read_dataset_file` is the recommended reader. It selects `pd.read_parquet` or
+`pd.read_csv` based on the file extension, matching `handle.format`. Parquet
+requires the optional `pyarrow` dependency (`pip install 'opx[parquet]'`).
 
 ---
 
@@ -259,11 +259,25 @@ Implemented. Behaviour is specified in `docs/PROJECT_SPEC.md` §7.3.
 
 ### 7.4 Expose `get_storage_backend()` as a public factory function
 
-`opx.storage.factory.get_storage_backend()` must be importable and return a
-`StorageBackend` instance configured from the `opx` config. If this function does
-not yet exist, it should be created as part of STORAGE_SPEC step 2.
+Implemented. `opx.storage.factory.get_storage_backend()` returns a
+`StorageBackend` instance configured from the `opx` config, or `None` when
+storage is disabled.
 
-No arguments; reads config from the standard `opx` config path.
+### 7.5 `write_legacy_csv` config option
+
+When `[storage] write_legacy_csv = false` (default `true`), `opx-fetcher` skips
+writing the timestamped `output/options_engine_output_<ts>.csv` file. Only the
+storage-managed artifact is written. Downstream orchestrators that depend on the
+legacy filename pattern must either keep `write_legacy_csv = true` or switch to
+reading through `get_storage_backend().list_datasets()`.
+
+### 7.6 `opx-viewer --data-dir`
+
+`opx-viewer` accepts a `--data-dir DIR` argument that overrides all dataset
+discovery — it scans `DIR` for `.csv` and `.parquet` files ordered by
+modification time. This is the primary way to view datasets when legacy CSV
+output is disabled. The default viewer behavior (no `--data-dir`) is to glob
+`output/options_engine_output_*.csv` as before.
 
 ---
 

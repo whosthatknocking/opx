@@ -741,4 +741,16 @@ def describe_runtime_config(config: RuntimeConfig) -> tuple[str, ...]:
             f"providers.massive.request_interval_seconds: "
             f"{config.massive_request_interval_seconds}",
         ]
+    if config.storage_enabled:
+        lines += [
+            "Storage:",
+            (
+                f"backend: {config.storage_backend}"
+                f"  dataset_format: {config.storage_dataset_format}"
+                f"  write_legacy_csv: {config.storage_write_legacy_csv}"
+            ),
+            f"cache: {config.provider_cache_backend}",
+        ]
+    else:
+        lines += ["Storage:", "enable: false"]
     return tuple(lines)

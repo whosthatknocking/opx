@@ -254,8 +254,9 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
             export_df = prepare_export_frame([combined])
             file_size_bytes = 0
 
+        dataset_record = None
         if storage is not None and run_id is not None:
-            storage.write_dataset(run_id, DatasetWrite(
+            dataset_record = storage.write_dataset(run_id, DatasetWrite(
                 data=export_df,
                 provider=config.data_provider,
                 schema_version=SCHEMA_VERSION,
@@ -263,25 +264,37 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
             ))
             storage.finalize_run(run_id, RunSummary(status="complete"))
 
+        print()
         if write_csv:
-            logger.info(
-                "run_finished output_path=%s ticker_frames=%s rows_written=%s file_size_bytes=%s",
-                output_path,
-                len(ticker_frames),
-                row_count,
-                file_size_bytes,
+            print(f"Saved: {output_path}")
+        if dataset_record is not None:
+            artifact_path = Path(dataset_record.location)
+            artifact_size = (
+                format_file_size(artifact_path.stat().st_size)
+                if artifact_path.exists() else "unknown size"
             )
-            print(f"\nSaved: {output_path}")
+            run_short = run_id[:8] if run_id else "?"
+            print(
+                f"Storage: run={run_short}  "
+                f"artifact={artifact_path}  {artifact_size}"
+            )
+
+        if write_csv:
             file_size = format_file_size(file_size_bytes)
-            print(f"rows={row_count}  size={file_size}  dropped={filtered_out_rows}")
+            summary = f"rows={row_count}  size={file_size}  dropped={filtered_out_rows}"
         else:
-            logger.info(
-                "run_finished legacy_csv=disabled ticker_frames=%s rows_written=%s",
-                len(ticker_frames),
-                row_count,
-            )
-            print("\nDone (legacy CSV disabled).")
-            print(f"rows={row_count}  dropped={filtered_out_rows}")
+            summary = f"rows={row_count}  dropped={filtered_out_rows}"
+        print(summary)
+
+        logger.info(
+            "run_finished ticker_frames=%s rows_written=%s file_size_bytes=%s"
+            " legacy_csv=%s run_id=%s",
+            len(ticker_frames),
+            row_count,
+            file_size_bytes,
+            write_csv,
+            run_id,
+        )
         return 0
     except KeyboardInterrupt:
         print("\nInterrupted.")

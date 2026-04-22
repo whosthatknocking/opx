@@ -35,8 +35,12 @@ The project currently supports:
 - provider-backed fetches through `marketdata`
 - canonical CSV export with shared derived metrics
 - provider-aware field reference documentation
-- a local viewer for exported CSV files
+- a local viewer for exported CSV files (`opx-viewer`); `--data-dir DIR` scans
+  an arbitrary directory for `.csv` and `.parquet` files
 - provider debug payload dumps for raw-response inspection
+- opt-in storage layer (`[storage] enable = true`) with filesystem and SQLite
+  backends, parquet artifact format, configurable dataset retention, and a
+  provider response cache; see `docs/STORAGE_SPEC.md`
 - per-ticker corporate event data (earnings dates and ex-dividend dates) fetched from the `marketdata` provider via `stocks/earnings/{symbol}/` (SDK) and `stocks/dividends/{symbol}/` (direct HTTP), including an explicit earnings-date estimate flag, then broadcast to all option rows as event risk flags and a composite `event_risk_score`
 
 The project does not currently aim to:

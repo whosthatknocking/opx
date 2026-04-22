@@ -92,8 +92,18 @@ The storage layer is controlled by a `[storage]` section in
 
 ```toml
 [storage]
-enable = false           # default: storage disabled; existing runtime unchanged
-backend = "filesystem"   # "filesystem" (default when enabled) | "sqlite"
+enable = false                 # default: storage disabled; existing runtime unchanged
+backend = "filesystem"         # "filesystem" (default when enabled) | "sqlite"
+dataset_format = "csv"         # "csv" (default) | "parquet"
+max_runs_retained = 0          # 0 = keep all (default); positive integer = keep last N
+write_legacy_csv = true        # write output/options_engine_output_<ts>.csv alongside storage artifact
+
+# Provider response cache (optional)
+cache_backend = "none"         # "none" (default) | "filesystem"
+cache_dir = "cache"            # path to cache directory (used when cache_backend = "filesystem")
+snapshot_ttl = 300             # TTL in seconds for underlying snapshot cache entries
+chain_ttl = 300                # TTL in seconds for option chain cache entries
+events_ttl = 86400             # TTL in seconds for ticker events cache entries
 ```
 
 Behavior:
@@ -105,8 +115,12 @@ Behavior:
   `StorageBackend`, `opx-check` uses `list_datasets(limit=1)`, and the Python
   package interface becomes available to downstream consumers
 - `backend` is only read when `enable = true`; it is ignored otherwise
-- startup output prints the resolved storage config when enabled; when disabled,
-  storage config is not mentioned
+- `write_legacy_csv = false` suppresses the timestamped legacy CSV; only the
+  storage-managed artifact (e.g. `output/<uuid>.parquet`) is written; the viewer
+  reaches it via `opx-viewer --data-dir output/`; only meaningful when
+  `enable = true`
+- startup output always prints the resolved `Storage:` section; when disabled,
+  it prints `enable: false`
 
 The `enable` key must default to `false` in the config loader. Malformed or
 unrecognised `backend` values fall back to `"filesystem"` with a warning.
@@ -404,14 +418,17 @@ acquire lock → create_run (status=running)
   → finalize_run (status=complete)
   → release lock
 
-on error:
-  → fail_run (status=failed, error=...)
+on unexpected exception:
+  → fail_run (status=failed, error=<message>)
   → release lock
 
 on KeyboardInterrupt:
-  → fail_run (status=interrupted)
+  → finalize_run (status=interrupted, error_summary="interrupted")
   → release lock
 ```
+
+The `pending` status value is reserved for future use; `create_run` sets
+`status=running` immediately.
 
 ## 10. Missing Field Values
 
@@ -470,12 +487,15 @@ class DatasetSerializer(Protocol):
     # returns bytes written; raises on failure
 ```
 
-The CSV serializer wraps `pd.DataFrame.to_csv`. It is the initial and default
-format.
-
-Parquet support is deferred to Step 4. When added, `FilesystemBackend` selects
-the serializer based on the `dataset_format` config option (`csv` default). The
+Both `CsvSerializer` and `ParquetSerializer` are implemented in
+`opx/storage/serializers.py`. `get_serializer(fmt)` returns the appropriate
+instance. `FilesystemBackend` and `SqliteIndexedBackend` select the serializer
+based on the `dataset_format` config option (`"csv"` default). The
 `DatasetHandle.format` field tells downstream consumers which reader to use.
+
+`ParquetSerializer` requires the optional `pyarrow` dependency
+(`pip install 'opx[parquet]'`). Reading parquet files uses
+`opx.utils.read_dataset_file(path)`, which dispatches on file extension.
 
 ## 12. Dataset Retention
 
@@ -550,93 +570,57 @@ opx/storage/
   cache.py         # ProviderCache implementations
 ```
 
-## 17. Implementation Order
+## 17. Implementation Status
 
-The changes should be executed in the following sequence. Each step is
-independently shippable and leaves the system in a working state.
+All seven steps are complete and shipped.
 
-### Step 1 — Domain models and protocols (no behavior change)
+### Step 1 — Domain models and protocols ✓
 
-- introduce `opx/storage/base.py` with `StorageBackend` and `ProviderCache` protocols
-- introduce `opx/storage/models.py` with all records and write payloads
-- introduce `opx/storage/serializers.py` with `DatasetSerializer` protocol and CSV implementation
-- add `SCHEMA_VERSION: int = 1` to `opx/__init__.py`; update `opx/export.py` to import and reference it
-- add `MemoryBackend` in `opx/storage/memory.py`
-- no changes to `fetcher.py`, `fetch.py`, or `viewer.py`
-- tests: verify `MemoryBackend` satisfies the protocol and roundtrips all write operations
+- `opx/storage/base.py` — `StorageBackend` and `ProviderCache` protocols
+- `opx/storage/models.py` — all records and write payloads
+- `opx/storage/serializers.py` — `DatasetSerializer` protocol and CSV implementation
+- `SCHEMA_VERSION: int = 1` in `opx/__init__.py`
+- `MemoryBackend` in `opx/storage/memory.py`
 
-### Step 2 — Filesystem backend (parallel path, storage disabled by default)
+### Step 2 — Filesystem backend ✓
 
-- implement `FilesystemBackend` in `opx/storage/filesystem.py`
-  - `write_dataset` calls the CSV serializer and writes to `output/`
-  - `create_run`, `finalize_run`, `fail_run` write JSON sidecar files to `logs/`
-  - `write_artifact` writes to `debug/`
-  - `list_datasets` scans `output/` and parses sidecars
-- implement dataset retention pruning in `FilesystemBackend`
-- add `StorageFactory` in `opx/storage/factory.py`; reads `[storage]` config and
-  returns `None` when `enable = false`, `FilesystemBackend` when enabled
-- add `[storage]` parsing to `opx/config.py`; default `enable = false`
-- no change to output format, directory layout, or existing write paths
-- existing tests are unchanged; add new tests for `FilesystemBackend` using `tmp_path`
+- `FilesystemBackend` in `opx/storage/filesystem.py`
+- `StorageFactory` in `opx/storage/factory.py`
+- `[storage]` parsing in `opx/config.py`
 
-### Step 3 — Wire `fetcher.py` and `opx-check` to the storage port (opt-in)
+### Step 3 — Wire `fetcher.py` and `opx-check` ✓
 
-- `fetcher.py`: after the existing `write_options_csv` call, if storage is enabled,
-  also call `storage.write_dataset` with the same frame — both paths run; the
-  storage write is additive, not a replacement
-- `opx-check`: if storage is enabled, use `storage.list_datasets(limit=1)` for
-  dataset discovery; otherwise keep the existing `output/` directory scan
-- wrap the run lifecycle in `create_run` / `finalize_run` / `fail_run` only when
-  storage is enabled; existing lock/log behavior is unchanged either way
-- existing `write_options_csv` tests are unchanged
-- add new tests covering the storage-enabled branch using `MemoryBackend`
+- `fetcher.py` calls `create_run` / `record_ticker_result` / `write_dataset` /
+  `finalize_run` / `fail_run` when storage is enabled
+- `opx-check` uses `list_datasets(limit=1)` when storage is enabled
+- `write_legacy_csv` config key (default `true`) controls whether the timestamped
+  `output/options_engine_output_<ts>.csv` is also written
 
-### Step 4 — Parquet serializer
+### Step 4 — Parquet serializer ✓
 
-- add `ParquetSerializer` to `opx/storage/serializers.py`
-- add `dataset_format` config option (`csv` default)
-- `FilesystemBackend` selects serializer based on config
-- viewer and `opx-check` handle both formats via `DatasetHandle.format`
+- `ParquetSerializer` in `opx/storage/serializers.py`; requires `pyarrow`
+- `dataset_format` config option (`"csv"` default)
+- shared `read_dataset_file(path)` utility in `opx/utils.py` dispatches on extension
 
-### Step 5 — SQLite-indexed backend
+### Step 5 — SQLite-indexed backend ✓
 
-- implement `SqliteIndexedBackend` in `opx/storage/sqlite_indexed.py`
-  - stores run, dataset, ticker, validation, and artifact metadata in SQLite
-  - artifact files remain on disk; SQLite holds only metadata
-  - `list_datasets` queries SQLite with optional server-side filters
-- add migration logic for the SQLite schema (simple version table)
-- add `backend: sqlite` config option
-- tests: verify `list_datasets` queries and run lifecycle against `SqliteIndexedBackend`
+- `SqliteIndexedBackend` in `opx/storage/sqlite_indexed.py`
+- WAL mode, foreign keys, version table; schema defined in `docs/METADATA_SPEC.md`
 
-### Step 6 — Provider cache abstractions
+### Step 6 — Provider cache abstractions ✓
 
-- implement `ProviderCache` backends: `NullCache` (default) and `FilesystemCache`
-- wire into provider `load_underlying_snapshot`, `load_option_chain`,
-  `load_ticker_events` via an optional cache argument
-- TTL configurable per call type (snapshot vs. chain vs. events)
+- `NullCache` and `FilesystemCache` in `opx/storage/cache.py`
+- wired in `fetch.py` at the fetch-orchestration level; caches snapshot, chain,
+  and events responses with configurable TTLs
+- config keys: `cache_backend`, `cache_dir`, `snapshot_ttl`, `chain_ttl`, `events_ttl`
 
-### Step 7 — Viewer migration
+### Step 7 — Viewer enhancements ✓
 
-- migrate `viewer.py` to read datasets through `StorageBackend.list_datasets`
-  and `StorageBackend.get_dataset`
-- add viewer preference store (low priority, can be a simple JSON file initially)
+- `opx-viewer --data-dir DIR` scans an arbitrary directory for `.csv` and
+  `.parquet` files; default discovery remains the legacy CSV glob
+- viewer preference store: `~/.config/opx/viewer_prefs.json`,
+  GET/POST `/api/prefs`
 
 ## 18. Open Questions
 
-No open questions remain. The downstream metadata requirements are fully
-specified in `docs/METADATA_SPEC.md`, which also defines the SQLite schema
-for step 5 and documents which fields the `opx-strategy` consumer depends
-on from day one.
-
-## 19. Current Recommendation
-
-Recommended path:
-
-- execute steps 1 through 3 as the first milestone
-- keep storage disabled by default throughout; the existing runtime is never broken
-- keep exported datasets as immutable file artifacts throughout
-- defer SQLite until dataset discovery becomes a concrete need
-- introduce Parquet in step 4 before SQLite to validate the serializer abstraction
-
-This gives `opx` a clean opt-in storage boundary for downstream integration
-without changing anything for users who have not enabled it.
+No open questions remain.

@@ -26,7 +26,7 @@ One record per fetch run. Created by `create_run`, updated by
 | `run_id` | `str` | NO | 2 | Primary key; unique identifier for this fetch run |
 | `started_at` | `datetime` | NO | 2 | UTC timestamp when `create_run` was called |
 | `finished_at` | `datetime` | YES | 2 | UTC timestamp when `finalize_run` or `fail_run` was called; `None` while running |
-| `status` | `str` | NO | 2 | `pending` / `running` / `complete` / `failed` / `interrupted` |
+| `status` | `str` | NO | 2 | `running` / `complete` / `failed` / `interrupted`; `create_run` sets `running` immediately; `pending` is reserved |
 | `provider` | `str` | NO | 2 | Data provider name (e.g., `marketdata`, `yfinance`); required for dataset provenance |
 | `config_fingerprint` | `str` | NO | 2 | SHA-256 of the resolved config fields that affect output (provider, tickers, filter settings, scoring weights); two runs with the same fingerprint and positions fingerprint should produce structurally comparable datasets |
 | `positions_fingerprint` | `str` | NO | 2 | SHA-256 of the raw positions file bytes; empty string when no positions file is present; changes when held positions change, making it easy to attribute output differences to position vs. market changes |
