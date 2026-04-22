@@ -21,9 +21,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "coverage[toml]>=7.0",
     "playwright>=1.53",
     "pylint",
     "pytest>=8.0",
+    "pytest-cov>=5.0",
 ]
 parquet = [
     "pyarrow>=14.0",
@@ -42,3 +44,35 @@ opx_chain = ["viewer_static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+relative_files = true
+source = ["."]
+omit = [
+    "tests/*",
+    "scripts/*",
+    "config/*",
+    "docs/*",
+    ".venv/*",
+    "**/__pycache__/*",
+    "**/*.egg-info/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+sort = "cover"
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.coverage.json]
+output = "coverage.json"

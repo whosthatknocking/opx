@@ -39,6 +39,12 @@ For local development setup, including `.[dev]` extras and Playwright, use [docs
 
 This repo can also enforce local quality checks before each commit through the tracked Git pre-commit hook described in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
+For a full coverage report with missing lines plus HTML/XML/JSON artifacts, run:
+
+```bash
+./scripts/run_local_coverage.sh
+```
+
 Runtime configuration defaults live in [config/example.toml](config/example.toml). Copy it to `~/.config/opx-chain/config.toml` and replace provider placeholders as needed.
 
 The local viewer is organized around five primary tabs: `Dataset`, `Positions`, `Overview`, `Chain View`, and `Reference`.
@@ -91,5 +97,5 @@ Key dependencies:
 - `massive` for the official Massive / Polygon client library
 - `marketdata-sdk-py` for the official Market Data client library
 - `pandas`, `numpy`, and `scipy` for normalization and analytics
-- `pytest` in the `dev` extra for the automated test suite
+- `pytest`, `coverage`, and `pytest-cov` in the `dev` extra for the automated test and coverage workflow
 - `playwright` in the `dev` extra for browser-driven screenshot and UI checks

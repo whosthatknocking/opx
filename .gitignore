@@ -6,6 +6,11 @@ __pycache__/
 *.pyo
 *.pyd
 *.egg-info/
+.coverage
+.coverage.*
+coverage.json
+coverage.xml
+htmlcov/
 
 # Generated outputs
 *.csv

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -139,8 +140,17 @@ class SqliteIndexedBackend:
         conn.execute("PRAGMA journal_mode = WAL")
         return conn
 
+    @contextmanager
+    def _open_connection(self):
+        """Yield a SQLite connection and always close it on exit."""
+        conn = self._connect()
+        try:
+            yield conn
+        finally:
+            conn.close()
+
     def _init_schema(self) -> None:
-        with self._connect() as conn:
+        with self._open_connection() as conn:
             conn.executescript(_SCHEMA_SQL)
             existing = conn.execute(
                 "SELECT value FROM _schema_meta WHERE key = 'schema_version'"
@@ -172,7 +182,7 @@ class SqliteIndexedBackend:
     def create_run(self, context: RunContext) -> str:
         """Insert a new run row and return its run_id."""
         run_id = str(uuid.uuid4())
-        with self._connect() as conn:
+        with self._open_connection() as conn:
             conn.execute(
                 """INSERT INTO runs
                    (run_id, started_at, finished_at, status, provider,
@@ -191,7 +201,7 @@ class SqliteIndexedBackend:
 
     def record_ticker_result(self, run_id: str, result: TickerFetchResult) -> None:
         """Insert or replace a per-ticker result row."""
-        with self._connect() as conn:
+        with self._open_connection() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO ticker_results
                    (run_id, ticker, raw_row_count, normalized_row_count,
@@ -230,7 +240,7 @@ class SqliteIndexedBackend:
             location=str(artifact_path),
             content_hash=content_hash,
         )
-        with self._connect() as conn:
+        with self._open_connection() as conn:
             conn.execute(
                 """INSERT INTO datasets
                    (dataset_id, run_id, created_at, provider, schema_version,
@@ -261,7 +271,7 @@ class SqliteIndexedBackend:
         artifact_id, dest, content_hash = write_artifact_bytes(
             artifact.content, self._debug_dir, artifact.filename
         )
-        with self._connect() as conn:
+        with self._open_connection() as conn:
             conn.execute(
                 """INSERT INTO artifacts
                    (artifact_id, run_id, artifact_type, location, content_hash)
@@ -302,13 +312,13 @@ class SqliteIndexedBackend:
             sql += " WHERE " + " AND ".join(conditions)
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
-        with self._connect() as conn:
+        with self._open_connection() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [self._row_to_record(row) for row in rows]
 
     def get_dataset(self, dataset_id: str) -> DatasetHandle:
         """Return a DatasetHandle for the given dataset_id."""
-        with self._connect() as conn:
+        with self._open_connection() as conn:
             row = conn.execute(
                 "SELECT * FROM datasets WHERE dataset_id = ?", (dataset_id,)
             ).fetchone()
@@ -318,7 +328,7 @@ class SqliteIndexedBackend:
 
     def finalize_run(self, run_id: str, summary: RunSummary) -> None:
         """Update the run row with a completion status."""
-        with self._connect() as conn:
+        with self._open_connection() as conn:
             conn.execute(
                 "UPDATE runs SET status = ?, finished_at = ?, error_summary = ? WHERE run_id = ?",
                 (summary.status, _dt_to_str(_now()), summary.error_summary, run_id),
@@ -327,7 +337,7 @@ class SqliteIndexedBackend:
 
     def fail_run(self, run_id: str, error: str) -> None:
         """Update the run row with a failed status and error message."""
-        with self._connect() as conn:
+        with self._open_connection() as conn:
             conn.execute(
                 "UPDATE runs SET status = 'failed', finished_at = ?, error_summary = ? "
                 "WHERE run_id = ?",
@@ -337,7 +347,7 @@ class SqliteIndexedBackend:
 
     def get_run(self, run_id: str) -> RunRecord:
         """Return a RunRecord for the given run_id."""
-        with self._connect() as conn:
+        with self._open_connection() as conn:
             row = conn.execute(
                 "SELECT * FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
@@ -357,7 +367,7 @@ class SqliteIndexedBackend:
 
     def get_ticker_results(self, run_id: str) -> list[TickerRunRecord]:
         """Return per-ticker results for a run."""
-        with self._connect() as conn:
+        with self._open_connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM ticker_results WHERE run_id = ?", (run_id,)
             ).fetchall()

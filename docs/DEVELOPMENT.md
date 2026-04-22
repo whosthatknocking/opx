@@ -17,6 +17,7 @@ This guide is for people changing the codebase, adding providers, or working on 
 │   └── images/
 │       └── viewer-option-chain.png
 ├── scripts/
+│   ├── run_local_coverage.sh
 │   └── capture_viewer_screenshot.py
 ├── opx_chain/
 │   ├── config.py
@@ -84,6 +85,7 @@ The runtime depends on a small set of external libraries and upstream market-dat
 - `pandas`: primary tabular container for provider frames, normalization, and CSV export
 - `numpy`: numeric coercion, missing-value handling, and vectorized calculations
 - `pytest`: test runner
+- `coverage` and `pytest-cov`: local and CI-friendly coverage reporting
 - `pylint`: static linting used in CI
 - `playwright`: optional browser automation for viewer screenshots and UI checks
 
@@ -228,6 +230,22 @@ Run the linter with:
 ```
 pylint $(git ls-files '*.py')
 ```
+
+Run the dedicated local coverage workflow with:
+
+```bash
+./scripts/run_local_coverage.sh
+```
+
+That script:
+
+- runs the full pytest suite under coverage using the repo's `pyproject.toml` coverage config
+- measures the packaged modules plus the top-level compatibility entrypoints such as `main.py`, `fetcher.py`, and `viewer.py`
+- prints a missing-lines terminal report sorted by lowest coverage first
+- writes browser and machine-readable artifacts to `htmlcov/index.html`, `coverage.xml`, and `coverage.json`
+- prints a final `--skip-covered` report so only files with remaining gaps stay in view
+
+If you need a non-default interpreter, set `OPX_COVERAGE_PYTHON=/path/to/python` before running the script.
 
 ## Local Git Hooks
 

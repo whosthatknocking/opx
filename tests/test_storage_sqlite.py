@@ -1,7 +1,9 @@
 """Tests for SqliteIndexedBackend and factory sqlite path."""
 # pylint: disable=duplicate-code
 
+import gc
 import hashlib
+import warnings
 from datetime import timedelta
 from pathlib import Path
 
@@ -318,6 +320,38 @@ def test_factory_returns_sqlite_backend_when_configured(tmp_path: Path):
     )
     backend = get_storage_backend(config)
     assert isinstance(backend, SqliteIndexedBackend)
+
+
+def test_sqlite_connections_are_closed_after_operations(tmp_path: Path):
+    """Backend methods must not leak sqlite connections that warn at GC time."""
+    result = TickerFetchResult(
+        ticker="TSLA",
+        raw_row_count=4,
+        normalized_row_count=4,
+        kept_row_count=4,
+        filtered_row_count=0,
+        expiration_count=1,
+        status="ok",
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ResourceWarning)
+        backend = _make_backend(tmp_path)
+        run_id = backend.create_run(_make_context())
+        backend.record_ticker_result(run_id, result)
+        _write(backend, run_id)
+        backend.get_run(run_id)
+        backend.get_ticker_results(run_id)
+        backend.list_datasets()
+        backend.get_dataset(backend.list_datasets()[0].dataset_id)
+        del backend
+        gc.collect()
+
+    resource_warnings = [
+        warning for warning in caught
+        if issubclass(warning.category, ResourceWarning)
+    ]
+    assert not resource_warnings
 
 
 # ---------------------------------------------------------------------------
