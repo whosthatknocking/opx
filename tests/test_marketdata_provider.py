@@ -11,9 +11,12 @@ from marketdata.output_types.options_chain import OptionsChain
 from marketdata.sdk_error import MarketDataClientErrorResult
 
 from conftest import make_runtime_config
-from opx_chain import fetch
+from opx_chain import SCHEMA_VERSION, fetch
+from opx_chain.export import prepare_export_frame
 from opx_chain.providers.base import DataProvider, ProviderAuthenticationError
 from opx_chain.providers.marketdata import CALLER_USER_AGENT, MarketDataProvider
+from opx_chain.storage.filesystem import FilesystemBackend
+from opx_chain.storage.models import DatasetWrite, RunContext, RunSummary
 
 
 def make_chain_result():
@@ -483,3 +486,152 @@ def test_base_provider_load_ticker_events_returns_blank_defaults():
     assert events["next_earnings_date_is_estimated"] is None
     assert events["next_ex_div_date"] is None
     assert pd.isna(events["dividend_amount"])
+
+
+def test_marketdata_to_storage_pipeline_trace(monkeypatch, tmp_path):  # pylint: disable=too-many-statements,too-many-locals
+    """Trace specific field values from the MarketData SDK payload through to the storage artifact.
+
+    Fixture data (from make_chain_result):
+      Call  TSLA260417C00100000  strike=100  bid=1.2  ask=1.4  iv=0.31  delta=0.42  theta=-0.11
+      Put   TSLA260417P00095000  strike=95   bid=0.8  ask=1.0  iv=0.29  delta=-0.28 theta=-0.09
+    Stock quote: last=103.0, changepct=0.025
+    Config today=2026-03-20 → expiration 2026-04-17 → 28 DTE
+    """
+    patch_marketdata_client(monkeypatch)
+    today = date(2026, 3, 20)
+    config = make_runtime_config(
+        data_provider="marketdata",
+        marketdata_api_token="token",
+        today=today,
+        max_expiration="2026-06-30",
+        max_strike_distance_pct=0.30,
+        max_spread_pct_of_mid=0.25,
+        enable_filters=True,
+        enable_validation=False,
+    )
+
+    def config_factory():
+        return config
+
+    monkeypatch.setattr("opx_chain.fetch.get_runtime_config", config_factory)
+    monkeypatch.setattr("opx_chain.normalize.get_runtime_config", config_factory)
+    monkeypatch.setattr("opx_chain.metrics.get_runtime_config", config_factory)
+    monkeypatch.setattr("opx_chain.providers.marketdata.get_runtime_config", config_factory)
+    monkeypatch.setattr("opx_chain.fetch.get_data_provider", MarketDataProvider)
+
+    # ── Stage 1: fetch ──────────────────────────────────────────────────────
+    fetched = fetch.fetch_ticker_option_chain("TSLA")
+
+    assert len(fetched) == 2, "both call and put must survive filters"
+    assert set(fetched["option_type"]) == {"call", "put"}
+
+    call_fetched = fetched[fetched["option_type"] == "call"].iloc[0]
+    put_fetched = fetched[fetched["option_type"] == "put"].iloc[0]
+
+    # Values that must survive unchanged from provider payload
+    assert call_fetched["contract_symbol"] == "TSLA260417C00100000"
+    assert call_fetched["bid"] == pytest.approx(1.2)
+    assert call_fetched["ask"] == pytest.approx(1.4)
+    assert call_fetched["implied_volatility"] == pytest.approx(0.31)
+    assert call_fetched["delta"] == pytest.approx(0.42)   # kept via _merge_provider_and_derived
+    assert call_fetched["theta"] == pytest.approx(-0.11)  # kept via _merge_provider_and_derived
+    assert call_fetched["strike"] == pytest.approx(100.0)
+    assert call_fetched["underlying_price"] == pytest.approx(103.0)
+    assert call_fetched["underlying_day_change_pct"] == pytest.approx(0.025)
+    assert call_fetched["days_to_expiration"] == 28
+    assert call_fetched["data_source"] == "marketdata"
+
+    # Values derived by the pipeline from provider inputs
+    assert call_fetched["mark_price_mid"] == pytest.approx(1.30)
+    assert call_fetched["bid_ask_spread"] == pytest.approx(0.20)
+    assert call_fetched["bid_ask_spread_pct_of_mid"] == pytest.approx(0.20 / 1.30, rel=1e-4)
+    assert call_fetched["strike_minus_spot"] == pytest.approx(100.0 - 103.0)
+    assert call_fetched["theta_dollars_per_day"] == pytest.approx(abs(-0.11) * 100)
+
+    assert put_fetched["contract_symbol"] == "TSLA260417P00095000"
+    assert put_fetched["bid"] == pytest.approx(0.8)
+    assert put_fetched["ask"] == pytest.approx(1.0)
+    assert put_fetched["implied_volatility"] == pytest.approx(0.29)
+
+    # ── Stage 2: export ─────────────────────────────────────────────────────
+    export_df = prepare_export_frame([fetched])
+
+    assert len(export_df) == 2
+    assert "contract_symbol" in export_df.columns
+    assert "bid" in export_df.columns
+
+    # ── Stage 3: write to storage ───────────────────────────────────────────
+    backend = FilesystemBackend(
+        output_dir=tmp_path / "output",
+        logs_dir=tmp_path / "logs",
+        debug_dir=tmp_path / "debug",
+    )
+    run_id = backend.create_run(RunContext(
+        provider="marketdata",
+        tickers=("TSLA",),
+        config_fingerprint="trace_test",
+        positions_fingerprint="",
+    ))
+    record = backend.write_dataset(
+        run_id,
+        DatasetWrite(data=export_df, provider="marketdata", schema_version=SCHEMA_VERSION),
+    )
+    backend.finalize_run(run_id, RunSummary(status="complete"))
+
+    # ── Stage 4: verify DatasetRecord ───────────────────────────────────────
+    assert record.row_count == 2
+    assert record.schema_version == SCHEMA_VERSION
+    assert record.provider == "marketdata"
+    assert record.format == "csv"
+    assert len(record.content_hash) == 64         # SHA-256 hex
+    assert record.content_hash.isalnum()
+    assert (tmp_path / "output").joinpath(record.dataset_id + ".csv").exists()
+
+    # ── Stage 5: round-trip through the storage API ─────────────────────────
+    records = backend.list_datasets(limit=1)
+    assert len(records) == 1
+    handle = backend.get_dataset(records[0].dataset_id)
+    assert handle.row_count == 2
+    assert handle.schema_version == SCHEMA_VERSION
+    assert handle.content_hash == record.content_hash
+    assert handle.format == "csv"
+
+    run_record = backend.get_run(run_id)
+    assert run_record.status == "complete"
+    assert run_record.provider == "marketdata"
+    assert run_record.dataset_id == record.dataset_id
+    assert run_record.positions_fingerprint == ""
+
+    # ── Stage 6: verify the artifact CSV preserves all traced values ─────────
+    artifact_df = pd.read_csv(handle.location)
+    assert len(artifact_df) == 2
+
+    call_csv = artifact_df[artifact_df["option_type"] == "call"].iloc[0]
+    put_csv = artifact_df[artifact_df["option_type"] == "put"].iloc[0]
+
+    # Raw provider fields preserved through export to CSV
+    assert call_csv["contract_symbol"] == "TSLA260417C00100000"
+    assert call_csv["underlying_symbol"] == "TSLA"
+    assert call_csv["expiration_date"] == "2026-04-17"
+    assert call_csv["bid"] == pytest.approx(1.2)
+    assert call_csv["ask"] == pytest.approx(1.4)
+    assert call_csv["implied_volatility"] == pytest.approx(0.31)
+    assert call_csv["delta"] == pytest.approx(0.42)
+    assert call_csv["strike"] == pytest.approx(100.0)
+    assert call_csv["underlying_price"] == pytest.approx(103.0)
+    assert call_csv["underlying_day_change_pct"] == pytest.approx(0.025)
+    assert int(call_csv["days_to_expiration"]) == 28
+    assert call_csv["data_source"] == "marketdata"
+
+    # Pipeline-derived fields preserved through export to CSV
+    assert call_csv["mark_price_mid"] == pytest.approx(1.30)
+    assert call_csv["bid_ask_spread"] == pytest.approx(0.20)
+    assert call_csv["bid_ask_spread_pct_of_mid"] == pytest.approx(0.20 / 1.30, rel=1e-4)
+    assert call_csv["strike_minus_spot"] == pytest.approx(-3.0)
+    assert call_csv["theta_dollars_per_day"] == pytest.approx(11.0)  # abs(theta) * 100
+
+    # Put side
+    assert put_csv["contract_symbol"] == "TSLA260417P00095000"
+    assert put_csv["bid"] == pytest.approx(0.8)
+    assert put_csv["ask"] == pytest.approx(1.0)
+    assert put_csv["underlying_price"] == pytest.approx(103.0)
