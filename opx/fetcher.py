@@ -133,11 +133,12 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
         return 1
 
     logger = None
-    storage = get_storage_backend()
+    storage = None
     run_id = None
     try:
         config, cli_override = apply_cli_overrides(get_runtime_config(), args)
         set_runtime_config_override(config)
+        storage = get_storage_backend(config)
         logger, log_path = create_run_logger()
         print(f"Today: {config.today}  Log: {log_path}")
         if cli_override:
@@ -212,7 +213,10 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
             if storage is not None and run_id is not None:
                 filtered_this = sum(filtered_row_counts[counts_before:])
                 kept = len(ticker_df)
-                exp_count = int(ticker_df["expiration_date"].nunique()) if kept else 0
+                exp_count = (
+                    int(ticker_df["expiration_date"].nunique())
+                    if kept and "expiration_date" in ticker_df.columns else 0
+                )
                 storage.record_ticker_result(run_id, TickerFetchResult(
                     ticker=ticker,
                     raw_row_count=kept + filtered_this,

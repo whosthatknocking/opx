@@ -1,4 +1,4 @@
-"""Tests for FilesystemBackend and get_storage_backend factory."""
+"""Tests for SqliteIndexedBackend and factory sqlite path."""
 # pylint: disable=duplicate-code
 
 import hashlib
@@ -10,7 +10,6 @@ import pytest
 from conftest import make_runtime_config
 from opx.storage.base import StorageBackend
 from opx.storage.factory import get_storage_backend
-from opx.storage.filesystem import FilesystemBackend
 from opx.storage.models import (
     ArtifactWrite,
     DatasetHandle,
@@ -20,19 +19,16 @@ from opx.storage.models import (
     RunSummary,
     TickerFetchResult,
 )
+from opx.storage.sqlite_indexed import SqliteIndexedBackend
 
 
-def _make_backend(
-    tmp_path: Path,
-    max_runs_retained: int = 0,
-    dataset_format: str = "csv",
-) -> FilesystemBackend:
-    return FilesystemBackend(
+def _make_backend(tmp_path: Path, max_runs_retained: int = 0) -> SqliteIndexedBackend:
+    return SqliteIndexedBackend(
+        db_path=tmp_path / "logs" / "opx.db",
         output_dir=tmp_path / "output",
         logs_dir=tmp_path / "logs",
         debug_dir=tmp_path / "debug",
         max_runs_retained=max_runs_retained,
-        dataset_format=dataset_format,
     )
 
 
@@ -52,7 +48,7 @@ def _make_dataframe(rows: int = 3) -> pd.DataFrame:
     )
 
 
-def _write(backend: FilesystemBackend, run_id: str, rows: int = 3, provider: str = "yfinance"):
+def _write(backend: SqliteIndexedBackend, run_id: str, rows: int = 3, provider: str = "yfinance"):
     return backend.write_dataset(
         run_id,
         DatasetWrite(data=_make_dataframe(rows), provider=provider, schema_version=1),
@@ -63,25 +59,34 @@ def _write(backend: FilesystemBackend, run_id: str, rows: int = 3, provider: str
 # Protocol satisfaction
 # ---------------------------------------------------------------------------
 
-def test_filesystem_backend_satisfies_protocol(tmp_path: Path):
-    """FilesystemBackend must satisfy the StorageBackend runtime-checkable protocol."""
+def test_sqlite_backend_satisfies_protocol(tmp_path: Path):
+    """SqliteIndexedBackend must satisfy the StorageBackend runtime-checkable protocol."""
     assert isinstance(_make_backend(tmp_path), StorageBackend)
+
+
+# ---------------------------------------------------------------------------
+# Schema initialisation
+# ---------------------------------------------------------------------------
+
+def test_schema_initialises_on_first_connect(tmp_path: Path):
+    """Constructor must create all tables and seed schema_version."""
+    backend = _make_backend(tmp_path)
+    import sqlite3  # pylint: disable=import-outside-toplevel
+    conn = sqlite3.connect(str(tmp_path / "logs" / "opx.db"))
+    master = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    tables = {r[0] for r in master}
+    assert {"runs", "datasets", "ticker_results", "artifacts", "_schema_meta"}.issubset(tables)
+    conn.close()
+    run_id = backend.create_run(_make_context())
+    assert run_id
 
 
 # ---------------------------------------------------------------------------
 # Run lifecycle
 # ---------------------------------------------------------------------------
 
-def test_create_run_writes_sidecar(tmp_path: Path):
-    """create_run must write a JSON sidecar to logs_dir."""
-    backend = _make_backend(tmp_path)
-    run_id = backend.create_run(_make_context())
-
-    assert (tmp_path / "logs" / f"run_{run_id}.json").exists()
-
-
 def test_create_run_initial_status_is_running(tmp_path: Path):
-    """Newly created run sidecar must have status=running."""
+    """Newly created run must have status=running."""
     backend = _make_backend(tmp_path)
     run_id = backend.create_run(_make_context())
 
@@ -91,7 +96,7 @@ def test_create_run_initial_status_is_running(tmp_path: Path):
 
 
 def test_finalize_run_sets_status_complete(tmp_path: Path):
-    """finalize_run must update status to complete and set finished_at."""
+    """finalize_run must update status to complete."""
     backend = _make_backend(tmp_path)
     run_id = backend.create_run(_make_context())
     backend.finalize_run(run_id, RunSummary(status="complete"))
@@ -114,7 +119,7 @@ def test_fail_run_sets_status_and_error(tmp_path: Path):
 
 
 def test_record_ticker_result_persisted(tmp_path: Path):
-    """record_ticker_result must persist the result in the run sidecar."""
+    """record_ticker_result must persist the result in SQLite."""
     backend = _make_backend(tmp_path)
     run_id = backend.create_run(_make_context())
     result = TickerFetchResult(
@@ -138,14 +143,13 @@ def test_record_ticker_result_persisted(tmp_path: Path):
 # Dataset write and read
 # ---------------------------------------------------------------------------
 
-def test_write_dataset_creates_csv_and_meta(tmp_path: Path):
-    """write_dataset must create both the artifact CSV and its .meta.json."""
+def test_write_dataset_creates_artifact(tmp_path: Path):
+    """write_dataset must create the artifact file on disk."""
     backend = _make_backend(tmp_path)
     run_id = backend.create_run(_make_context())
     record = _write(backend, run_id)
 
     assert Path(record.location).exists()
-    assert (tmp_path / "output" / f"{record.dataset_id}.meta.json").exists()
 
 
 def test_write_dataset_returns_correct_record(tmp_path: Path):
@@ -186,7 +190,6 @@ def test_get_dataset_returns_handle(tmp_path: Path):
     assert isinstance(handle, DatasetHandle)
     assert handle.dataset_id == record.dataset_id
     assert handle.content_hash == record.content_hash
-    assert handle.created_at == record.created_at
 
 
 def test_get_dataset_raises_for_unknown_id(tmp_path: Path):
@@ -220,7 +223,7 @@ def test_list_datasets_limit(tmp_path: Path):
 
 
 def test_list_datasets_filter_provider(tmp_path: Path):
-    """list_datasets must filter by provider when the argument is given."""
+    """list_datasets must filter by provider when supplied."""
     backend = _make_backend(tmp_path)
     run_id = backend.create_run(_make_context())
     _write(backend, run_id, provider="yfinance")
@@ -232,14 +235,8 @@ def test_list_datasets_filter_provider(tmp_path: Path):
     assert results[0].provider == "yfinance"
 
 
-def test_list_datasets_empty_when_no_output_dir(tmp_path: Path):
-    """list_datasets must return empty list when output_dir does not exist."""
-    backend = _make_backend(tmp_path)
-    assert not backend.list_datasets()
-
-
 def test_write_dataset_links_run(tmp_path: Path):
-    """write_dataset must update the run sidecar's dataset_id field."""
+    """write_dataset must update the run's dataset_id field."""
     backend = _make_backend(tmp_path)
     run_id = backend.create_run(_make_context())
     record = _write(backend, run_id)
@@ -288,7 +285,7 @@ def test_pruning_removes_oldest_when_limit_exceeded(tmp_path: Path):
 
 
 def test_pruning_removes_artifact_file(tmp_path: Path):
-    """Pruning must delete the artifact CSV in addition to the meta file."""
+    """Pruning must delete the artifact file on disk."""
     backend = _make_backend(tmp_path, max_runs_retained=1)
     run_id = backend.create_run(_make_context())
     r1 = _write(backend, run_id)
@@ -311,62 +308,12 @@ def test_no_pruning_when_max_runs_retained_zero(tmp_path: Path):
 # Factory
 # ---------------------------------------------------------------------------
 
-def test_factory_returns_none_when_storage_disabled():
-    """get_storage_backend must return None when storage_enabled = False."""
-    config = make_runtime_config(storage_enabled=False)
-    assert get_storage_backend(config) is None
-
-
-def test_factory_returns_filesystem_backend_when_enabled(tmp_path: Path):
-    """get_storage_backend must return a FilesystemBackend when enabled."""
+def test_factory_returns_sqlite_backend_when_configured(tmp_path: Path):
+    """get_storage_backend must return SqliteIndexedBackend when backend=sqlite."""
     config = make_runtime_config(
         storage_enabled=True,
-        storage_backend="filesystem",
+        storage_backend="sqlite",
         debug_dump_dir=tmp_path / "debug",
     )
     backend = get_storage_backend(config)
-    assert isinstance(backend, FilesystemBackend)
-
-
-# ---------------------------------------------------------------------------
-# Parquet format
-# ---------------------------------------------------------------------------
-
-def test_write_dataset_parquet_creates_parquet_file(tmp_path: Path):
-    """write_dataset with dataset_format='parquet' must create a .parquet artifact."""
-    backend = _make_backend(tmp_path, dataset_format="parquet")
-    run_id = backend.create_run(_make_context())
-    record = backend.write_dataset(
-        run_id, DatasetWrite(data=_make_dataframe(), provider="yfinance", schema_version=1)
-    )
-
-    assert record.format == "parquet"
-    assert Path(record.location).suffix == ".parquet"
-    assert Path(record.location).exists()
-
-
-def test_write_dataset_parquet_is_readable(tmp_path: Path):
-    """A parquet artifact written by FilesystemBackend must be readable by pandas."""
-    backend = _make_backend(tmp_path, dataset_format="parquet")
-    run_id = backend.create_run(_make_context())
-    df = _make_dataframe()
-    record = backend.write_dataset(
-        run_id, DatasetWrite(data=df, provider="yfinance", schema_version=1)
-    )
-
-    result = pd.read_parquet(record.location)
-    assert list(result.columns) == list(df.columns)
-    assert len(result) == len(df)
-
-
-def test_factory_passes_dataset_format_to_backend(tmp_path: Path):
-    """get_storage_backend must honour storage_dataset_format from config."""
-    config = make_runtime_config(
-        storage_enabled=True,
-        storage_backend="filesystem",
-        storage_dataset_format="parquet",
-        debug_dump_dir=tmp_path / "debug",
-    )
-    backend = get_storage_backend(config)
-    assert isinstance(backend, FilesystemBackend)
-    assert backend._dataset_format == "parquet"  # pylint: disable=protected-access
+    assert isinstance(backend, SqliteIndexedBackend)

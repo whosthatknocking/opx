@@ -12,8 +12,7 @@ def get_storage_backend(config=None):
 
     When config is None, the process runtime config is loaded automatically.
     Returns None when storage.enable = false (the default).
-    Returns a FilesystemBackend when storage.enable = true and
-    storage.backend = 'filesystem'.
+    Returns a FilesystemBackend or SqliteIndexedBackend when enabled.
     """
     if config is None:
         from opx.config import get_runtime_config  # pylint: disable=import-outside-toplevel
@@ -22,12 +21,16 @@ def get_storage_backend(config=None):
     if not config.storage_enabled:
         return None
 
-    if config.storage_backend == "filesystem":
-        return FilesystemBackend(
-            output_dir=Path("output"),
-            logs_dir=Path("logs"),
-            debug_dir=config.debug_dump_dir,
-            max_runs_retained=config.storage_max_runs_retained,
-        )
+    kwargs = {
+        "output_dir": Path("output"),
+        "logs_dir": Path("logs"),
+        "debug_dir": config.debug_dump_dir,
+        "max_runs_retained": config.storage_max_runs_retained,
+        "dataset_format": config.storage_dataset_format,
+    }
 
-    return None
+    if config.storage_backend == "sqlite":
+        from opx.storage.sqlite_indexed import SqliteIndexedBackend  # pylint: disable=import-outside-toplevel,no-name-in-module
+        return SqliteIndexedBackend(db_path=Path("logs") / "opx.db", **kwargs)
+
+    return FilesystemBackend(**kwargs)

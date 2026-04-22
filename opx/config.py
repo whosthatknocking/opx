@@ -94,6 +94,12 @@ class RuntimeConfig:
     storage_enabled: bool = False
     storage_backend: str = "filesystem"
     storage_max_runs_retained: int = 0
+    storage_dataset_format: str = "csv"
+    provider_cache_backend: str = "none"
+    provider_cache_dir: Path = field(default_factory=lambda: Path("cache"))
+    provider_snapshot_ttl: int = 300
+    provider_chain_ttl: int = 300
+    provider_events_ttl: int = 86400
     config_warnings: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -511,6 +517,53 @@ def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:  # py
             coercer=_coerce_int,
             warnings=warnings,
             validator=lambda v: v >= 0,
+        ),
+        storage_dataset_format=_resolve_config_value(
+            storage_settings.get("dataset_format"),
+            field_name="storage.dataset_format",
+            default="csv",
+            coercer=_coerce_str,
+            warnings=warnings,
+            validator=lambda v: v in {"csv", "parquet"},
+        ),
+        provider_cache_backend=_resolve_config_value(
+            storage_settings.get("cache_backend"),
+            field_name="storage.cache_backend",
+            default="none",
+            coercer=_coerce_str,
+            warnings=warnings,
+            validator=lambda v: v in {"none", "filesystem"},
+        ),
+        provider_cache_dir=Path(_resolve_config_value(
+            storage_settings.get("cache_dir"),
+            field_name="storage.cache_dir",
+            default="cache",
+            coercer=_coerce_str,
+            warnings=warnings,
+        )),
+        provider_snapshot_ttl=_resolve_config_value(
+            storage_settings.get("snapshot_ttl"),
+            field_name="storage.snapshot_ttl",
+            default=300,
+            coercer=_coerce_int,
+            warnings=warnings,
+            validator=lambda v: v > 0,
+        ),
+        provider_chain_ttl=_resolve_config_value(
+            storage_settings.get("chain_ttl"),
+            field_name="storage.chain_ttl",
+            default=300,
+            coercer=_coerce_int,
+            warnings=warnings,
+            validator=lambda v: v > 0,
+        ),
+        provider_events_ttl=_resolve_config_value(
+            storage_settings.get("events_ttl"),
+            field_name="storage.events_ttl",
+            default=86400,
+            coercer=_coerce_int,
+            warnings=warnings,
+            validator=lambda v: v > 0,
         ),
         config_warnings=tuple(warnings),
     )

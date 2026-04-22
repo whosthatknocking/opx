@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
@@ -21,7 +20,8 @@ from opx.storage.models import (
     TickerRunRecord,
     record_to_handle,
 )
-from opx.storage.serializers import CsvSerializer
+from opx.storage._disk import write_artifact_bytes, write_dataset_artifact
+from opx.storage.serializers import get_serializer
 
 
 def _now() -> datetime:
@@ -45,19 +45,21 @@ class FilesystemBackend:
     Artifact files land in debug_dir as {artifact_id}/{filename}.
     """
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         output_dir: Path,
         logs_dir: Path,
         debug_dir: Path,
         max_runs_retained: int = 0,
+        dataset_format: str = "csv",
     ) -> None:
         """Initialise with the three storage directories and optional retention limit."""
         self._output_dir = output_dir
         self._logs_dir = logs_dir
         self._debug_dir = debug_dir
         self._max_runs_retained = max_runs_retained
-        self._serializer = CsvSerializer()
+        self._dataset_format = dataset_format
+        self._serializer = get_serializer(dataset_format)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -173,11 +175,9 @@ class FilesystemBackend:
 
     def write_dataset(self, run_id: str, dataset: DatasetWrite) -> DatasetRecord:
         """Serialize the DataFrame, compute its hash, and write metadata."""
-        dataset_id = str(uuid.uuid4())
-        ext = "parquet" if dataset.format == "parquet" else "csv"
-        artifact_path = (self._output_dir / f"{dataset_id}.{ext}").resolve()
-        self._serializer.serialize(dataset.data, str(artifact_path))
-        content_hash = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+        dataset_id, artifact_path, content_hash = write_dataset_artifact(
+            dataset.data, self._output_dir, self._dataset_format, self._serializer
+        )
         record = DatasetRecord(
             dataset_id=dataset_id,
             run_id=run_id,
@@ -185,7 +185,7 @@ class FilesystemBackend:
             provider=dataset.provider,
             schema_version=dataset.schema_version,
             row_count=len(dataset.data),
-            format=dataset.format,
+            format=self._dataset_format,
             location=str(artifact_path),
             content_hash=content_hash,
         )
@@ -198,11 +198,9 @@ class FilesystemBackend:
 
     def write_artifact(self, run_id: str, artifact: ArtifactWrite) -> ArtifactRecord:
         """Write artifact bytes to disk and return an ArtifactRecord."""
-        artifact_id = str(uuid.uuid4())
-        dest = self._artifact_path(artifact_id, artifact.filename)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(artifact.content)
-        content_hash = hashlib.sha256(artifact.content).hexdigest()
+        artifact_id, dest, content_hash = write_artifact_bytes(
+            artifact.content, self._debug_dir, artifact.filename
+        )
         return ArtifactRecord(
             artifact_id=artifact_id,
             run_id=run_id,

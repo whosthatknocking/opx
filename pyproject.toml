@@ -25,6 +25,9 @@ dev = [
     "pylint",
     "pytest>=8.0",
 ]
+parquet = [
+    "pyarrow>=14.0",
+]
 
 [project.scripts]
 opx-fetcher = "opx.fetcher:main"

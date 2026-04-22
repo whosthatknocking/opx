@@ -51,6 +51,12 @@ def make_runtime_config(**overrides):
         "storage_enabled": False,
         "storage_backend": "filesystem",
         "storage_max_runs_retained": 0,
+        "storage_dataset_format": "csv",
+        "provider_cache_backend": "none",
+        "provider_cache_dir": Path("cache"),
+        "provider_snapshot_ttl": 300,
+        "provider_chain_ttl": 300,
+        "provider_events_ttl": 86400,
     }
     defaults.update(overrides)
     return RuntimeConfig(**defaults)
