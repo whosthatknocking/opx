@@ -21,9 +21,10 @@ def get_storage_backend(config=None):
     if not config.storage_enabled:
         return None
 
+    base = config.storage_dir if config.storage_dir else Path.cwd()
     kwargs = {
-        "output_dir": Path("output"),
-        "logs_dir": Path("logs"),
+        "output_dir": base / "output",
+        "logs_dir": base / "logs",
         "debug_dir": config.debug_dump_dir,
         "max_runs_retained": config.storage_max_runs_retained,
         "dataset_format": config.storage_dataset_format,
@@ -31,6 +32,6 @@ def get_storage_backend(config=None):
 
     if config.storage_backend == "sqlite":
         from opx_chain.storage.sqlite_indexed import SqliteIndexedBackend  # pylint: disable=import-outside-toplevel,no-name-in-module
-        return SqliteIndexedBackend(db_path=Path("data") / "opx-chain.db", **kwargs)
+        return SqliteIndexedBackend(db_path=base / "data" / "opx-chain.db", **kwargs)
 
     return FilesystemBackend(**kwargs)

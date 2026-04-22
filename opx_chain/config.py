@@ -96,6 +96,7 @@ class RuntimeConfig:
     storage_max_runs_retained: int = 0
     storage_dataset_format: str = "csv"
     storage_write_legacy_csv: bool = True
+    storage_dir: Path | None = None       # absolute base for output/data/logs dirs; defaults to cwd
     provider_cache_backend: str = "none"
     provider_cache_dir: Path = field(default_factory=lambda: Path("cache"))
     provider_snapshot_ttl: int = 300
@@ -534,6 +535,8 @@ def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:  # py
             coercer=_coerce_bool,
             warnings=warnings,
         ),
+        storage_dir=Path(storage_settings["dir"]).expanduser().resolve()
+            if storage_settings.get("dir") else None,
         provider_cache_backend=_resolve_config_value(
             storage_settings.get("cache_backend"),
             field_name="storage.cache_backend",
