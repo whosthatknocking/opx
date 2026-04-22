@@ -1,5 +1,7 @@
 """Tests for MemoryBackend: protocol satisfaction and write roundtrips."""
 
+from datetime import timedelta
+
 import pandas as pd
 import pytest
 
@@ -243,3 +245,79 @@ def test_content_hash_is_deterministic():
 def test_schema_version_constant_is_positive_int():
     """SCHEMA_VERSION must be importable from opx and be a positive integer."""
     assert isinstance(SCHEMA_VERSION, int) and SCHEMA_VERSION >= 1
+
+
+# ---------------------------------------------------------------------------
+# get_run
+# ---------------------------------------------------------------------------
+
+def test_get_run_returns_record():
+    """get_run must return the RunRecord via the public API."""
+    backend = MemoryBackend()
+    run_id = backend.create_run(_make_context(provider="marketdata"))
+
+    run = backend.get_run(run_id)
+
+    assert run.run_id == run_id
+    assert run.provider == "marketdata"
+    assert run.status == "running"
+    assert run.finished_at is None
+
+
+def test_get_run_raises_for_unknown_id():
+    """get_run must raise KeyError for a run_id that was never created."""
+    backend = MemoryBackend()
+    with pytest.raises(KeyError):
+        backend.get_run("no-such-run")
+
+
+# ---------------------------------------------------------------------------
+# list_datasets date range filters
+# ---------------------------------------------------------------------------
+
+def test_list_datasets_since_excludes_older_records():
+    """list_datasets(since=T) must exclude records created before T."""
+    backend = MemoryBackend()
+    run_id = backend.create_run(_make_context())
+    record = _write(backend, run_id)
+
+    future = record.created_at + timedelta(seconds=1)
+    results = backend.list_datasets(since=future)
+
+    assert results == []
+
+
+def test_list_datasets_since_includes_records_at_boundary():
+    """list_datasets(since=T) must include a record created exactly at T."""
+    backend = MemoryBackend()
+    run_id = backend.create_run(_make_context())
+    record = _write(backend, run_id)
+
+    results = backend.list_datasets(since=record.created_at)
+
+    assert len(results) == 1
+    assert results[0].dataset_id == record.dataset_id
+
+
+def test_list_datasets_until_excludes_newer_records():
+    """list_datasets(until=T) must exclude records created after T."""
+    backend = MemoryBackend()
+    run_id = backend.create_run(_make_context())
+    record = _write(backend, run_id)
+
+    past = record.created_at - timedelta(seconds=1)
+    results = backend.list_datasets(until=past)
+
+    assert results == []
+
+
+def test_list_datasets_until_includes_records_at_boundary():
+    """list_datasets(until=T) must include a record created exactly at T."""
+    backend = MemoryBackend()
+    run_id = backend.create_run(_make_context())
+    record = _write(backend, run_id)
+
+    results = backend.list_datasets(until=record.created_at)
+
+    assert len(results) == 1
+    assert results[0].dataset_id == record.dataset_id

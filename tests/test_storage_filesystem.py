@@ -2,6 +2,7 @@
 # pylint: disable=duplicate-code
 
 import hashlib
+from datetime import timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -372,3 +373,71 @@ def test_factory_passes_dataset_format_to_backend(tmp_path: Path):
     backend = get_storage_backend(config)
     assert isinstance(backend, FilesystemBackend)
     assert backend._dataset_format == "parquet"  # pylint: disable=protected-access
+
+
+# ---------------------------------------------------------------------------
+# get_run error path
+# ---------------------------------------------------------------------------
+
+def test_get_run_raises_for_unknown_id(tmp_path: Path):
+    """get_run must raise an exception when the run sidecar does not exist."""
+    backend = _make_backend(tmp_path)
+    with pytest.raises((KeyError, FileNotFoundError, OSError)):
+        backend.get_run("no-such-run")
+
+
+# ---------------------------------------------------------------------------
+# list_datasets date range filters
+# ---------------------------------------------------------------------------
+
+def test_list_datasets_since_excludes_older_records(tmp_path: Path):
+    """list_datasets(since=T) must exclude records whose created_at is before T."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    record = _write(backend, run_id)
+
+    future = record.created_at + timedelta(seconds=1)
+    results = backend.list_datasets(since=future)
+
+    assert not results
+
+
+def test_list_datasets_until_excludes_newer_records(tmp_path: Path):
+    """list_datasets(until=T) must exclude records whose created_at is after T."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    record = _write(backend, run_id)
+
+    past = record.created_at - timedelta(seconds=1)
+    results = backend.list_datasets(until=past)
+
+    assert not results
+
+
+# ---------------------------------------------------------------------------
+# Pruning resilience
+# ---------------------------------------------------------------------------
+
+def test_prune_tolerates_corrupt_meta_file(tmp_path: Path):
+    """A corrupt meta JSON must be silently skipped and removed during pruning."""
+    backend = _make_backend(tmp_path, max_runs_retained=1)
+    run_id = backend.create_run(_make_context())
+    _write(backend, run_id)
+
+    corrupt_meta = tmp_path / "output" / "corrupt.meta.json"
+    corrupt_meta.write_text("not-valid-json", encoding="utf-8")
+
+    _write(backend, run_id)
+
+    assert not corrupt_meta.exists()
+
+
+# ---------------------------------------------------------------------------
+# get_serializer error path
+# ---------------------------------------------------------------------------
+
+def test_get_serializer_raises_for_unknown_format():
+    """get_serializer must raise ValueError for an unrecognised format name."""
+    from opx_chain.storage.serializers import get_serializer  # pylint: disable=import-outside-toplevel
+    with pytest.raises(ValueError, match="Unsupported dataset format"):
+        get_serializer("avro")
