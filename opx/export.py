@@ -168,3 +168,4 @@ def write_options_csv(ticker_frames, output_path):
     df = reorder_export_columns(df)
     df = coerce_export_column_types(df)
     df.to_csv(output_path, index=False)
+    return df

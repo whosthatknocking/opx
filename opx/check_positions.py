@@ -6,6 +6,7 @@ import pandas as pd
 
 from opx.config import get_runtime_config
 from opx.positions import DEFAULT_POSITIONS_PATH, load_positions
+from opx.storage.factory import get_storage_backend
 
 OUTPUTS_DIR = Path("output")
 
@@ -380,7 +381,14 @@ def main(argv=None):
         print(f"Positions file not found: {positions_path}")
         return 1
 
-    resolved_output = output_path or find_latest_output()
+    storage = get_storage_backend()
+    if output_path is not None:
+        resolved_output = output_path
+    elif storage is not None:
+        records = storage.list_datasets(limit=1)
+        resolved_output = Path(records[0].location) if records else None
+    else:
+        resolved_output = find_latest_output()
     if resolved_output is None:
         print(f"No output CSV found in {OUTPUTS_DIR}/")
         return 1

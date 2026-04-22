@@ -4,16 +4,21 @@ import argparse
 from dataclasses import replace
 from datetime import datetime
 import fcntl
+import hashlib
+import json
 import os
 from pathlib import Path
 
 import pandas as pd
 
+from opx import SCHEMA_VERSION
 from opx.config import describe_runtime_config, get_runtime_config, set_runtime_config_override
 from opx.export import write_options_csv
 from opx.fetch import fetch_ticker_option_chain
 from opx.positions import DEFAULT_POSITIONS_PATH, load_positions
 from opx.runlog import create_run_logger
+from opx.storage.factory import get_storage_backend
+from opx.storage.models import DatasetWrite, RunContext, RunSummary, TickerFetchResult
 from opx.validate import emit_validation_report, validate_export_frame
 
 OUTPUTS_DIR = Path("output")
@@ -67,6 +72,33 @@ def format_file_size(byte_count):
     return f"{byte_count / (1024 * 1024):.1f} MB"
 
 
+def _config_fingerprint(config) -> str:
+    """Return a SHA-256 hex digest of the config fields that affect fetch output."""
+    fields = {
+        "provider": config.data_provider,
+        "tickers": sorted(config.tickers),
+        "max_expiration_weeks": config.max_expiration_weeks,
+        "enable_filters": config.enable_filters,
+        "min_bid": config.min_bid,
+        "min_open_interest": config.min_open_interest,
+        "min_volume": config.min_volume,
+        "max_spread_pct_of_mid": config.max_spread_pct_of_mid,
+        "max_strike_distance_pct": config.max_strike_distance_pct,
+        "option_score_income_weight": config.option_score_income_weight,
+        "option_score_liquidity_weight": config.option_score_liquidity_weight,
+        "option_score_risk_weight": config.option_score_risk_weight,
+        "option_score_efficiency_weight": config.option_score_efficiency_weight,
+    }
+    return hashlib.sha256(json.dumps(fields, sort_keys=True).encode()).hexdigest()
+
+
+def _positions_fingerprint(positions_path: Path) -> str:
+    """Return SHA-256 of the positions file bytes, or empty string if absent."""
+    if not positions_path.exists():
+        return ""
+    return hashlib.sha256(positions_path.read_bytes()).hexdigest()
+
+
 def acquire_fetcher_lock():
     """Acquire an exclusive non-blocking lock for the fetcher process."""
     LOCKS_DIR.mkdir(exist_ok=True)
@@ -101,6 +133,8 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
         return 1
 
     logger = None
+    storage = get_storage_backend()
+    run_id = None
     try:
         config, cli_override = apply_cli_overrides(get_runtime_config(), args)
         set_runtime_config_override(config)
@@ -153,10 +187,19 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
             len(extra_tickers),
         )
 
+        if storage is not None:
+            run_id = storage.create_run(RunContext(
+                provider=config.data_provider,
+                tickers=effective_tickers,
+                config_fingerprint=_config_fingerprint(config),
+                positions_fingerprint=_positions_fingerprint(positions_path),
+            ))
+
         ticker_frames = []
         validation_findings = []
         filtered_row_counts = []
         for ticker in effective_tickers:
+            counts_before = len(filtered_row_counts)
             ticker_df = fetch_ticker_option_chain(
                 ticker,
                 logger=logger,
@@ -166,6 +209,19 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
             )
             if not ticker_df.empty:
                 ticker_frames.append(ticker_df)
+            if storage is not None and run_id is not None:
+                filtered_this = sum(filtered_row_counts[counts_before:])
+                kept = len(ticker_df)
+                exp_count = int(ticker_df["expiration_date"].nunique()) if kept else 0
+                storage.record_ticker_result(run_id, TickerFetchResult(
+                    ticker=ticker,
+                    raw_row_count=kept + filtered_this,
+                    normalized_row_count=kept + filtered_this,
+                    kept_row_count=kept,
+                    filtered_row_count=filtered_this,
+                    expiration_count=exp_count,
+                    status="ok" if not ticker_df.empty else "skipped",
+                ))
 
         filtered_out_rows = sum(filtered_row_counts)
         if logger:
@@ -174,6 +230,8 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
         if not ticker_frames:
             print("No data fetched.")
             logger.warning("run_finished no_data_fetched=true")
+            if storage is not None and run_id is not None:
+                storage.fail_run(run_id, "no data fetched")
             return 1
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -183,8 +241,15 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
             validation_findings.extend(validate_export_frame(combined))
             emit_validation_report(validation_findings, logger=logger)
         row_count = len(combined)
-        write_options_csv([combined], output_path=output_path)
+        export_df = write_options_csv([combined], output_path=output_path)
         file_size_bytes = output_path.stat().st_size
+        if storage is not None and run_id is not None:
+            storage.write_dataset(run_id, DatasetWrite(
+                data=export_df,
+                provider=config.data_provider,
+                schema_version=SCHEMA_VERSION,
+            ))
+            storage.finalize_run(run_id, RunSummary(status="complete"))
         logger.info(
             "run_finished output_path=%s ticker_frames=%s rows_written=%s file_size_bytes=%s",
             output_path,
@@ -200,6 +265,8 @@ def main(argv=None):  # pylint: disable=too-many-branches,too-many-locals,too-ma
         print("\nInterrupted.")
         if logger:
             logger.warning("run_finished interrupted=true")
+        if storage is not None and run_id is not None:
+            storage.fail_run(run_id, "interrupted")
         return 130
     finally:
         set_runtime_config_override(None)

@@ -14,7 +14,7 @@ validate_export_frame = _fetcher.validate_export_frame
 emit_validation_report = _fetcher.emit_validation_report
 write_options_csv = _fetcher.write_options_csv
 pd = _fetcher.pd
-datetime = _fetcher.datetime
+datetime = _fetcher.datetime  # pylint: disable=invalid-name
 
 
 def acquire_fetcher_lock():
@@ -30,22 +30,24 @@ def release_fetcher_lock(lock_handle):
     return _fetcher.release_fetcher_lock(lock_handle)
 
 
+_DELEGATED = (
+    "OUTPUTS_DIR", "LOCKS_DIR", "FETCHER_LOCK_PATH",
+    "format_file_size", "get_runtime_config", "describe_runtime_config",
+    "create_run_logger", "fetch_ticker_option_chain", "validate_export_frame",
+    "emit_validation_report", "write_options_csv", "pd", "datetime",
+)
+
+
 def main(argv=None):
     """Delegate to the packaged fetcher while honoring patched legacy globals."""
-    _fetcher.OUTPUTS_DIR = OUTPUTS_DIR
-    _fetcher.LOCKS_DIR = LOCKS_DIR
-    _fetcher.FETCHER_LOCK_PATH = FETCHER_LOCK_PATH
-    _fetcher.format_file_size = format_file_size
-    _fetcher.get_runtime_config = get_runtime_config
-    _fetcher.describe_runtime_config = describe_runtime_config
-    _fetcher.create_run_logger = create_run_logger
-    _fetcher.fetch_ticker_option_chain = fetch_ticker_option_chain
-    _fetcher.validate_export_frame = validate_export_frame
-    _fetcher.emit_validation_report = emit_validation_report
-    _fetcher.write_options_csv = write_options_csv
-    _fetcher.pd = pd
-    _fetcher.datetime = datetime
-    return _fetcher.main(argv)
+    saved = {attr: getattr(_fetcher, attr) for attr in _DELEGATED}
+    try:
+        for attr in _DELEGATED:
+            setattr(_fetcher, attr, globals()[attr])
+        return _fetcher.main(argv)
+    finally:
+        for attr, val in saved.items():
+            setattr(_fetcher, attr, val)
 
 
 if __name__ == "__main__":
