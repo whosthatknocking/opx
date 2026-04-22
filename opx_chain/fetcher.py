@@ -239,6 +239,10 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
                 config_fingerprint=_config_fingerprint(config),
                 positions_fingerprint=_positions_fingerprint(resolved_positions_path),
             ))
+            if resolved_positions_path.exists():
+                run_positions_dest = RUNS_DIR / run_id / "positions.csv"
+                run_positions_dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(resolved_positions_path, run_positions_dest)
 
         ticker_frames = []
         validation_findings = []
