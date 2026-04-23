@@ -1713,7 +1713,7 @@ async function loadPositionsData() {
       ? `${payload.selected_file} does not contain any position rows.`
       : null;
   } catch (error) {
-    tableState.selectedFile = 'data/positions.csv';
+    tableState.selectedFile = 'positions.csv';
     tableState.rows = [];
     tableState.columns = [];
     tableState.sortColumn = null;

@@ -30,7 +30,7 @@ The project currently supports:
 
 - config-driven provider selection
 - config-driven runtime thresholds and fetch behavior
-- a user-supplied portfolio positions input file at `data/positions.csv` for ticker expansion and position-aware filter bypass
+- a user-supplied portfolio positions input file at `$XDG_DATA_HOME/opx-chain/positions.csv` for ticker expansion and position-aware filter bypass
 - provider-backed fetches through `yfinance` or `massive`
 - provider-backed fetches through `marketdata`
 - canonical CSV export with shared derived metrics
@@ -88,7 +88,7 @@ Behavior:
 
 The single source of truth for runtime settings is:
 
-- `~/.config/opx-chain/config.toml`
+- `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`)
 - `config/example.toml` is the tracked template users copy into that path
 
 The config loader is responsible for:
@@ -104,7 +104,7 @@ The config loader is responsible for:
 - Market Data credentials
 - debug-dump settings
 - Massive request pacing and page-size settings
-- using the default portfolio positions input path at `data/positions.csv`
+- using the default portfolio positions input path at `$XDG_DATA_HOME/opx-chain/positions.csv`
 
 Defaults:
 
@@ -130,8 +130,8 @@ Provider credentials are local-only configuration.
 Current credential model:
 
 - `yfinance` requires no secret
-- `massive` reads `[providers.massive].api_key` from `~/.config/opx-chain/config.toml`
-- `marketdata` reads `[providers.marketdata].api_token` from `~/.config/opx-chain/config.toml`
+- `massive` reads `[providers.massive].api_key` from `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`)
+- `marketdata` reads `[providers.marketdata].api_token` from `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`)
 
 Current Market Data request controls:
 
@@ -198,7 +198,7 @@ Implemented Massive behavior:
 - provider retry handling uses exponential backoff with 3 retries
 - request caller header identifies the app as `opx-chain/<version>`
 - fetch progress prints per-page API status and row-count progress
-- raw per-response payload dumps can be written to `debug/`
+- raw per-response payload dumps can be written under `$XDG_DATA_HOME/opx-chain/debug/`
 
 Field-mapping rules already implemented for Massive include:
 
@@ -229,7 +229,7 @@ Implemented Market Data behavior:
 - optional client-side request spacing is available through `[providers.marketdata].request_interval_seconds`
 - request caller header identifies the app as `opx-chain/<version>`
 - fetch progress prints per-request API status and row-count progress
-- raw response payload dumps can be written to `debug/`
+- raw response payload dumps can be written under `$XDG_DATA_HOME/opx-chain/debug/`
 
 Field-mapping rules already implemented for Market Data include:
 
@@ -321,7 +321,7 @@ The fetcher uses a lock file to prevent concurrent runs.
 
 Current behavior:
 
-- a run acquires `logs/fetcher.lock`
+- a run acquires `$XDG_DATA_HOME/opx-chain/fetcher.lock`
 - a second run exits clearly if the lock is already held
 - the lock file is removed when the run finishes or is interrupted
 
@@ -332,7 +332,7 @@ Debug dumping is shared across providers.
 Current behavior:
 
 - controlled by config flags
-- raw payload files are written under `debug/`
+- raw payload files are written under `$XDG_DATA_HOME/opx-chain/debug/`
 - dump filenames are prefixed with provider name
 - Massive dumps are written per HTTP response page and include page numbers
 - yfinance dumps cover underlying snapshots, expiration lists, and option-chain payloads
@@ -343,7 +343,7 @@ The fetcher can consume a user-supplied portfolio positions file.
 
 Current behavior:
 
-- the default input path is `data/positions.csv`
+- the default input path is `$XDG_DATA_HOME/opx-chain/positions.csv`
 - `opx-fetch` accepts an optional `--positions <path>` CLI override for one run
 - the file is treated as user-managed input, not generated output
 - stock tickers found in the file are added to the effective fetch list for the run
@@ -419,7 +419,7 @@ Current viewer behavior includes:
 
 - dataset summary cards
 - active provider surfaced through dataset metadata when constant across the file
-- a `Positions` tab backed by `data/positions.csv` with the same sortable/filterable table behavior and row-detail modal pattern used for exported datasets
+- a `Positions` tab backed by `$XDG_DATA_HOME/opx-chain/positions.csv` with the same sortable/filterable table behavior and row-detail modal pattern used for exported datasets
 - a `Reference` tab backed by the field-reference document
 - a `Chain View` tab that derives per-ticker/per-expiration visualizations directly from the exported CSV rows
 - sortable/filterable table view
@@ -465,7 +465,7 @@ The following project work has already landed.
 
 Completed:
 
-- migrated runtime settings into `~/.config/opx-chain/config.toml`
+- migrated runtime settings into `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`)
 - renamed the project/package to `opx-chain` / `opx_chain`
 - kept `viewer.py` unchanged
 - isolated credential access behind the config layer
@@ -511,7 +511,7 @@ Completed:
 
 Completed:
 
-- added support for a user-supplied portfolio positions file at `data/positions.csv`
+- added support for a user-supplied portfolio positions file at `$XDG_DATA_HOME/opx-chain/positions.csv`
 - added stock ticker expansion from held positions
 - added option-filter bypass for held contracts
 - added the `opx-check` CLI for position coverage against the latest output

@@ -523,7 +523,7 @@ api_key = "secret"
         encoding="utf-8",
     )
 
-    monkeypatch.setattr("opx_chain.config.DEFAULT_CONFIG_PATH", config_path)
+    monkeypatch.setattr("opx_chain.config.DEFAULT_CONFIG_PATH_OVERRIDE", config_path)
     reset_runtime_config()
     monkeypatch.setattr(
         MassiveProvider,

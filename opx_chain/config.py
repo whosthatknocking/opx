@@ -14,10 +14,18 @@ except ImportError:  # pragma: no cover
     import tomli as tomllib
 
 from opx_chain.version import __version__
+from opx_chain.paths import (
+    get_cache_dir,
+    get_data_dir,
+    get_default_config_path,
+    get_default_debug_dump_dir,
+    get_default_provider_cache_dir,
+    resolve_relative_path,
+)
 
 SUPPORTED_PROVIDERS = frozenset({"yfinance", "massive", "marketdata"})
 SCRIPT_VERSION = __version__
-DEFAULT_CONFIG_PATH = Path("~/.config/opx-chain/config.toml").expanduser()
+DEFAULT_CONFIG_PATH_OVERRIDE: Path | None = None
 DEFAULT_TICKERS = ("TSLA", "NVDA", "UBER", "MSFT", "GOOGL", "ORCL", "PLTR")
 DEFAULT_DATA_PROVIDER = "yfinance"
 DEFAULT_MIN_BID = None  # disabled by default; previously 0.50
@@ -45,7 +53,6 @@ MAX_MASSIVE_SNAPSHOT_PAGE_LIMIT = 250
 DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT = MAX_MASSIVE_SNAPSHOT_PAGE_LIMIT
 DEFAULT_MASSIVE_REQUEST_INTERVAL_SECONDS = 12.0
 DEFAULT_DEBUG_DUMP_PROVIDER_PAYLOAD = False
-DEFAULT_DEBUG_DUMP_DIR = Path("debug")
 _RUNTIME_CONFIG_OVERRIDE: RuntimeConfig | None = None
 US_MARKET_TIMEZONE = ZoneInfo("America/New_York")
 
@@ -96,9 +103,9 @@ class RuntimeConfig:
     storage_max_runs_retained: int = 0
     storage_dataset_format: str = "csv"
     storage_also_write_csv: bool = True
-    storage_dir: Path | None = None       # absolute base for output/data/logs dirs; defaults to cwd
+    storage_dir: Path | None = None       # absolute storage base; defaults to XDG data dir
     provider_cache_backend: str = "none"
-    provider_cache_dir: Path = field(default_factory=lambda: Path("cache"))
+    provider_cache_dir: Path = field(default_factory=get_default_provider_cache_dir)
     provider_snapshot_ttl: int = 300
     provider_chain_ttl: int = 300
     provider_events_ttl: int = 86400
@@ -174,6 +181,25 @@ def _coerce_path(value, *, field_name):
     if not normalized:
         raise ConfigError(f"Config field '{field_name}' must not be blank.")
     return Path(normalized).expanduser()
+
+
+def _resolve_path_setting(
+    raw_value,
+    *,
+    field_name,
+    default: Path,
+    base_dir: Path,
+    warnings: list[str],
+) -> Path:
+    """Resolve a config path, anchoring relative paths to the appropriate XDG base."""
+    value = _resolve_config_value(
+        raw_value,
+        field_name=field_name,
+        default=default,
+        coercer=_coerce_path,
+        warnings=warnings,
+    )
+    return resolve_relative_path(Path(value), base_dir=base_dir)
 
 
 def _read_config_data(config_path: Path, warnings: list[str] | None = None) -> dict:
@@ -253,7 +279,8 @@ def _clamp_massive_snapshot_page_limit(value: int, warnings: list[str]) -> int:
 
 def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:  # pylint: disable=too-many-locals
     """Load runtime config from the user config file, falling back to defaults."""
-    resolved_path = (config_path or DEFAULT_CONFIG_PATH).expanduser()
+    default_config_path = DEFAULT_CONFIG_PATH_OVERRIDE or get_default_config_path()
+    resolved_path = (config_path or default_config_path).expanduser()
     warnings: list[str] = []
     data = _read_config_data(resolved_path, warnings)
     settings = _resolve_table(data.get("settings", {}), field_name="settings", warnings=warnings)
@@ -435,11 +462,11 @@ def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:  # py
             coercer=_coerce_bool,
             warnings=warnings,
         ),
-        debug_dump_dir=_resolve_config_value(
+        debug_dump_dir=_resolve_path_setting(
             settings.get("debug_dump_dir"),
             field_name="settings.debug_dump_dir",
-            default=DEFAULT_DEBUG_DUMP_DIR,
-            coercer=_coerce_path,
+            default=get_default_debug_dump_dir(),
+            base_dir=get_data_dir(),
             warnings=warnings,
         ),
         viewer_host=_resolve_config_value(
@@ -562,13 +589,13 @@ def load_runtime_config(config_path: Path | None = None) -> RuntimeConfig:  # py
             warnings=warnings,
             validator=lambda v: v in {"none", "filesystem"},
         ),
-        provider_cache_dir=Path(_resolve_config_value(
+        provider_cache_dir=_resolve_path_setting(
             storage_settings.get("cache_dir"),
             field_name="storage.cache_dir",
-            default="cache",
-            coercer=_coerce_str,
+            default=get_default_provider_cache_dir(),
+            base_dir=get_cache_dir(),
             warnings=warnings,
-        )).expanduser(),
+        ),
         provider_snapshot_ttl=_resolve_config_value(
             storage_settings.get("snapshot_ttl"),
             field_name="storage.snapshot_ttl",

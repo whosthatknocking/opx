@@ -19,6 +19,7 @@ from opx_chain.config import (
     get_provider_credentials,
     get_runtime_config,
 )
+from opx_chain.paths import get_default_config_path
 from opx_chain.providers.base import (
     DataProvider,
     OptionChainFrames,
@@ -222,7 +223,7 @@ class MassiveProvider(DataProvider):
                     if "401" in message or "403" in message or "auth" in message:
                         raise ProviderAuthenticationError(
                             "Massive authentication failed. Check [providers.massive] api_key "
-                            "in ~/.config/opx-chain/config.toml."
+                            f"in {get_default_config_path()}."
                         ) from exc
                     if attempt == MAX_RETRIES:
                         raise

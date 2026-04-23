@@ -7,7 +7,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_POSITIONS_PATH = Path("data/positions.csv")
+from opx_chain.paths import get_default_positions_path
+
+
+DEFAULT_POSITIONS_PATH = get_default_positions_path()
 STRIKE_MATCH_TOLERANCE = 0.01  # max abs difference when matching strikes across data sources
 
 _OPTION_RE = re.compile(r"^-?([A-Z.]+)(\d{2})(\d{2})(\d{2})([CP])(\d+\.?\d*)$")

@@ -22,6 +22,7 @@ from opx_chain.config import (
     get_provider_credentials,
     get_runtime_config,
 )
+from opx_chain.paths import get_default_config_path
 from opx_chain.providers.base import (
     DataProvider,
     OptionChainFrames,
@@ -254,7 +255,7 @@ class MarketDataProvider(DataProvider):
         ):
             raise ProviderAuthenticationError(
                 "Market Data authentication failed. Check [providers.marketdata] api_token "
-                "in ~/.config/opx-chain/config.toml."
+                f"in {get_default_config_path()}."
             )
         if "request limit" in normalized or "rate limit" in normalized:
             raise ProviderQuotaError(f"Market Data {context} failed: {message}")

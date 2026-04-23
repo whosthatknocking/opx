@@ -39,7 +39,7 @@ Keep those files aligned with the implementation. If you change canonical fields
   - expiration filtering
   - provider execution, normalization, filtering, and progress logging
 - `opx_chain/config.py`
-  - config loading from `~/.config/opx-chain/config.toml`
+  - config loading from `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`)
   - defaults, fallback warnings, provider selection, and runtime override support
 - `opx_chain/providers/`
   - provider contract in `base.py`
@@ -84,14 +84,14 @@ Keep those files aligned with the implementation. If you change canonical fields
 
 ## Config and Runtime Rules
 
-- Runtime settings come from `~/.config/opx-chain/config.toml`; `config/example.toml` is the tracked template.
+- Runtime settings come from `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`); `config/example.toml` is the tracked template.
 - Defaults and fallback warnings in `opx_chain/config.py` are part of the product behavior. Keep startup reporting accurate if config handling changes.
 - If the selected provider is misconfigured, preserve the current clear fallback or failure behavior rather than failing ambiguously.
 - Secrets must stay redacted in any user-facing output.
 
 ## Viewer and Export Conventions
 
-- Keep exported CSVs under `output/`, logs under `logs/`, and optional provider payload dumps under `debug/`.
+- Keep exported CSVs under `$XDG_DATA_HOME/opx-chain/runs/`, logs under `$XDG_DATA_HOME/opx-chain/logs/`, and optional provider payload dumps under `$XDG_DATA_HOME/opx-chain/debug/`.
 - If you change exported columns, also update the viewer serialization assumptions and field-reference docs.
 - Keep viewer endpoints and payloads aligned with the current tab model: `Dataset`, `Positions`, `Overview`, `Chain View`, and `Reference`.
 - Use JSON-serializable payloads only when sending data to the browser.

@@ -58,7 +58,7 @@ def parse_args(argv=None):
         "--positions",
         type=Path,
         default=None,
-        help="Path to positions CSV. Defaults to data/positions.csv.",
+        help="Path to positions CSV. Defaults to the XDG data-dir positions file.",
     )
     parser.add_argument(
         "--dry-run",

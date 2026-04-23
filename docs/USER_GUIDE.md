@@ -26,8 +26,8 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e .
-mkdir -p ~/.config/opx-chain
-cp config/example.toml ~/.config/opx-chain/config.toml
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/opx-chain"
+cp config/example.toml "${XDG_CONFIG_HOME:-$HOME/.config}/opx-chain/config.toml"
 opx-fetch
 opx-view
 ```
@@ -45,7 +45,7 @@ Then open `http://127.0.0.1:8000` in your browser.
 
 Fetch data with `opx-fetch`.
 
-You can force the shared post-download filter toggle for a single run without editing `~/.config/opx-chain/config.toml`:
+You can force the shared post-download filter toggle for a single run without editing `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`):
 
 ```bash
 opx-fetch --disable-filters
@@ -57,12 +57,12 @@ These flags override `settings.filters_enable` only for that process. If neither
 You can also override the positions-file path for one run:
 
 ```bash
-opx-fetch --positions data/runs/<run_id>/positions.csv
+opx-fetch --positions /path/to/runs/<run_id>/positions.csv
 ```
 
-When `--positions` is omitted, the fetcher still defaults to `data/positions.csv`. If the override path does not exist or cannot be parsed, the run continues without position-aware ticker expansion or filter bypass, matching the existing graceful fallback behavior.
+When `--positions` is omitted, the fetcher still defaults to `$XDG_DATA_HOME/opx-chain/positions.csv` (default `~/.local/share/opx-chain/positions.csv`). If the override path does not exist or cannot be parsed, the run continues without position-aware ticker expansion or filter bypass, matching the existing graceful fallback behavior.
 
-Check that every option position in `data/positions.csv` appears in the latest output CSV:
+Check that every option position in the default positions file appears in the latest output CSV:
 
 ```bash
 opx-check
@@ -103,12 +103,12 @@ Open the viewer and launch the page in your default browser:
 opx-view --open
 ```
 
-The viewer binds to `settings.viewer_host` and `settings.viewer_port` from `~/.config/opx-chain/config.toml` by default. `OPX_VIEWER_HOST` and `OPX_VIEWER_PORT` still override those values when you need a one-off launch target.
+The viewer binds to `settings.viewer_host` and `settings.viewer_port` from `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`) by default. `OPX_VIEWER_HOST` and `OPX_VIEWER_PORT` still override those values when you need a one-off launch target.
 
 The viewer includes:
 
 - a sortable table for the exported CSV
-- a sortable `Positions` table for `data/positions.csv` with the same row-detail modal used by the dataset table
+- a sortable `Positions` table for the default XDG data-dir positions file with the same row-detail modal used by the dataset table
 - shareable tab URLs using `?tab=table`, `?tab=positions`, `?tab=summary`, `?tab=chain`, or `?tab=readme`
 - hover descriptions on column headers pulled from this guide
 - a file selector for available CSV exports
@@ -165,22 +165,22 @@ The run log records:
 - provider-library error messages routed into the same log file when available
 - final CSV row count and file size after export
 
-If `debug_dump_provider_payload = true`, raw provider payload JSON files are also written under `debug_dump_dir`. Massive dumps are written per API response page with filenames such as `massive_TSLA_snapshot_chain_page_001_...json`, while yfinance dumps use labels such as `yfinance_TSLA_option_chain_2026-04-17_...json`.
+If `debug_dump_provider_payload = true`, raw provider payload JSON files are also written under `debug_dump_dir`. Relative `debug_dump_dir` values resolve under `$XDG_DATA_HOME/opx-chain/`; the default `debug_dump_dir = "debug"` becomes `~/.local/share/opx-chain/debug/`. Massive dumps are written per API response page with filenames such as `massive_TSLA_snapshot_chain_page_001_...json`, while yfinance dumps use labels such as `yfinance_TSLA_option_chain_2026-04-17_...json`.
 
 ## Configuration
 
-Runtime configuration lives in `~/.config/opx-chain/config.toml`. If the file is absent, the app falls back to built-in defaults and uses `yfinance` as the active provider.
+Runtime configuration lives in `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`). If the file is absent, the app falls back to built-in defaults and uses `yfinance` as the active provider.
 
 If individual config values are missing, malformed, or out of range, the loader applies built-in defaults for those fields and the fetcher prints the resolved values plus any fallback warnings at startup.
 
 Start from the tracked example at [`config/example.toml`](config/example.toml):
 
 ```
-mkdir -p ~/.config/opx-chain
-cp config/example.toml ~/.config/opx-chain/config.toml
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/opx-chain"
+cp config/example.toml "${XDG_CONFIG_HOME:-$HOME/.config}/opx-chain/config.toml"
 ```
 
-Then update provider placeholders in `~/.config/opx-chain/config.toml` for the provider you actually use.
+Then update provider placeholders in `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`) for the provider you actually use.
 
 ### Shared Settings
 
@@ -224,7 +224,7 @@ These settings apply regardless of which provider is active.
 - `FILTERS_ENABLE = true`: applies the zero-bid, strike-band, and wide-spread row filters after download. Set it to `false` when you want the raw downloaded rows to remain in the exported dataset while still computing metrics and quality flags.
 - `ENABLE_VALIDATION = true`: runs shared row-level validation before post-download filtering and file-level validation before export. Set it to `false` when you want to skip validation findings and validation summary output entirely.
 - `DEBUG_DUMP_PROVIDER_PAYLOAD = false`: when `true`, dump raw provider payloads to JSON before normalization so missing fields can be inspected directly.
-- `DEBUG_DUMP_DIR = "debug"`: directory used for raw provider payload dumps. Dump filenames are prefixed with the provider name.
+- `DEBUG_DUMP_DIR = "debug"`: directory used for raw provider payload dumps. Relative values are resolved under `$XDG_DATA_HOME/opx-chain/`, so the default becomes `~/.local/share/opx-chain/debug/`. Dump filenames are prefixed with the provider name.
 
 ### Provider Settings
 
@@ -243,9 +243,9 @@ These settings are only used by the matching provider.
 - `providers.marketdata.max_retries = 3`: retry count for Market Data rate-limit responses (`429`). The provider uses exponential backoff and honors `Retry-After` when the upstream response supplies it.
 - `providers.marketdata.request_interval_seconds = 0.0`: optional minimum spacing between Market Data HTTP requests. Leave it at `0.0` unless you want extra pacing for low-credit or low-throughput plans.
 
-### Portfolio Positions (`data/positions.csv`)
+### Portfolio Positions (`$XDG_DATA_HOME/opx-chain/positions.csv`)
 
-At the start of every run, `opx-fetch` reads `data/positions.csv` (Fidelity export format) to drive two behaviors:
+At the start of every run, `opx-fetch` reads `$XDG_DATA_HOME/opx-chain/positions.csv` (default `~/.local/share/opx-chain/positions.csv`, Fidelity export format) to drive two behaviors:
 
 - **Stock ticker expansion** _(always active)_: all stock tickers found in the file are added to the effective fetch list for the run, even if they are not listed in `settings.tickers`. Today's expiration is also kept for these tickers so that options expiring on the current date are available for position matching.
 - **Option filter bypass** _(active only when filters are enabled)_: any option contract that matches a row in the file (by ticker, expiration date, option type, and strike) bypasses all post-download quality filters. These rows are always included in the output regardless of bid, spread, or strike-distance settings. When `filters_enable = false` or `--disable-filters` is used, all rows are already kept unconditionally so the bypass has no effect.
@@ -254,7 +254,7 @@ The file is re-read on every run. If the file does not exist or cannot be parsed
 
 If you need a one-off override, pass `opx-fetch --positions /path/to/positions.csv`. That changes only the file path used for that process; it does not change `filters_enable`, and it does not affect later runs.
 
-`data/positions.csv` is excluded from version control — place your own export there without risk of committing personal data. The expected format is a standard Fidelity brokerage export. Stock rows use a plain ticker in the Symbol column; option rows use a leading dash followed by the OCC-style symbol:
+The default positions path is user-local and outside version control — place your own export there without risk of committing personal data. The expected format is a standard Fidelity brokerage export. Stock rows use a plain ticker in the Symbol column; option rows use a leading dash followed by the OCC-style symbol:
 
 ```
 Account Number,Account Name,Symbol,Description,...,Type

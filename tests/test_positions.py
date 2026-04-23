@@ -3,12 +3,9 @@
 import textwrap
 from pathlib import Path
 
-from opx_chain.positions import (
-    DEFAULT_POSITIONS_PATH,
-    EMPTY_POSITION_SET,
-    OptionPositionKey,
-    load_positions,
-)
+from opx_chain.paths import get_default_positions_path
+from opx_chain import positions
+from opx_chain.positions import EMPTY_POSITION_SET, OptionPositionKey, load_positions
 
 
 def write_positions_csv(tmp_path: Path, content: str) -> Path:
@@ -24,9 +21,9 @@ def test_load_positions_returns_empty_when_file_missing(tmp_path):
     assert result == EMPTY_POSITION_SET
 
 
-def test_default_positions_path_points_to_repo_data_directory():
-    """DEFAULT_POSITIONS_PATH resolves to data/positions.csv."""
-    assert DEFAULT_POSITIONS_PATH == Path("data/positions.csv")
+def test_default_positions_path_points_to_xdg_data_directory():
+    """DEFAULT_POSITIONS_PATH resolves to the default XDG data-dir positions file."""
+    assert positions.DEFAULT_POSITIONS_PATH == get_default_positions_path()
 
 
 def test_load_positions_parses_stock_tickers(tmp_path):

@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
+from opx_chain.paths import get_data_dir as get_xdg_data_dir
 from opx_chain.storage.filesystem import FilesystemBackend
-
-_APP_NAME = "opx-chain"
-
 
 def get_data_dir() -> Path:
     """Return the XDG-compliant base data directory for opx-chain."""
@@ -16,9 +13,7 @@ def get_data_dir() -> Path:
 
 
 def _default_data_dir() -> Path:
-    xdg = os.environ.get("XDG_DATA_HOME")
-    base = Path(xdg) if xdg else Path.home() / ".local" / "share"
-    return base / _APP_NAME
+    return get_xdg_data_dir()
 
 
 def get_storage_backend(config=None):

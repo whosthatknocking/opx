@@ -22,6 +22,7 @@ import pandas as pd
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 from opx_chain.config import get_runtime_config
 from opx_chain.export import UNWANTED_EXPORT_COLUMNS
+from opx_chain.paths import get_default_viewer_prefs_path
 from opx_chain.positions import DEFAULT_POSITIONS_PATH
 from opx_chain.storage.factory import get_data_dir, get_storage_backend
 from opx_chain.utils import read_dataset_file
@@ -36,7 +37,7 @@ POSITIONS_PATH = DEFAULT_POSITIONS_PATH
 CSV_PATTERN = "options_engine_output_*.csv"
 _DATA_DIR_OVERRIDE: Path | None = None
 _CSV_MODE: bool = False
-VIEWER_PREFS_PATH = Path("~/.config/opx-chain/viewer_prefs.json").expanduser()
+VIEWER_PREFS_PATH = get_default_viewer_prefs_path()
 ALLOWED_DATASET_SUFFIXES = frozenset({".csv", ".parquet"})
 HIDDEN_COLUMNS = {
     "roll_from_days_to_expiration",
@@ -998,7 +999,7 @@ def parse_args(argv=None):
         metavar="DIR",
         help=(
             "Directory to scan for dataset files (.csv, .parquet). "
-            "Overrides the storage backend and the default output/ directory."
+            "Overrides the storage backend and the default XDG data-dir runs directory."
         ),
     )
     parser.add_argument(
@@ -1006,7 +1007,7 @@ def parse_args(argv=None):
         action="store_true",
         help=(
             "Skip the storage backend and read timestamped CSV exports "
-            "(options_engine_output_*.csv) from the output directory directly."
+            "(options_engine_output_*.csv) from the XDG data-dir runs directory directly."
         ),
     )
     return parser.parse_args(argv)

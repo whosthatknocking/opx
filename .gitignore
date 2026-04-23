@@ -14,12 +14,7 @@ htmlcov/
 
 # Generated outputs
 *.csv
-output/
-logs/
 debug/
-
-# Portfolio data — never commit personal positions
-data/positions.csv
 
 # SQLite databases
 *.db

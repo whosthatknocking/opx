@@ -11,8 +11,8 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e .
-mkdir -p ~/.config/opx-chain
-cp config/example.toml ~/.config/opx-chain/config.toml
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/opx-chain"
+cp config/example.toml "${XDG_CONFIG_HOME:-$HOME/.config}/opx-chain/config.toml"
 opx-fetch
 opx-view
 ```
@@ -21,11 +21,11 @@ Then open `http://127.0.0.1:8000` in your browser.
 
 If you want the viewer to launch the page automatically, run `opx-view --open`.
 
-For one-off fetch runs, you can override the shared filter toggle from the CLI with `opx-fetch --disable-filters` or `opx-fetch --enable-filters` instead of editing `~/.config/opx-chain/config.toml`.
+For one-off fetch runs, you can override the shared filter toggle from the CLI with `opx-fetch --disable-filters` or `opx-fetch --enable-filters` instead of editing `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`).
 
-`opx-fetch` also accepts `--positions /path/to/positions.csv` when you want one run to use a non-default positions file instead of `data/positions.csv`.
+`opx-fetch` also accepts `--positions /path/to/positions.csv` when you want one run to use a non-default positions file instead of `$XDG_DATA_HOME/opx-chain/positions.csv` (default `~/.local/share/opx-chain/positions.csv`).
 
-After a fetch run, `opx-check` verifies that every option contract in `data/positions.csv` appears in the latest output CSV and reports coverage gaps:
+After a fetch run, `opx-check` verifies that every option contract in the default positions file appears in the latest output CSV and reports coverage gaps:
 
 ```
 opx-check
@@ -45,7 +45,7 @@ For a full coverage report with missing lines plus HTML/XML/JSON artifacts, run:
 ./scripts/run_local_coverage.sh
 ```
 
-Runtime configuration defaults live in [config/example.toml](config/example.toml). Copy it to `~/.config/opx-chain/config.toml` and replace provider placeholders as needed.
+Runtime configuration defaults live in [config/example.toml](config/example.toml). Copy it to `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`) and replace provider placeholders as needed.
 
 The local viewer is organized around five primary tabs: `Dataset`, `Positions`, `Overview`, `Chain View`, and `Reference`.
 
@@ -58,14 +58,15 @@ The local viewer is organized around five primary tabs: `Dataset`, `Positions`, 
 - Limits strikes to a configurable band around spot
 - Computes Greeks, delta-safety, expected move, ROM-style metrics, configurable option scoring, and volatility context
 - Writes a timestamped CSV plus an append-only run log
-- Includes a local browser for exploring the output interactively, including dataset inspection, an optional positions browser for `data/positions.csv` when that user-local file is present, per-ticker overview cards, `Most Profitable`, `Moderate Risk`, `High Conviction Call`, and `High Conviction Put` highlights, plus chain visualizations with chart tooltips and click-through row details
+- Includes a local browser for exploring the output interactively, including dataset inspection, an optional positions browser for the default XDG data-dir positions file when that user-local file is present, per-ticker overview cards, `Most Profitable`, `Moderate Risk`, `High Conviction Call`, and `High Conviction Put` highlights, plus chain visualizations with chart tooltips and click-through row details
 - Produces normalized option-chain output for inspection, comparison, and archival
 
-Generated files are written to `~/.local/share/opx-chain/` (XDG data home):
+Generated files are written under `$XDG_DATA_HOME/opx-chain/` (default `~/.local/share/opx-chain/`):
 
-- `~/.local/share/opx-chain/output/` for exported CSV snapshots
-- `~/.local/share/opx-chain/logs/` for run logs
-- `debug/` for optional raw provider payload dumps (current directory)
+- `$XDG_DATA_HOME/opx-chain/runs/` for exported datasets
+- `$XDG_DATA_HOME/opx-chain/logs/` for run logs
+- `$XDG_DATA_HOME/opx-chain/debug/` for default raw provider payload dumps
+- `$XDG_DATA_HOME/opx-chain/positions.csv` for the default positions import file
 
 Override the base path with `dir` in the `[storage]` config section.
 

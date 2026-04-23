@@ -57,7 +57,7 @@ Header contents:
 
 ### B. Main Surfaces
 * **Dataset tab:** toolbar, freshness cards, dataset cards, options table, pagination
-* **Positions tab:** sortable/filterable table of held positions from `data/positions.csv` with the same row-detail modal pattern used for exported datasets; hidden when the file is absent
+* **Positions tab:** sortable/filterable table of held positions from `$XDG_DATA_HOME/opx-chain/positions.csv` with the same row-detail modal pattern used for exported datasets; hidden when the file is absent
 * **Overview tab:** ticker summary cards and four opportunity cards per ticker for profitability, moderate-risk balance, bullish conviction, and bearish conviction
 * **Chain View tab:** one chart card per row, stacked vertically, using the same panel language as the rest of the viewer
 * **Reference tab:** rendered documentation/readme content

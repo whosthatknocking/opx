@@ -88,7 +88,7 @@ Rules:
 ## 4. Config-Driven Enable/Disable
 
 The storage layer is controlled by a `[storage]` section in
-`~/.config/opx-chain/config.toml`.
+`$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`).
 
 ```toml
 [storage]
@@ -96,12 +96,12 @@ enable = false                 # default: storage disabled; existing runtime unc
 backend = "filesystem"         # "filesystem" (default when enabled) | "sqlite"
 dataset_format = "csv"         # "csv" (default) | "parquet"
 max_runs_retained = 0          # 0 = keep all (default); positive integer = keep last N
-also_write_csv = true          # also write <data-dir>/output/options_engine_output_<ts>.csv alongside the storage artifact
+also_write_csv = true          # also write <data-dir>/runs/options_engine_output_<ts>.csv alongside the storage artifact
 # dir = "/path/to/custom/dir"  # override XDG data dir (default: $XDG_DATA_HOME/opx-chain or ~/.local/share/opx-chain)
 
 # Provider response cache (optional)
 cache_backend = "none"         # "none" (default) | "filesystem"
-cache_dir = "cache"            # path to cache directory (used when cache_backend = "filesystem")
+cache_dir = "cache"            # relative paths resolve under $XDG_CACHE_HOME/opx-chain/
 snapshot_ttl = 300             # TTL in seconds for underlying snapshot cache entries
 chain_ttl = 300                # TTL in seconds for option chain cache entries
 events_ttl = 86400             # TTL in seconds for ticker events cache entries
@@ -110,8 +110,9 @@ events_ttl = 86400             # TTL in seconds for ticker events cache entries
 Behavior:
 
 - when `enable = false` (or the `[storage]` section is absent), `fetcher.py`
-  calls `write_options_csv` directly, `opx-check` scans `output/` by filename,
-  and the viewer discovers CSVs as today — no behavior change
+  calls `write_options_csv` directly, `opx-check` scans the XDG data-dir
+  `runs/` tree by filename, and the viewer discovers CSVs as today — no
+  behavior change
 - when `enable = true`, `fetcher.py` writes through the configured
   `StorageBackend`, `opx-check` uses `list_datasets(limit=1)`, and the Python
   package interface becomes available to downstream consumers
@@ -502,7 +503,8 @@ based on the `dataset_format` config option (`"csv"` default). The
 
 ## 12. Dataset Retention
 
-Retention is configurable through `[storage]` in `~/.config/opx-chain/config.toml`.
+Retention is configurable through `[storage]` in `$XDG_CONFIG_HOME/opx-chain/config.toml`
+(default `~/.config/opx-chain/config.toml`).
 
 ```toml
 [storage]
@@ -599,7 +601,7 @@ All seven steps are complete and shipped.
   `finalize_run` / `fail_run` when storage is enabled
 - `opx-check` uses `list_datasets(limit=1)` when storage is enabled
 - `also_write_csv` config key (default `true`) controls whether the timestamped
-  `output/options_engine_output_<ts>.csv` is also written alongside the storage artifact
+  `runs/options_engine_output_<ts>.csv` is also written alongside the storage artifact
 
 ### Step 4 — Parquet serializer ✓
 
@@ -623,7 +625,7 @@ All seven steps are complete and shipped.
 
 - `opx-view --data-dir DIR` scans an arbitrary directory for `.csv` and
   `.parquet` files; default discovery queries the storage backend, falling back to the timestamped CSV glob
-- viewer preference store: `~/.config/opx-chain/viewer_prefs.json`,
+- viewer preference store: `$XDG_CONFIG_HOME/opx-chain/viewer_prefs.json`,
   GET/POST `/api/prefs`
 
 ## 18. Open Questions

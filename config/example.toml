@@ -3,7 +3,8 @@ tickers = ["TSLA", "NVDA", "UBER", "MSFT", "GOOGL", "ORCL", "PLTR"]
 data_provider = "yfinance"
 
 # Optional portfolio positions input:
-# Place a Fidelity-format export at data/positions.csv when you want
+# Place a Fidelity-format export at $XDG_DATA_HOME/opx-chain/positions.csv
+# (defaulting to ~/.local/share/opx-chain/positions.csv) when you want
 # position-aware ticker expansion and post-download filter bypass.
 
 # Shared filtering
@@ -34,7 +35,7 @@ option_score_efficiency_weight = 0.15
 # Shared diagnostics
 enable_validation = true
 debug_dump_provider_payload = false
-debug_dump_dir = "debug"
+debug_dump_dir = "debug"  # resolved under $XDG_DATA_HOME/opx-chain/
 
 [storage]
 # Set enable = true to activate the storage port for pipeline integration.
@@ -42,6 +43,8 @@ debug_dump_dir = "debug"
 enable = false
 backend = "filesystem"   # "filesystem" | "sqlite" (when enable = true)
 max_runs_retained = 0  # 0 = keep all datasets; positive integer = keep last N
+cache_backend = "none"  # "none" | "filesystem"
+cache_dir = "cache"     # resolved under $XDG_CACHE_HOME/opx-chain/
 
 [providers.massive]
 api_key = "replace-me"

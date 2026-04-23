@@ -77,7 +77,7 @@ def test_main_prints_rows_written_after_saved(monkeypatch, capsys, tmp_path: Pat
     monkeypatch.setattr(
         main,
         "create_run_logger",
-        lambda: (StubLogger(), Path("logs/run.log")),
+        lambda: (StubLogger(), Path("/tmp/opx-run.log")),
     )
 
     frames = {
@@ -129,7 +129,7 @@ def test_main_prints_config_fallbacks(monkeypatch, capsys, tmp_path: Path):
     monkeypatch.setattr(
         main,
         "create_run_logger",
-        lambda: (StubLogger(), Path("logs/run.log")),
+        lambda: (StubLogger(), Path("/tmp/opx-run.log")),
     )
     monkeypatch.setattr(
         main,
@@ -163,7 +163,7 @@ def test_main_can_disable_filters_via_cli(monkeypatch, capsys, tmp_path: Path):
     monkeypatch.setattr(
         main,
         "create_run_logger",
-        lambda: (StubLogger(), Path("logs/run.log")),
+        lambda: (StubLogger(), Path("/tmp/opx-run.log")),
     )
 
     def fetch_and_capture_config(
@@ -213,7 +213,7 @@ def test_main_can_enable_filters_via_cli(monkeypatch, capsys, tmp_path: Path):
     monkeypatch.setattr(
         main,
         "create_run_logger",
-        lambda: (StubLogger(), Path("logs/run.log")),
+        lambda: (StubLogger(), Path("/tmp/opx-run.log")),
     )
 
     def fetch_and_capture_config(
@@ -262,7 +262,7 @@ def test_main_prints_validation_summary_before_export(monkeypatch, capsys, tmp_p
     monkeypatch.setattr(
         main,
         "create_run_logger",
-        lambda: (StubLogger(), Path("logs/run.log")),
+        lambda: (StubLogger(), Path("/tmp/opx-run.log")),
     )
 
     def fetch_with_invalid_quote(
@@ -321,7 +321,7 @@ def test_main_can_disable_validation_summary(monkeypatch, capsys, tmp_path: Path
     monkeypatch.setattr(
         main,
         "create_run_logger",
-        lambda: (StubLogger(), Path("logs/run.log")),
+        lambda: (StubLogger(), Path("/tmp/opx-run.log")),
     )
     monkeypatch.setattr(
         main,
@@ -359,7 +359,7 @@ def test_main_returns_failure_when_no_data_is_fetched(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(
         main,
         "create_run_logger",
-        lambda: (StubLogger(), Path("logs/run.log")),
+        lambda: (StubLogger(), Path("/tmp/opx-run.log")),
     )
     monkeypatch.setattr(
         main,
@@ -408,7 +408,7 @@ def test_main_removes_lock_file_after_success(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(
         main,
         "create_run_logger",
-        lambda: (StubLogger(), Path("logs/run.log")),
+        lambda: (StubLogger(), Path("/tmp/opx-run.log")),
     )
     monkeypatch.setattr(
         main,
@@ -443,7 +443,7 @@ def test_main_handles_ctrl_c_gracefully(monkeypatch, capsys, tmp_path: Path):
     monkeypatch.setattr(
         main,
         "create_run_logger",
-        lambda: (StubLogger(), Path("logs/run.log")),
+        lambda: (StubLogger(), Path("/tmp/opx-run.log")),
     )
 
     def interrupting_fetch(
@@ -484,7 +484,7 @@ def test_main_can_override_positions_path_via_cli(monkeypatch, capsys, tmp_path:
     monkeypatch.setattr(
         main,
         "create_run_logger",
-        lambda: (logger, Path("logs/run.log")),
+        lambda: (logger, Path("/tmp/opx-run.log")),
     )
     positions_path = tmp_path / "data" / "runs" / "run-123" / "positions.csv"
     positions_path.parent.mkdir(parents=True, exist_ok=True)

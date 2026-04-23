@@ -32,11 +32,14 @@ This guide is for people changing the codebase, adding providers, or working on 
 │   ├── viewer_static/
 │   └── utils.py
 ├── main.py
-├── logs/
-├── debug/
-├── output/
 └── pyproject.toml
 ```
+
+Runtime-generated files live under the XDG base directories rather than the repository root:
+
+- `$XDG_CONFIG_HOME/opx-chain/` for `config.toml` and `viewer_prefs.json`
+- `$XDG_DATA_HOME/opx-chain/` for `runs/`, `logs/`, `debug/`, `positions.csv`, and `fetcher.lock`
+- `$XDG_CACHE_HOME/opx-chain/` for provider cache files when `cache_backend = "filesystem"`
 
 ## Provider Contract
 
@@ -71,7 +74,7 @@ This installs all market-data client libraries used by the project, including th
 
 `playwright` is optional for the fetch/export pipeline itself, but required if you want automated browser screenshots or browser-driven UI checks.
 
-For Massive / Polygon access, this project assumes you have an options-capable Massive account. The default `request_interval_seconds = 12.0` is intentionally conservative for delayed-plan usage, and you should adjust it in `~/.config/opx-chain/config.toml` to match the actual rate limits and throughput your Massive options plan allows.
+For Massive / Polygon access, this project assumes you have an options-capable Massive account. The default `request_interval_seconds = 12.0` is intentionally conservative for delayed-plan usage, and you should adjust it in `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`) to match the actual rate limits and throughput your Massive options plan allows.
 
 For Market Data access, this project assumes you have a Market Data account and API token configured under `[providers.marketdata].api_token`.
 The Market Data provider now retries `429` rate-limit responses with exponential backoff, honors `Retry-After` when present, and exposes optional client-side pacing through `[providers.marketdata].request_interval_seconds`.
@@ -144,7 +147,7 @@ Rules to keep the provider layer stable:
 
 ## Debugging Config
 
-The runtime exposes a small debugging config surface through `~/.config/opx-chain/config.toml`. Use [`config/example.toml`](../config/example.toml) as the starting point for local config and then override only the debugging keys you need.
+The runtime exposes a small debugging config surface through `$XDG_CONFIG_HOME/opx-chain/config.toml` (default `~/.config/opx-chain/config.toml`). Use [`../config/example.toml`](../config/example.toml) as the starting point for local config and then override only the debugging keys you need.
 
 Objective:
 
@@ -157,7 +160,7 @@ Current debugging settings:
 - `debug_dump_provider_payload = true|false`
   - when enabled, the app writes raw provider payloads to disk before normalization
   - use this when a canonical field is unexpectedly blank, a provider response shape appears to have changed, or a mapping bug is suspected
-- `debug_dump_dir = "debug"`
+- `debug_dump_dir = "debug"` (resolved under `$XDG_DATA_HOME/opx-chain/`)
   - controls where raw provider payload files are written
   - use a custom path when you want to isolate one investigation from older dumps
 - `enable_validation = true|false`
@@ -177,7 +180,7 @@ How to use it:
 
 - turn on `debug_dump_provider_payload` before reproducing the issue
 - run `opx-fetch`
-- inspect the newest files under `debug_dump_dir` and compare them with the exported CSV fields
+- inspect the newest files under `debug_dump_dir` and compare them with the exported CSV fields; relative paths resolve under `$XDG_DATA_HOME/opx-chain/`
 - turn the dump back off after the investigation so normal runs do not accumulate unnecessary payload files
 
 ## Shared Metrics and Viewer Scope

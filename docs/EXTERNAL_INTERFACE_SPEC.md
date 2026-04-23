@@ -45,7 +45,8 @@ The orchestrator must:
 
 **`--positions <path>` (optional)**
 
-Overrides the default positions file path (`data/positions.csv`). When provided,
+Overrides the default positions file path (`$XDG_DATA_HOME/opx-chain/positions.csv`,
+default `~/.local/share/opx-chain/positions.csv`). When provided,
 `opx-fetch` uses this file to determine which option contracts must survive hard
 filters regardless of screening criteria. When absent, behaviour is unchanged.
 
@@ -53,7 +54,7 @@ A downstream orchestrator that manages a per-run positions file passes the
 run-specific path here:
 
 ```
-opx-fetch --positions data/runs/<run_id>/positions.csv
+opx-fetch --positions /path/to/runs/<run_id>/positions.csv
 ```
 
 See `docs/PROJECT_SPEC.md` §7.3 for the full behaviour specification.
@@ -105,9 +106,12 @@ releases.
 ```python
 from opx_chain.fetcher import run_fetch
 
-run_fetch(positions_path=Path("data/runs/<run_id>/positions.csv"))
+run_fetch(positions_path=Path("/path/to/runs/<run_id>/positions.csv"))
 run_fetch(tickers=("TSLA", "NVDA"))
-run_fetch(positions_path=Path("data/positions.csv"), tickers=("AAPL",))
+run_fetch(
+    positions_path=Path.home() / ".local" / "share" / "opx-chain" / "positions.csv",
+    tickers=("AAPL",),
+)
 ```
 
 `run_fetch()` is the in-process equivalent of invoking `opx-fetch` as a subprocess.
@@ -322,7 +326,8 @@ storage is disabled.
 ### 7.5 `also_write_csv` config option
 
 When `[storage] also_write_csv = false` (default `true`), `opx-fetch` skips
-writing the timestamped `output/options_engine_output_<ts>.csv` file. Only the
+writing the timestamped
+`$XDG_DATA_HOME/opx-chain/runs/options_engine_output_<ts>.csv` file. Only the
 storage-managed artifact is written. Downstream orchestrators that read the
 timestamped filename pattern must either keep `also_write_csv = true` or switch to
 reading through `get_storage_backend().list_datasets()`.

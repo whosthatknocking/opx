@@ -4,6 +4,10 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from opx_chain.config import describe_runtime_config, load_runtime_config, reset_runtime_config
+from opx_chain.paths import (
+    get_default_debug_dump_dir,
+    get_default_provider_cache_dir,
+)
 from opx_chain.providers import (
     PROVIDER_FACTORIES,
     MassiveProvider,
@@ -30,7 +34,7 @@ def test_load_runtime_config_uses_defaults_when_file_is_absent(tmp_path: Path):
     assert config.massive_snapshot_page_limit == 250
     assert config.massive_request_interval_seconds == 12.0
     assert config.debug_dump_provider_payload is False
-    assert config.debug_dump_dir == Path("debug")
+    assert config.debug_dump_dir == get_default_debug_dump_dir()
     assert config.viewer_host == "127.0.0.1"
     assert config.viewer_port == 8000
     assert config.enable_filters is True
@@ -60,7 +64,7 @@ def test_load_runtime_config_uses_eastern_market_calendar_for_today(tmp_path: Pa
 
 
 def test_load_runtime_config_reads_user_config_file(tmp_path: Path):
-    """Runtime settings should load from ~/.config/opx-chain/config.toml format."""
+    """Runtime settings should load from the XDG config file format."""
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         """
@@ -106,7 +110,10 @@ request_interval_seconds = 0.75
     assert config.enable_filters is False
     assert config.enable_validation is False
     assert config.debug_dump_provider_payload is True
-    assert config.debug_dump_dir == Path("logs/provider_payloads")
+    assert (
+        config.debug_dump_dir
+        == get_default_debug_dump_dir().parent / "logs" / "provider_payloads"
+    )
     assert config.viewer_host == "0.0.0.0"
     assert config.viewer_port == 9001
     assert config.max_expiration_weeks == 8
@@ -275,7 +282,7 @@ def test_get_data_provider_returns_provider_from_runtime_config(monkeypatch, tmp
     """Provider factory should resolve yfinance and massive from config."""
     yfinance_config = tmp_path / "yfinance.toml"
     yfinance_config.write_text("[settings]\ndata_provider = 'yfinance'\n", encoding="utf-8")
-    monkeypatch.setattr("opx_chain.config.DEFAULT_CONFIG_PATH", yfinance_config)
+    monkeypatch.setattr("opx_chain.config.DEFAULT_CONFIG_PATH_OVERRIDE", yfinance_config)
     assert isinstance(get_data_provider(), YFinanceProvider)
 
     massive_config = tmp_path / "massive.toml"
@@ -283,7 +290,7 @@ def test_get_data_provider_returns_provider_from_runtime_config(monkeypatch, tmp
         "[settings]\ndata_provider = 'massive'\n\n[providers.massive]\napi_key = 'secret'\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("opx_chain.config.DEFAULT_CONFIG_PATH", massive_config)
+    monkeypatch.setattr("opx_chain.config.DEFAULT_CONFIG_PATH_OVERRIDE", massive_config)
 
     reset_runtime_config()
     assert isinstance(get_data_provider(), MassiveProvider)
@@ -371,8 +378,25 @@ debug_dump_dir = 42
         encoding="utf-8",
     )
     config = load_runtime_config(bad_debug_dir)
-    assert config.debug_dump_dir == Path("debug")
+    assert config.debug_dump_dir == get_default_debug_dump_dir()
     assert any("debug_dump_dir" in warning for warning in config.config_warnings)
+
+
+def test_load_runtime_config_resolves_relative_cache_dir_under_xdg_cache_home(tmp_path: Path):
+    """Relative cache_dir values should resolve under the app cache directory."""
+    config_path = tmp_path / "cache-dir.toml"
+    config_path.write_text(
+        """
+[storage]
+cache_backend = "filesystem"
+cache_dir = "provider-cache"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_runtime_config(config_path)
+
+    assert config.provider_cache_dir == get_default_provider_cache_dir().parent / "provider-cache"
 
 
 def test_load_runtime_config_defaults_invalid_filter_toggle(tmp_path: Path):
