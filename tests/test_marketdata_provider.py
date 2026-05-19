@@ -901,9 +901,9 @@ def test_marketdata_provider_load_ticker_events_parses_earnings_and_dividends(mo
     client = fake_client(provider)
 
     market_tz = ZoneInfo("America/New_York")
-    earnings_actual_ts = int(datetime(2026, 4, 29, tzinfo=market_tz).timestamp())
+    fiscal_period_end_ts = int(datetime(2026, 4, 29, tzinfo=market_tz).timestamp())
     earnings_estimate_ts = int(datetime(2026, 4, 30, tzinfo=market_tz).timestamp())
-    past_earnings_ts = int(datetime(2026, 4, 1, tzinfo=market_tz).timestamp())
+    past_report_ts = int(datetime(2026, 4, 1, tzinfo=market_tz).timestamp())
     client.stocks = type(
         "StocksResource",
         (),
@@ -912,8 +912,8 @@ def test_marketdata_provider_load_ticker_events_parses_earnings_and_dividends(mo
                 "StockEarnings",
                 (),
                 {
-                    "date": [past_earnings_ts, earnings_actual_ts],
-                    "reportDate": [past_earnings_ts, earnings_estimate_ts],
+                    "date": [past_report_ts, fiscal_period_end_ts],
+                    "reportDate": [past_report_ts, earnings_estimate_ts],
                     "s": "ok",
                 },
             )(),
@@ -929,14 +929,53 @@ def test_marketdata_provider_load_ticker_events_parses_earnings_and_dividends(mo
 
     events = provider.load_ticker_events("TSLA")
 
-    assert events["next_earnings_date"] == "2026-04-29"
-    assert events["next_earnings_date_is_estimated"] is False
-    assert events["next_earnings_date_source"] == "marketdata.date"
-    assert events["next_earnings_date_confidence"] == "confirmed"
+    assert events["next_earnings_date"] == "2026-04-30"
+    assert events["next_earnings_date_is_estimated"] is True
+    assert events["next_earnings_date_source"] == "marketdata.reportDate"
+    assert events["next_earnings_date_confidence"] == "estimated"
     assert events["next_ex_div_date"] == "2026-04-18"
     assert events["next_ex_div_date_source"] == "marketdata.exDate"
     assert events["next_ex_div_date_confidence"] == "confirmed"
     assert events["dividend_amount"] == pytest.approx(0.88)
+
+
+def test_marketdata_provider_ignores_fiscal_period_end_date_for_future_earnings(monkeypatch):
+    """Market Data `date` is fiscal period end, not the upcoming report event."""
+    patch_marketdata_client(monkeypatch)
+    today = date(2026, 5, 19)
+    monkeypatch.setattr(
+        "opx_chain.providers.marketdata.get_runtime_config",
+        lambda: make_runtime_config(today=today),
+    )
+    provider = MarketDataProvider()
+    client = fake_client(provider)
+
+    market_tz = ZoneInfo("America/New_York")
+    fiscal_period_end_ts = int(datetime(2026, 4, 30, tzinfo=market_tz).timestamp())
+    projected_report_ts = int(datetime(2026, 5, 27, tzinfo=market_tz).timestamp())
+    client.stocks = type(
+        "StocksResource",
+        (),
+        {
+            "earnings": lambda _self, _sym, **_kw: type(
+                "StockEarnings",
+                (),
+                {
+                    "date": [fiscal_period_end_ts],
+                    "reportDate": [projected_report_ts],
+                    "reportedEPS": [None],
+                    "s": "ok",
+                },
+            )(),
+        },
+    )()
+
+    events = provider.load_ticker_events("NVDA")
+
+    assert events["next_earnings_date"] == "2026-05-27"
+    assert events["next_earnings_date_is_estimated"] is True
+    assert events["next_earnings_date_source"] == "marketdata.reportDate"
+    assert events["next_earnings_date_confidence"] == "estimated"
 
 
 def test_marketdata_provider_skips_stale_estimate_when_reported_eps_present(monkeypatch):

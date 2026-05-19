@@ -548,12 +548,10 @@ class MarketDataProvider(DataProvider):
     def _fetch_next_earnings_event(self, ticker: str, today: date) -> _EventDateMetadata:
         """Return the next upcoming earnings date and provider confidence metadata.
 
-        Market Data can expose both `date` and `reportDate` for a future
-        earnings row. Treat `date` as the confirmed event date when present,
-        and fall back to the pre-announcement `reportDate` estimate until a
-        confirmed date is available. Skip rows whose `reportedEPS` is already
-        populated and rows whose confirmed event date is already in the past;
-        those fiscal periods have reported regardless of any future estimate.
+        Market Data exposes `date` as the fiscal period end for the earnings
+        report. Use `reportDate` as the event date and mark future rows as
+        estimated until the provider supplies reported EPS, at which point the
+        row is historical and should not be selected as an upcoming event.
         """
         try:
             result = self._client().stocks.earnings(
@@ -562,28 +560,14 @@ class MarketDataProvider(DataProvider):
                 mode=self._mode(),
             )
             earnings_data = self._raise_if_error(result, context="earnings request")
-            actual_dates = getattr(earnings_data, "date", None) or []
             report_dates = getattr(earnings_data, "reportDate", None) or []
             reported_eps = getattr(earnings_data, "reportedEPS", None) or []
-            row_count = max(len(actual_dates), len(report_dates), len(reported_eps))
+            row_count = max(len(report_dates), len(reported_eps))
             upcoming: list[_EventDateMetadata] = []
             for idx in range(row_count):
                 if _has_reported_eps(_row_value(reported_eps, idx)):
                     continue
-                actual_date = _parse_event_date(_row_value(actual_dates, idx))
                 estimated_date = _parse_event_date(_row_value(report_dates, idx))
-                if actual_date is not None:
-                    if actual_date < today:
-                        continue
-                    upcoming.append(
-                        _EventDateMetadata(
-                            actual_date.isoformat(),
-                            False,
-                            "marketdata.date",
-                            "confirmed",
-                        )
-                    )
-                    continue
                 if estimated_date is not None and estimated_date >= today:
                     upcoming.append(
                         _EventDateMetadata(
