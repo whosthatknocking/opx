@@ -361,10 +361,23 @@ class YFinanceProvider(DataProvider):
             dividends,
             today,
         )
+        earnings_confidence = None
+        if next_earnings_date:
+            earnings_confidence = (
+                "estimated"
+                if is_estimated is True
+                else "confirmed"
+                if is_estimated is False
+                else "unknown"
+            )
         return {
             "next_earnings_date": next_earnings_date,
             "next_earnings_date_is_estimated": is_estimated,
+            "next_earnings_date_source": "yfinance" if next_earnings_date else None,
+            "next_earnings_date_confidence": earnings_confidence,
             "next_ex_div_date": next_ex_div_date,
+            "next_ex_div_date_source": "yfinance" if next_ex_div_date else None,
+            "next_ex_div_date_confidence": "confirmed" if next_ex_div_date else None,
             "dividend_amount": dividend_amount,
         }
 

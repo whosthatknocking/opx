@@ -391,8 +391,8 @@ The fetcher fetches upcoming corporate event data once per ticker and broadcasts
 
 What is fetched:
 
-- Next upcoming earnings report date, whether that date is estimated, and how many days away it is
-- Next upcoming ex-dividend date, how many days away it is, and the associated per-share dividend amount
+- Next upcoming earnings report date, whether that date is estimated, its provider source/confidence metadata, and how many days away it is
+- Next upcoming ex-dividend date, provider source/confidence metadata, how many days away it is, and the associated per-share dividend amount
 
 Derived flags:
 
@@ -405,9 +405,11 @@ Derived flags:
 Provider availability:
 
 - `marketdata`: earnings and dividend event data are fetched for every ticker
-  - `next_earnings_date_is_estimated` is currently `True` whenever Market Data returns a future earnings date that has not already reported, because the upstream endpoint documents future `reportDate` values as estimates and `opx-chain` skips stale rows whose `reportedEPS` is already populated
+  - `next_earnings_date` prefers Market Data `date` as a confirmed event date when available, and falls back to `reportDate` as an estimated upcoming report date until a confirmed date is present
+  - `next_earnings_date_is_estimated`, `next_earnings_date_source`, and `next_earnings_date_confidence` preserve whether the selected earnings date came from confirmed `date` or estimated `reportDate`
+  - `next_ex_div_date_source` and `next_ex_div_date_confidence` preserve that dividend dates came from Market Data `exDate`
   - day counts for expirations, earnings, and ex-dividend dates use the `America/New_York` market calendar so the CSV stays aligned with Market Data's documented date semantics
-- `yfinance`: event fields are populated on a best-effort basis from Yahoo metadata (`info`, `calendar`, and `dividends`) when future dates are available; blanks remain expected when Yahoo does not expose usable future event data
+- `yfinance`: event fields are populated on a best-effort basis from Yahoo metadata (`info`, `calendar`, and `dividends`) when future dates are available, with source/confidence metadata when a date is selected; blanks remain expected when Yahoo does not expose usable future event data
 - `massive`: all event fields are blank for this provider
 
 How to use it:

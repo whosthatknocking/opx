@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
 import math
@@ -50,6 +51,19 @@ TRANSIENT_REQUEST_EXCEPTIONS = (
     httpx.NetworkError,
     httpx.RemoteProtocolError,
 )
+
+
+@dataclass(frozen=True)
+class _EventDateMetadata:
+    """Canonical event date plus provider confidence metadata."""
+
+    value: str | None
+    is_estimated: bool | None
+    source: str | None
+    confidence: str | None
+
+
+_BLANK_EVENT_DATE = _EventDateMetadata(None, None, None, None)
 
 
 class OpxMarketDataClient(MarketDataClient):  # pylint: disable=too-few-public-methods
@@ -104,6 +118,24 @@ def _normalize_marketdata_expiration_series(series: pd.Series) -> pd.Series:
     return series.map(_parse_event_date).map(
         lambda value: value.isoformat() if value is not None else np.nan
     )
+
+
+def _row_value(values: Any, index: int) -> Any:
+    """Return an indexed provider list value, or None when the row has no value."""
+    try:
+        return values[index] if index < len(values) else None
+    except TypeError:
+        return None
+
+
+def _has_reported_eps(value: Any) -> bool:
+    """Return True when Market Data says this earnings period has reported."""
+    if value is None:
+        return False
+    try:
+        return not pd.isna(value)
+    except (TypeError, ValueError):
+        return True
 
 
 class MarketDataProvider(DataProvider):
@@ -513,14 +545,15 @@ class MarketDataProvider(DataProvider):
                 best_quote = quote_row
         return best_quote
 
-    def _fetch_next_earnings_date(self, ticker: str, today: date) -> str | None:
-        """Return the next upcoming earnings date as an ISO string, or None.
+    def _fetch_next_earnings_event(self, ticker: str, today: date) -> _EventDateMetadata:
+        """Return the next upcoming earnings date and provider confidence metadata.
 
-        Market Data keeps the pre-announcement `reportDate` estimate on a row
-        until a fresh estimate is issued, so a row whose actual report has
-        already been published can still surface with `reportDate` in the
-        future. Skip rows whose `reportedEPS` is already populated — those
-        fiscal periods have been reported regardless of what `reportDate` says.
+        Market Data can expose both `date` and `reportDate` for a future
+        earnings row. Treat `date` as the confirmed event date when present,
+        and fall back to the pre-announcement `reportDate` estimate until a
+        confirmed date is available. Skip rows whose `reportedEPS` is already
+        populated and rows whose confirmed event date is already in the past;
+        those fiscal periods have reported regardless of any future estimate.
         """
         try:
             result = self._client().stocks.earnings(
@@ -529,25 +562,51 @@ class MarketDataProvider(DataProvider):
                 mode=self._mode(),
             )
             earnings_data = self._raise_if_error(result, context="earnings request")
+            actual_dates = getattr(earnings_data, "date", None) or []
             report_dates = getattr(earnings_data, "reportDate", None) or []
             reported_eps = getattr(earnings_data, "reportedEPS", None) or []
-            upcoming: list[date] = []
-            for idx, raw in enumerate(report_dates):
-                parsed = _parse_event_date(raw)
-                if parsed is None or parsed < today:
+            row_count = max(len(actual_dates), len(report_dates), len(reported_eps))
+            upcoming: list[_EventDateMetadata] = []
+            for idx in range(row_count):
+                if _has_reported_eps(_row_value(reported_eps, idx)):
                     continue
-                eps = reported_eps[idx] if idx < len(reported_eps) else None
-                if eps is not None and not pd.isna(eps):
+                actual_date = _parse_event_date(_row_value(actual_dates, idx))
+                estimated_date = _parse_event_date(_row_value(report_dates, idx))
+                if actual_date is not None:
+                    if actual_date < today:
+                        continue
+                    upcoming.append(
+                        _EventDateMetadata(
+                            actual_date.isoformat(),
+                            False,
+                            "marketdata.date",
+                            "confirmed",
+                        )
+                    )
                     continue
-                upcoming.append(parsed)
-            return min(upcoming).isoformat() if upcoming else None
+                if estimated_date is not None and estimated_date >= today:
+                    upcoming.append(
+                        _EventDateMetadata(
+                            estimated_date.isoformat(),
+                            True,
+                            "marketdata.reportDate",
+                            "estimated",
+                        )
+                    )
+            if not upcoming:
+                return _BLANK_EVENT_DATE
+            return min(upcoming, key=lambda item: item.value or "")
         except (ProviderAuthenticationError, ProviderQuotaError):
             raise
         except Exception:  # pylint: disable=broad-exception-caught
-            return None
+            return _BLANK_EVENT_DATE
 
-    def _fetch_next_dividend(self, ticker: str, today: date) -> tuple[str | None, float]:
-        """Return the next upcoming ex-dividend date and amount, or (None, NaN)."""
+    def _fetch_next_dividend(
+        self,
+        ticker: str,
+        today: date,
+    ) -> tuple[_EventDateMetadata, float]:
+        """Return the next upcoming ex-dividend date metadata and amount."""
         try:
             response = self._client()._make_request(  # pylint: disable=protected-access
                 method="GET",
@@ -556,40 +615,50 @@ class MarketDataProvider(DataProvider):
                 retry_status_codes=[],
             )
             if self._is_no_data_response(response):
-                return None, np.nan
+                return _BLANK_EVENT_DATE, np.nan
             self._raise_raw_response_if_error(response, context="dividends request")
             div_data = self._decode_response_json(response) or {}
             ex_dates = div_data.get("exDate") or []
             amounts = div_data.get("amount") or []
             upcoming_divs = sorted(
                 (
-                    (d, amt)
-                    for raw, amt in zip(ex_dates, amounts)
+                    (d, _row_value(amounts, idx))
+                    for idx, raw in enumerate(ex_dates)
                     if (d := _parse_event_date(raw)) is not None and d >= today
                 ),
                 key=lambda item: item[0],
             )
             if not upcoming_divs:
-                return None, np.nan
+                return _BLANK_EVENT_DATE, np.nan
             next_date, next_amount = upcoming_divs[0]
+            event = _EventDateMetadata(
+                next_date.isoformat(),
+                False,
+                "marketdata.exDate",
+                "confirmed",
+            )
             try:
-                return next_date.isoformat(), float(next_amount)
+                return event, float(next_amount)
             except (TypeError, ValueError):
-                return next_date.isoformat(), np.nan
+                return event, np.nan
         except (ProviderAuthenticationError, ProviderQuotaError):
             raise
         except Exception:  # pylint: disable=broad-exception-caught
-            return None, np.nan
+            return _BLANK_EVENT_DATE, np.nan
 
     def load_ticker_events(self, ticker: str) -> dict:
         """Fetch upcoming earnings and dividend event data from the Market Data API."""
         today = get_runtime_config().today
-        next_earnings_date = self._fetch_next_earnings_date(ticker, today)
-        next_ex_div_date, dividend_amount = self._fetch_next_dividend(ticker, today)
+        next_earnings = self._fetch_next_earnings_event(ticker, today)
+        next_ex_div, dividend_amount = self._fetch_next_dividend(ticker, today)
         return {
-            "next_earnings_date": next_earnings_date,
-            "next_earnings_date_is_estimated": True if next_earnings_date else None,
-            "next_ex_div_date": next_ex_div_date,
+            "next_earnings_date": next_earnings.value,
+            "next_earnings_date_is_estimated": next_earnings.is_estimated,
+            "next_earnings_date_source": next_earnings.source,
+            "next_earnings_date_confidence": next_earnings.confidence,
+            "next_ex_div_date": next_ex_div.value,
+            "next_ex_div_date_source": next_ex_div.source,
+            "next_ex_div_date_confidence": next_ex_div.confidence,
             "dividend_amount": dividend_amount,
         }
 

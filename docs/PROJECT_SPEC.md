@@ -300,7 +300,8 @@ Field-mapping rules already implemented for Market Data include:
 - `last -> last_trade_price` for the option contract itself; `underlyingPrice` is not used for `last_trade_price`
 - `updated -> option_quote_time` for option rows; if stock quotes are unavailable, the latest chain row with a usable `underlyingPrice` is used as a fallback for `underlying_price` and `underlying_price_time`
 - `bid`, `ask`, `last`, `openInterest`, `volume`, `iv`, and greeks map directly into canonical fields
-- future `stocks/earnings/{symbol}/ reportDate` values are exposed with `next_earnings_date_is_estimated = true` because Market Data documents upcoming earnings dates as estimates rather than confirmed announcements; rows whose `reportedEPS` is already populated are treated as already reported and excluded from the upcoming-event selection even if the stale estimate remains in the future
+- `stocks/earnings/{symbol}/ date` is preferred as a confirmed future earnings event date when available; `reportDate` remains the estimated fallback until a confirmed date is present. Rows whose `reportedEPS` is already populated, or whose confirmed `date` is already in the past, are treated as already reported and excluded from upcoming-event selection even if a stale estimate remains in the future
+- `stocks/dividends/{symbol}/ exDate` supplies the next ex-dividend date and associated amount; event source/confidence metadata is preserved for both earnings and dividends
 - runtime `today` and numeric Market Data event dates are interpreted on the `America/New_York` market calendar so expiration and catalyst day-count fields do not drift on non-Eastern hosts
 - process runtime config may be cached within one market-calendar date, but long-running processes must refresh the cached config when the `America/New_York` date changes so DTE, event day counts, and expiration cutoffs do not freeze overnight
 

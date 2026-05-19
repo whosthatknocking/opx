@@ -211,7 +211,11 @@ def append_ticker_event_fields(df, events, today):
     """Broadcast per-ticker corporate event data to all option rows."""
     df["next_earnings_date"] = events.get("next_earnings_date")
     df["next_earnings_date_is_estimated"] = events.get("next_earnings_date_is_estimated")
+    df["next_earnings_date_source"] = events.get("next_earnings_date_source")
+    df["next_earnings_date_confidence"] = events.get("next_earnings_date_confidence")
     df["next_ex_div_date"] = events.get("next_ex_div_date")
+    df["next_ex_div_date_source"] = events.get("next_ex_div_date_source")
+    df["next_ex_div_date_confidence"] = events.get("next_ex_div_date_confidence")
     df["dividend_amount"] = events.get("dividend_amount", np.nan)
 
     earnings_date_str = events.get("next_earnings_date")

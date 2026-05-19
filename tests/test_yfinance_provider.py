@@ -143,7 +143,11 @@ def test_yfinance_provider_load_ticker_events_parses_earnings_and_dividends(monk
 
     assert events["next_earnings_date"] == "2026-04-29"
     assert events["next_earnings_date_is_estimated"] is True
+    assert events["next_earnings_date_source"] == "yfinance"
+    assert events["next_earnings_date_confidence"] == "estimated"
     assert events["next_ex_div_date"] == "2026-04-18"
+    assert events["next_ex_div_date_source"] == "yfinance"
+    assert events["next_ex_div_date_confidence"] == "confirmed"
     assert events["dividend_amount"] == pytest.approx(0.88)
 
 
@@ -196,7 +200,11 @@ def test_yfinance_provider_load_ticker_events_returns_blanks_on_missing_data(mon
 
     assert events["next_earnings_date"] is None
     assert events["next_earnings_date_is_estimated"] is None
+    assert events["next_earnings_date_source"] is None
+    assert events["next_earnings_date_confidence"] is None
     assert events["next_ex_div_date"] is None
+    assert events["next_ex_div_date_source"] is None
+    assert events["next_ex_div_date_confidence"] is None
     assert pd.isna(events["dividend_amount"])
 
 

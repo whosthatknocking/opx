@@ -219,7 +219,11 @@ class DataProvider(ABC):
         return {
             "next_earnings_date": None,
             "next_earnings_date_is_estimated": None,
+            "next_earnings_date_source": None,
+            "next_earnings_date_confidence": None,
             "next_ex_div_date": None,
+            "next_ex_div_date_source": None,
+            "next_ex_div_date_confidence": None,
             "dividend_amount": np.nan,
         }
 

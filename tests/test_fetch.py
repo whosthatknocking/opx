@@ -775,7 +775,11 @@ def test_append_ticker_event_fields_broadcasts_day_counts_to_all_rows():
     events = {
         "next_earnings_date": "2026-04-23",
         "next_earnings_date_is_estimated": True,
+        "next_earnings_date_source": "marketdata.reportDate",
+        "next_earnings_date_confidence": "estimated",
         "next_ex_div_date": "2026-04-18",
+        "next_ex_div_date_source": "marketdata.exDate",
+        "next_ex_div_date_confidence": "confirmed",
         "dividend_amount": 0.75,
     }
     frame = pd.DataFrame([{"strike": 100.0}, {"strike": 105.0}, {"strike": 110.0}])
@@ -784,7 +788,11 @@ def test_append_ticker_event_fields_broadcasts_day_counts_to_all_rows():
 
     assert (result["next_earnings_date"] == "2026-04-23").all()
     assert result["next_earnings_date_is_estimated"].tolist() == [True, True, True]
+    assert (result["next_earnings_date_source"] == "marketdata.reportDate").all()
+    assert (result["next_earnings_date_confidence"] == "estimated").all()
     assert (result["next_ex_div_date"] == "2026-04-18").all()
+    assert (result["next_ex_div_date_source"] == "marketdata.exDate").all()
+    assert (result["next_ex_div_date_confidence"] == "confirmed").all()
     assert result["dividend_amount"].tolist() == pytest.approx([0.75, 0.75, 0.75])
     assert (result["days_to_earnings"] == 7).all()
     assert (result["days_to_ex_div"] == 2).all()
@@ -793,19 +801,28 @@ def test_append_ticker_event_fields_broadcasts_day_counts_to_all_rows():
 def test_append_ticker_event_fields_handles_blank_events():
     """Missing event data should produce NaN day-count fields without raising."""
     today = date(2026, 4, 16)
-    events = {
-        "next_earnings_date": None,
-        "next_earnings_date_is_estimated": None,
-        "next_ex_div_date": None,
-        "dividend_amount": np.nan,
-    }
+    blank_event_keys = [
+        "next_earnings_date",
+        "next_earnings_date_is_estimated",
+        "next_earnings_date_source",
+        "next_earnings_date_confidence",
+        "next_ex_div_date",
+        "next_ex_div_date_source",
+        "next_ex_div_date_confidence",
+    ]
+    events = {key: None for key in blank_event_keys}
+    events["dividend_amount"] = np.nan
     frame = pd.DataFrame([{"strike": 100.0}])
 
     result = append_ticker_event_fields(frame.copy(), events, today)
 
     assert result.loc[0, "next_earnings_date"] is None
     assert result.loc[0, "next_earnings_date_is_estimated"] is None
+    assert result.loc[0, "next_earnings_date_source"] is None
+    assert result.loc[0, "next_earnings_date_confidence"] is None
     assert result.loc[0, "next_ex_div_date"] is None
+    assert result.loc[0, "next_ex_div_date_source"] is None
+    assert result.loc[0, "next_ex_div_date_confidence"] is None
     assert pd.isna(result.loc[0, "days_to_earnings"])
     assert pd.isna(result.loc[0, "days_to_ex_div"])
 

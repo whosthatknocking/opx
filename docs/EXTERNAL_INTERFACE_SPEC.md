@@ -384,7 +384,7 @@ consumers must not construct or infer artifact paths independently — always us
 
 ```python
 # opx_chain/__init__.py
-SCHEMA_VERSION: int = 1   # incremented on every breaking schema change
+SCHEMA_VERSION: int = 2   # incremented on every breaking schema change
 ```
 
 This integer is the join key between the chain artifact and the consumer's field
