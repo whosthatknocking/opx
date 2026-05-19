@@ -188,6 +188,7 @@ run_fetch(
     tickers=("AAPL",),
     max_expiration_weeks=34,
     stale_quote_seconds=86_400,
+    data_provider="marketdata",
 )
 run_fetch(dry_run=True)
 run_fetch(price_context_only=True)
@@ -213,6 +214,12 @@ fetch. When absent, the configured `settings.max_expiration_weeks` is used uncha
 threshold for this run only. Downstream callers use this to align fetch freshness with
 their own run policy without editing opx-chain config. When absent, the configured
 `settings.stale_quote_seconds` is used unchanged.
+
+**`data_provider` (optional `str`)** — overrides `settings.data_provider` for this
+run only. Supported values are `marketdata`, `massive`, and `yfinance`. Downstream
+callers use this to select a provider per experimental or production run without
+mutating the opx-chain config file. When absent, the configured provider is used
+unchanged.
 
 **`dry_run` (optional `bool`)** — when `True`, validates config loading, positions
 parsing, lock acquisition, and storage reachability without making provider API calls

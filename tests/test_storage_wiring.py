@@ -799,6 +799,43 @@ def test_run_fetch_tickers_override_replaces_config_tickers(tmp_path: Path):
     assert set_call[0][0].tickers == ("AAPL",)
 
 
+def test_run_fetch_data_provider_override_replaces_config_provider(tmp_path: Path):
+    """run_fetch(data_provider=...) must use the supplied provider for this run."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True, data_provider="yfinance")
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in patches]
+        fetcher.run_fetch(data_provider="marketdata")
+
+    mock_set_config = mocks[6]
+    set_call = mock_set_config.call_args_list[0]
+    assert set_call[0][0].data_provider == "marketdata"
+
+
+def test_run_fetch_data_provider_override_rejects_unknown_provider(tmp_path: Path):
+    """Provider overrides should fail before opening a fetcher run."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True, data_provider="yfinance")
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in patches]
+        try:
+            fetcher.run_fetch(data_provider="bad-provider")
+        except ValueError as exc:
+            assert "unsupported data provider" in str(exc)
+        else:  # pragma: no cover - defensive assertion branch
+            raise AssertionError("expected invalid data provider to raise ValueError")
+
+    mocks[3].assert_not_called()  # acquire_fetcher_lock
+
+
 def test_run_fetch_max_expiration_override_updates_derived_date(tmp_path: Path):
     """run_fetch(max_expiration_weeks=...) must keep the derived filter date in sync."""
     from opx_chain import fetcher  # pylint: disable=import-outside-toplevel

@@ -14,7 +14,10 @@ import pandas as pd
 
 from opx_chain import SCHEMA_VERSION
 from opx_chain.config import (
-    describe_runtime_config, get_runtime_config, set_runtime_config_override,
+    SUPPORTED_PROVIDERS,
+    describe_runtime_config,
+    get_runtime_config,
+    set_runtime_config_override,
 )
 from opx_chain.export import prepare_export_frame, write_options_csv
 from opx_chain.fetch import fetch_ticker_option_chain, fetch_ticker_price_context
@@ -149,6 +152,17 @@ def _with_max_expiration_weeks(config, max_expiration_weeks: int):
         max_expiration_weeks=max_expiration_weeks,
         max_expiration=max_expiration,
     )
+
+
+def _with_data_provider(config, data_provider: str):
+    """Return config with a validated provider override for this run only."""
+    provider = str(data_provider or "").strip().lower()
+    if provider not in SUPPORTED_PROVIDERS:
+        supported = ", ".join(sorted(SUPPORTED_PROVIDERS))
+        raise ValueError(
+            f"unsupported data provider {data_provider!r}; expected one of: {supported}"
+        )
+    return replace(config, data_provider=provider)
 
 
 def format_file_size(byte_count):
@@ -684,6 +698,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     tickers: tuple[str, ...] | None = None,
     max_expiration_weeks: int | None = None,
     stale_quote_seconds: int | None = None,
+    data_provider: str | None = None,
     dry_run: bool = False,
     price_context_only: bool = False,
 ) -> None:
@@ -697,6 +712,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     tickers: override the ticker list from config for this run only.
     max_expiration_weeks: override the expiration window from config for this run only.
     stale_quote_seconds: override the staleness threshold from config for this run only.
+    data_provider: override settings.data_provider for this run only.
     dry_run: validate config, positions, and storage without API calls or writes.
     price_context_only: fetch/cache daily-OHLCV context without option-chain export.
 
@@ -711,6 +727,8 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
         config = _with_max_expiration_weeks(config, max_expiration_weeks)
     if stale_quote_seconds is not None:
         config = replace(config, stale_quote_seconds=stale_quote_seconds)
+    if data_provider is not None:
+        config = _with_data_provider(config, data_provider)
     if price_context_only:
         config = replace(config, price_context_enable=True)
     if dry_run:
