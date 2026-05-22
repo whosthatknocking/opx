@@ -145,6 +145,30 @@ def test_run_fetch_public_params_are_documented():
         assert f"**`{param}`" in section
 
 
+def test_external_interface_documents_special_fetch_modes():
+    """The external contract should match dry-run and price-context-only behavior."""
+    spec = (ROOT / "docs" / "EXTERNAL_INTERFACE_SPEC.md").read_text(encoding="utf-8")
+    cli = spec.split("### 2.1 `opx-fetch`", maxsplit=1)[1]
+    cli = cli.split("### 2.2", maxsplit=1)[0]
+    run_fetch_heading = "### 3.2 Triggering a fresh fetch programmatically"
+    run_fetch_section = spec.split(run_fetch_heading, maxsplit=1)[1]
+    run_fetch_section = run_fetch_section.split("### 3.3", maxsplit=1)[0]
+    normalized_run_fetch = " ".join(run_fetch_section.split())
+
+    assert "--enable-price-context" in cli
+    assert "--disable-price-context" in cli
+    assert "--price-context-only" in cli
+    assert "--enable-filters" not in cli
+    assert "--disable-filters" not in cli
+    assert "Dry runs do not acquire the fetcher lock" in normalized_run_fetch
+    assert "dry_run=True` writes no result" in normalized_run_fetch
+    assert (
+        "price_context_only=True` writes only the standalone price-context artifact"
+        in normalized_run_fetch
+    )
+    assert "storage dataset or run record" in normalized_run_fetch
+
+
 def test_agents_architecture_map_lists_load_bearing_modules():
     """Agent guidance should keep the architecture map aligned with core modules."""
     agents_doc = (ROOT / "AGENTS.md").read_text(encoding="utf-8")

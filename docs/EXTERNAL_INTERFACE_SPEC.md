@@ -55,7 +55,7 @@ normalization logic — is internal to `opx-chain` and may change without notice
 A downstream orchestrator invokes it as a subprocess:
 
 ```
-opx-fetch [--positions <path>] [--dry-run] [--enable-filters | --disable-filters]
+opx-fetch [--positions <path>] [--dry-run] [--enable-price-context | --disable-price-context] [--price-context-only]
 ```
 
 The orchestrator must:
@@ -88,11 +88,25 @@ dependency is installed before any provider call can be made. A dry run exits
 `0` when those preflight checks pass. It is safe for operator diagnostics; a
 downstream orchestrator should not treat it as producing a new dataset.
 
+**`--enable-price-context` / `--disable-price-context` (optional)**
+
+Overrides optional daily-OHLCV price-context capture for this run. These flags
+apply to a normal option-chain fetch: the command still writes the option-chain
+dataset when the fetch succeeds, and the price-context artifact is auxiliary.
+
+**`--price-context-only` (optional)**
+
+Refreshes only the daily-OHLCV price-context artifact and skips option-chain
+export. A successful price-context-only run exits `0` after writing the
+standalone versioned JSON artifact under the runs directory, but it does not
+create a new option-chain dataset or storage run record. Downstream consumers
+must not poll storage for a new dataset after this mode.
+
 **Exit codes**
 
 | Code | Meaning |
 |---|---|
-| `0` | Fetch completed; at least one dataset was written to storage |
+| `0` | Command completed successfully. For a normal option-chain fetch, at least one dataset was written to storage. For `--dry-run`, no dataset or artifact is written. For `--price-context-only`, only the standalone price-context artifact is written. |
 | non-zero | Fetch failed or was interrupted; no new dataset should be assumed |
 
 ### 2.2 No other CLI arguments are part of the external interface
@@ -194,9 +208,11 @@ run_fetch(dry_run=True)
 run_fetch(price_context_only=True)
 ```
 
-`run_fetch()` is the in-process equivalent of invoking `opx-fetch` as a subprocess.
-It acquires the same exclusive lock, runs the full fetch pipeline, and writes the result
-to storage. The caller blocks until the fetch completes.
+`run_fetch()` is the in-process equivalent of invoking `opx-fetch` as a
+subprocess. For normal option-chain fetches, it acquires the same exclusive
+lock, runs the full fetch pipeline, and writes the result to storage. The
+caller blocks until the fetch completes. Dry runs do not acquire the fetcher
+lock and are not a lock-availability or concurrency preflight.
 
 **`positions_path` (optional `Path`)** — overrides the default positions file, identical
 in semantics to the `--positions` CLI flag. When absent, the configured default is used.
@@ -221,9 +237,10 @@ callers use this to select a provider per experimental or production run without
 mutating the opx-chain config file. When absent, the configured provider is used
 unchanged.
 
-**`dry_run` (optional `bool`)** — when `True`, validates config loading, positions
-parsing, lock acquisition, and storage reachability without making provider API calls
-or writing run artifacts. This is the in-process equivalent of `opx-fetch --dry-run`.
+**`dry_run` (optional `bool`)** — when `True`, validates config loading,
+positions parsing, and storage reachability without making provider API calls,
+acquiring the fetcher lock, or writing run artifacts. This is the in-process
+equivalent of `opx-fetch --dry-run`.
 
 **`price_context_only` (optional `bool`)** — when `True`, reconciles only the
 optional daily-OHLCV price-history store, writes the derived price-context
@@ -240,8 +257,11 @@ directory and does not change the option-chain dataset schema.
 | Fetch produces no data | `RuntimeError` |
 | Provider or storage failure | provider-specific exception |
 
-After `run_fetch()` returns without error, the result is available via `get_storage_backend()`
-exactly as it would be after a successful `opx-fetch` subprocess exit.
+After a normal option-chain `run_fetch()` returns without error, the dataset is
+available via `get_storage_backend()` exactly as it would be after a successful
+normal `opx-fetch` subprocess exit. `dry_run=True` writes no result, and
+`price_context_only=True` writes only the standalone price-context artifact
+under the runs directory instead of creating a storage dataset or run record.
 
 ### 3.3 Obtaining a backend instance
 
