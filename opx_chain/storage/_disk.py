@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Iterable
 from pathlib import Path
 
 import pandas as pd
@@ -45,6 +46,22 @@ def resolve_child_path(base_dir: Path, *components: str) -> Path:
     if not resolved_dest.is_relative_to(resolved_base):
         raise ValueError(f"path escapes base directory: {resolved_dest}")
     return resolved_dest
+
+
+def retained_path_under_roots(location: str, roots: Iterable[Path]) -> Path | None:
+    """Return a retained metadata path only when it resolves under an allowed root."""
+    try:
+        resolved = Path(location).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    for root in roots:
+        try:
+            resolved_root = root.expanduser().resolve(strict=False)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if resolved.is_relative_to(resolved_root):
+            return resolved
+    return None
 
 
 def write_dataset_artifact(

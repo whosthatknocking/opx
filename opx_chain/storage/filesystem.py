@@ -29,6 +29,7 @@ from opx_chain.storage.models import (
 from opx_chain.storage.atomic import atomic_write_bytes, atomic_write_text
 from opx_chain.storage._disk import (
     content_hash_for_bytes,
+    retained_path_under_roots,
     resolve_child_path,
     write_artifact_bytes,
     write_dataset_artifact,
@@ -117,7 +118,9 @@ class FilesystemBackend:
                 entry.unlink(missing_ok=True)
 
     def _delete_artifact_path(self, location: str) -> None:
-        path = Path(location)
+        path = retained_path_under_roots(location, (self._runs_dir, self._debug_dir))
+        if path is None:
+            return
         path.unlink(missing_ok=True)
         try:
             if path.parent.parent.resolve() == self._debug_dir.resolve():

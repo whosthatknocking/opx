@@ -34,6 +34,7 @@ from opx_chain.storage.models import (
 from opx_chain.storage.atomic import atomic_write_bytes
 from opx_chain.storage._disk import (
     content_hash_for_bytes,
+    retained_path_under_roots,
     resolve_child_path,
     write_artifact_bytes,
     write_dataset_artifact,
@@ -328,8 +329,10 @@ class SqliteIndexedBackend:
                 pending.append(_DeferredDelete(entry))
         return pending
 
-    def _stage_artifact_file_delete(self, location: str) -> _DeferredDelete:
-        path = Path(location)
+    def _stage_artifact_file_delete(self, location: str) -> _DeferredDelete | None:
+        path = retained_path_under_roots(location, (self._runs_dir, self._debug_dir))
+        if path is None:
+            return None
         try:
             remove_empty_parent = (
                 path.parent.parent.resolve() == self._debug_dir.resolve()
@@ -360,7 +363,9 @@ class SqliteIndexedBackend:
         ).fetchall()
         pending: list[_DeferredDelete] = []
         for row in rows:
-            pending.append(self._stage_artifact_file_delete(row["location"]))
+            staged = self._stage_artifact_file_delete(row["location"])
+            if staged is not None:
+                pending.append(staged)
             conn.execute("DELETE FROM artifacts WHERE artifact_id = ?", (row["artifact_id"],))
         pending.extend(self._stage_sidecar_file_deletes(run_id))
         return pending
@@ -386,7 +391,9 @@ class SqliteIndexedBackend:
         ).fetchall()
         pending: list[_DeferredDelete] = []
         for row in rows:
-            pending.append(_DeferredDelete(Path(row["location"])))
+            dataset_path = retained_path_under_roots(row["location"], (self._runs_dir,))
+            if dataset_path is not None:
+                pending.append(_DeferredDelete(dataset_path))
             pending.extend(self._stage_run_artifact_deletes(conn, row["run_id"]))
             conn.execute(
                 "UPDATE runs SET dataset_id = NULL WHERE run_id = ? AND dataset_id = ?",
