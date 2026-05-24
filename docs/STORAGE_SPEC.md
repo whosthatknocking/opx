@@ -227,6 +227,13 @@ tail data. `opx-price-history-backfill` uses the same store and keying to
 populate `marketdata` and `yfinance` coverage independently without creating an
 option-chain dataset or price-context artifact.
 
+Durable implied-volatility history is stored in `iv-history.db` under the same
+base directory. It is derived from retained option-chain datasets rather than
+provider cache entries or new provider calls. Rows are keyed by provider,
+ticker, observation date, option type, DTE bucket, and delta bucket so
+historical-IV percentile calculations can prefer ticker-wide and DTE-bucket
+history instead of using the current-chain cross-section as a proxy.
+
 ### 5.5 Viewer Preference Store
 
 Purpose:
@@ -755,6 +762,9 @@ All seven steps are complete and shipped.
   and events responses with configurable TTLs
 - price context uses the separate durable `price-history.db` daily-bar store;
   `price_context_ttl` controls reconciliation attempts, not artifact retention
+- IV history uses the separate durable `iv-history.db` aggregate store populated
+  from retained option-chain datasets by `opx-iv-history-backfill`; it does not
+  consume provider API calls
 - Market Data cache keys include the configured `[providers.marketdata].mode`
   (`live`, `cached`, `delayed`, or provider default) so changing mode does not
   reuse responses from a different recency mode

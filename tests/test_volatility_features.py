@@ -127,9 +127,9 @@ def test_build_iv_features_leaves_history_percentiles_blank_without_history() ->
 def test_build_iv_features_uses_optional_history_percentiles() -> None:
     history = pd.DataFrame(
         {
-            "ticker": ["TSLA"] * 6,
-            "representative_iv": [0.20, 0.22, 0.24, 0.26, 0.30, 0.35],
-            "dte_bucket": ["8_14", "8_14", "8_14", "15_30", "15_30", "15_30"],
+            "ticker": ["TSLA"] * 48,
+            "representative_iv": [0.20 + index * 0.002 for index in range(48)],
+            "dte_bucket": ["8_14"] * 24 + ["15_30"] * 24,
         }
     )
 
@@ -143,8 +143,53 @@ def test_build_iv_features_uses_optional_history_percentiles() -> None:
     assert features["source_status"] == SOURCE_READY
     assert features["iv_source_method"] == "current_chain_plus_history"
     assert features["iv_percentile_1y"] is not None
-    assert features["dte_buckets"]["8_14"]["history_observation_count"] == 3
+    assert features["dte_buckets"]["8_14"]["history_observation_count"] == 24
     assert features["dte_buckets"]["8_14"]["iv_percentile"] is not None
+
+
+def test_build_iv_features_keeps_sparse_history_partial() -> None:
+    history = pd.DataFrame(
+        {
+            "ticker": ["TSLA"],
+            "representative_iv": [0.20],
+            "dte_bucket": ["8_14"],
+            "observation_date": ["2026-05-21"],
+        }
+    )
+
+    features = build_iv_features(
+        _chain(),
+        ticker="TSLA",
+        as_of=date(2026, 5, 22),
+        iv_history=history,
+    )
+
+    assert features["source_status"] == SOURCE_PARTIAL
+    assert features["unknown_reason"] == "insufficient_iv_history"
+    assert features["iv_percentile_1y"] is not None
+    assert features["dte_buckets"]["8_14"]["iv_percentile"] is None
+
+
+def test_build_iv_features_filters_date_bearing_history_to_lookback() -> None:
+    history = pd.DataFrame(
+        {
+            "ticker": ["TSLA"] * 25,
+            "representative_iv": [0.20 + index * 0.002 for index in range(25)],
+            "dte_bucket": ["8_14"] * 25,
+            "observation_date": ["2025-01-01"] * 25,
+        }
+    )
+
+    features = build_iv_features(
+        _chain(),
+        ticker="TSLA",
+        as_of=date(2026, 5, 22),
+        iv_history=history,
+    )
+
+    assert features["source_status"] == SOURCE_PARTIAL
+    assert features["iv_history_observation_count"] == 0
+    assert features["iv_percentile_1y"] is None
 
 
 def test_build_ticker_volatility_features_combines_price_and_iv() -> None:

@@ -153,7 +153,57 @@ Rows are stored independently in `price-history.db` by
 `(provider, ticker, trading_date)`, so `marketdata` and `yfinance` coverage for
 the same ticker can coexist without overwriting each other.
 
-### 2.3 No other `opx-fetch` CLI arguments are part of the external interface
+### 2.3 `opx-iv-history-backfill`
+
+`opx-iv-history-backfill` is the stable operational command for building
+durable implied-volatility percentile history from option-chain datasets already
+retained by opx-chain storage. It does not call provider APIs, write a new
+option-chain dataset, or create a storage run record. It only reconciles
+`iv-history.db`.
+
+```
+opx-iv-history-backfill --providers marketdata --tickers TSLA,NVDA --lookback-days 365
+```
+
+**`--providers <provider[,provider...]>` (optional)**
+
+Comma-separated provider list. When absent, the configured provider is used.
+Rows are stored independently by provider so retained `marketdata` and
+`yfinance` datasets can coexist.
+
+**`--tickers <ticker[,ticker...]>` (optional)**
+
+Comma-separated ticker filter. When absent, `settings.tickers` from the resolved
+config is used. If no configured tickers exist, all rows in matching datasets
+are eligible.
+
+**`--lookback-days <n>` (optional)**
+
+Dataset `created_at` lookback window to inspect. Defaults to `365`.
+
+**`--limit <n>` (optional)**
+
+Maximum retained datasets to inspect per provider. Defaults to `200`.
+
+**`--dataset-id <id>` (optional)**
+
+Specific retained dataset to ingest. Can be repeated or comma-separated.
+
+**`--refresh` (optional)**
+
+Reingests datasets even when an `iv_history_syncs` record already exists.
+
+**`--dry-run` (optional)**
+
+Reads matching datasets and reports derived aggregate row counts without writing
+`iv-history.db`.
+
+Rows are stored independently in `iv-history.db` by
+`(provider, ticker, observation_date, option_type, dte_bucket, delta_bucket)`.
+The public feature helpers consume ticker-wide and DTE-bucket aggregate rows to
+compute one-year IV percentiles without re-reading raw option-chain artifacts.
+
+### 2.4 No other `opx-fetch` CLI arguments are part of the external interface
 
 `--enable-filters` and `--disable-filters` are internal operational flags, not part
 of the stable downstream interface. A downstream orchestrator should not set them.
@@ -193,6 +243,11 @@ from opx_chain.price_context import (
     PRICE_CONTEXT_SCHEMA_VERSION,
     PriceContextStatus,
     blank_price_context,
+)
+from opx_chain.iv_history import (
+    IVHistoryStore,
+    build_iv_observation_frame,
+    get_iv_history_store,
 )
 from opx_chain.volatility_features import (
     VOLATILITY_FEATURE_SCHEMA_VERSION,
@@ -234,6 +289,12 @@ feature surface for downstream advisory consumers. These helpers expose
 stored daily-price realized-volatility features, current-chain IV context, and
 optional IV-history percentiles without requiring consumers to inspect
 `price-history.db` or option-chain internals directly.
+
+`IVHistoryStore`, `build_iv_observation_frame`, and `get_iv_history_store` are
+the stable durable-IV history surface for downstream consumers that need to
+populate or inspect provider-scoped historical IV percentiles. Consumers should
+prefer `build_ticker_volatility_features(..., iv_history_store=...)` instead of
+querying `iv-history.db` directly.
 
 `OPTION_TYPE_CALL`, `OPTION_TYPE_PUT`, `OPTION_TYPES`,
 `normalize_option_type`, and `option_type_label` are the stable option-type

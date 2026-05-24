@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from math import sqrt
 from typing import Any
 
@@ -19,6 +19,7 @@ VOLATILITY_FEATURE_SCHEMA_VERSION = 1
 VOLATILITY_FEATURE_METHOD = "vrp_lite_features_v1"
 PRICE_VOL_METHOD = "close_to_close_rv_v1"
 IV_FEATURE_METHOD = "current_chain_with_optional_history_v1"
+MIN_IV_HISTORY_OBSERVATIONS = 20
 
 SOURCE_READY = "READY"
 SOURCE_PARTIAL = "PARTIAL"
@@ -136,7 +137,13 @@ def _with_iv_state_columns(frame: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def _historical_iv_frame(history: pd.DataFrame, ticker: str) -> pd.DataFrame:
+def _historical_iv_frame(
+    history: pd.DataFrame,
+    ticker: str,
+    *,
+    as_of: date | None = None,
+    lookback_days: int | None = None,
+) -> pd.DataFrame:
     if not isinstance(history, pd.DataFrame) or history.empty:
         return pd.DataFrame()
     frame = history.copy()
@@ -145,6 +152,15 @@ def _historical_iv_frame(history: pd.DataFrame, ticker: str) -> pd.DataFrame:
         return frame
     if "dte_bucket" not in frame.columns and "days_to_expiration" in frame.columns:
         frame["dte_bucket"] = frame["days_to_expiration"].map(dte_bucket)
+    for date_column in ("observation_date", "date"):
+        if as_of is None or date_column not in frame.columns:
+            continue
+        dates = pd.to_datetime(frame[date_column], utc=True, errors="coerce").dt.date
+        frame = frame.loc[dates <= as_of].copy()
+        if lookback_days is not None:
+            start_date = as_of - timedelta(days=max(int(lookback_days), 0))
+            frame = frame.loc[dates.loc[frame.index] >= start_date].copy()
+        break
     iv_column = None
     for candidate in ("representative_iv", "median_iv", "implied_volatility", "iv"):
         if candidate in frame.columns:
@@ -158,12 +174,22 @@ def _historical_iv_frame(history: pd.DataFrame, ticker: str) -> pd.DataFrame:
     return frame
 
 
-def build_iv_features(  # pylint: disable=too-many-locals
+def _ticker_wide_iv_history(history: pd.DataFrame) -> pd.DataFrame:
+    if "dte_bucket" not in history.columns:
+        return history
+    wide_rows = history[history["dte_bucket"] == "ALL"]
+    return wide_rows if not wide_rows.empty else history
+
+
+def build_iv_features(  # pylint: disable=too-many-arguments,too-many-locals
     chain: pd.DataFrame,
     *,
     ticker: str,
     as_of: date | None = None,
     iv_history: pd.DataFrame | None = None,
+    iv_history_source_method: str | None = None,
+    iv_lookback_days: int = 365,
+    min_iv_history_observations: int = MIN_IV_HISTORY_OBSERVATIONS,
 ) -> dict[str, Any]:
     """Build ticker-wide and DTE-bucket IV features from current chain data.
 
@@ -214,11 +240,18 @@ def build_iv_features(  # pylint: disable=too-many-locals
     ).replace([np.inf, -np.inf], np.nan)
     current_observation_count = int((valid_iv > 0).sum())
     history = (
-        _historical_iv_frame(iv_history, ticker_key)
+        _historical_iv_frame(
+            iv_history,
+            ticker_key,
+            as_of=as_of,
+            lookback_days=iv_lookback_days,
+        )
         if iv_history is not None
         else pd.DataFrame()
     )
-    history_iv = history.get("representative_iv", pd.Series(dtype=float))
+    wide_history = _ticker_wide_iv_history(history)
+    history_iv = wide_history.get("representative_iv", pd.Series(dtype=float))
+    history_observation_count = int(len(history_iv.dropna()))
     iv_percentile = _percentile_rank(history_iv, representative_iv)
 
     if "days_to_expiration" in ticker_frame.columns:
@@ -241,20 +274,34 @@ def build_iv_features(  # pylint: disable=too-many-locals
             else pd.DataFrame()
         )
         history_values = history_rows.get("representative_iv", pd.Series(dtype=float))
+        history_observations = int(len(history_values.dropna()))
         dte_buckets[bucket] = {
             "current_observation_count": int(len(current_iv)),
-            "history_observation_count": int(len(history_values.dropna())),
+            "history_observation_count": history_observations,
             "representative_iv": current_median,
-            "iv_percentile": _percentile_rank(history_values, current_median),
+            "iv_percentile": (
+                _percentile_rank(history_values, current_median)
+                if history_observations >= int(min_iv_history_observations)
+                else None
+            ),
         }
 
     source_status = SOURCE_PARTIAL
     unknown_reason = "missing_iv_history"
     iv_source_method = "current_chain_proxy"
     if not history.empty:
-        source_status = SOURCE_READY if iv_percentile is not None else SOURCE_PARTIAL
-        unknown_reason = None if iv_percentile is not None else "insufficient_iv_history"
-        iv_source_method = "current_chain_plus_history"
+        has_enough_history = history_observation_count >= int(min_iv_history_observations)
+        source_status = (
+            SOURCE_READY
+            if iv_percentile is not None and has_enough_history
+            else SOURCE_PARTIAL
+        )
+        unknown_reason = (
+            None
+            if iv_percentile is not None and has_enough_history
+            else "insufficient_iv_history"
+        )
+        iv_source_method = iv_history_source_method or "current_chain_plus_history"
     elif representative_iv is None:
         source_status = SOURCE_MISSING
         unknown_reason = "missing_current_iv"
@@ -269,7 +316,7 @@ def build_iv_features(  # pylint: disable=too-many-locals
         "representative_iv": representative_iv,
         "iv_percentile_1y": iv_percentile,
         "iv_source_method": iv_source_method,
-        "iv_history_observation_count": int(len(history)),
+        "iv_history_observation_count": history_observation_count,
         "current_chain_observation_count": current_observation_count,
         "iv_state_level": _safe_first(ticker_frame, "iv_state_level") or "UNKNOWN",
         "iv_state_term": _safe_first(ticker_frame, "iv_state_term") or "UNKNOWN",
@@ -389,7 +436,7 @@ def load_price_volatility_features(  # pylint: disable=too-many-arguments
     )
 
 
-def build_ticker_volatility_features(  # pylint: disable=too-many-arguments
+def build_ticker_volatility_features(  # pylint: disable=too-many-arguments,too-many-locals
     *,
     ticker: str,
     chain: pd.DataFrame,
@@ -398,6 +445,9 @@ def build_ticker_volatility_features(  # pylint: disable=too-many-arguments
     provider: str | None = None,
     as_of: date | None = None,
     iv_history: pd.DataFrame | None = None,
+    iv_history_store: Any | None = None,
+    iv_lookback_days: int = 365,
+    min_iv_history_observations: int = MIN_IV_HISTORY_OBSERVATIONS,
     price_lookback_days: int = 260,
     min_context_sessions: int = 90,
     max_stale_days: int = 7,
@@ -424,11 +474,24 @@ def build_ticker_volatility_features(  # pylint: disable=too-many-arguments
             max_stale_days=max_stale_days,
         )
 
+    iv_history_source_method = None
+    if iv_history is None and iv_history_store is not None and provider and as_of:
+        iv_history = iv_history_store.load_history(
+            provider=provider,
+            ticker=ticker_key,
+            lookback_days=iv_lookback_days,
+            end_date=as_of,
+        )
+        iv_history_source_method = "durable_iv_history"
+
     iv_features = build_iv_features(
         chain,
         ticker=ticker_key,
         as_of=as_of,
         iv_history=iv_history,
+        iv_history_source_method=iv_history_source_method,
+        iv_lookback_days=iv_lookback_days,
+        min_iv_history_observations=min_iv_history_observations,
     )
     source_statuses = {
         str(price_features.get("source_status") or SOURCE_MISSING),
@@ -458,6 +521,7 @@ def build_ticker_volatility_features(  # pylint: disable=too-many-arguments
 __all__ = [
     "DTE_BUCKETS",
     "IV_FEATURE_METHOD",
+    "MIN_IV_HISTORY_OBSERVATIONS",
     "PRICE_VOL_METHOD",
     "RV_WINDOWS",
     "SOURCE_ERROR",

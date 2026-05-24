@@ -250,6 +250,20 @@ The command writes rows independently by provider, ticker, and trading date in
 `price-history.db`. Use `--dry-run` to inspect current local coverage without
 provider API calls or writes.
 
+Use `opx-iv-history-backfill` after normal option-chain datasets have been
+retained when you want stronger historical-IV percentiles for volatility
+advisory features. This command replays stored option-chain datasets only; it
+does not call provider APIs or create a new fetch run:
+
+```bash
+opx-iv-history-backfill --providers marketdata,yfinance --tickers TSLA,NVDA,GOOGL --lookback-days 365
+```
+
+The command writes daily aggregate IV rows independently by provider, ticker,
+observation date, option type, DTE bucket, and delta bucket in `iv-history.db`.
+Use `--dry-run` to inspect matching retained datasets and aggregate row counts
+without writing the store.
+
 #### Shared Viewer Defaults
 
 - `viewer_host = "127.0.0.1"`: default bind host used by `opx-view`.
@@ -444,6 +458,13 @@ directory, or under `[storage].dir` when that base directory is configured. New
 tickers fetch the configured lookback. Existing tickers reuse stored historical
 bars and fetch only required backfill or recent tail data after
 `storage.price_context_ttl` expires.
+
+Durable implied-volatility history for volatility advisory features lives in
+`iv-history.db` under the same base directory. It is populated by
+`opx-iv-history-backfill` from retained option-chain datasets, not from
+additional provider calls. The store keeps provider-scoped daily aggregate IV
+observations so downstream consumers can compute ticker-wide and DTE-bucket IV
+percentiles without relying on a current-chain proxy.
 
 Current fields include `support_1`, `support_2`, `resistance_1`,
 `resistance_2`, `20d_high`, `20d_low`, `50dma`, `200dma`, `vwap`,
