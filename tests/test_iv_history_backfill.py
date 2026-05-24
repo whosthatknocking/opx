@@ -235,6 +235,31 @@ def test_iv_history_historical_dry_run_estimates_requests_without_fetch(tmp_path
     assert "estimated_provider_requests: 4" in format_backfill_result(result)
 
 
+def test_iv_history_historical_sessions_roll_weekend_end_date(tmp_path):
+    """Historical session planning should count back from the prior business day."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    config = make_runtime_config(
+        data_provider="marketdata",
+        tickers=("TSLA",),
+        today=date(2026, 5, 24),
+    )
+
+    result = run_iv_history_backfill(
+        providers=("marketdata",),
+        fetch_historical=True,
+        sessions=2,
+        config=config,
+        store=store,
+        dry_run=True,
+    )
+
+    assert [row.observation_date for row in result.rows] == [
+        "2026-05-21",
+        "2026-05-22",
+    ]
+    assert result.estimated_requests == 2
+
+
 def test_iv_history_historical_fetch_ingests_marketdata_snapshots(tmp_path):
     """Historical fetch should write provider/ticker/date IV aggregates."""
     store = IVHistoryStore(tmp_path / "iv-history.db")

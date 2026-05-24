@@ -146,9 +146,12 @@ def _historical_observation_dates(*, end_date: date, sessions: int) -> tuple[dat
     resolved_sessions = int(sessions)
     if resolved_sessions <= 0:
         raise ValueError("sessions must be positive")
+    business_end = pd.Timestamp(end_date)
+    while business_end.dayofweek >= 5:
+        business_end -= pd.Timedelta(days=1)
     return tuple(
         item.date()
-        for item in pd.bdate_range(end=end_date, periods=resolved_sessions)
+        for item in pd.bdate_range(end=business_end, periods=resolved_sessions)
     )
 
 
