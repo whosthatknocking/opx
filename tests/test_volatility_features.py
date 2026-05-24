@@ -96,6 +96,43 @@ def test_build_price_volatility_features_reports_insufficient_history() -> None:
     assert features["rv_10d"] is None
 
 
+def test_build_price_volatility_features_filters_mixed_symbol_history() -> None:
+    mixed = pd.concat(
+        [
+            _history(periods=120).assign(ticker="AAPL", provider="marketdata"),
+            _history(periods=6).assign(ticker="TSLA", provider="marketdata"),
+        ],
+        ignore_index=True,
+    )
+
+    features = build_price_volatility_features(
+        mixed,
+        ticker="TSLA",
+        provider="marketdata",
+        as_of=date(2026, 5, 22),
+    )
+
+    assert features["ticker"] == "TSLA"
+    assert features["source_status"] == SOURCE_INSUFFICIENT_HISTORY
+    assert features["price_history_lookback_sessions"] == 6
+    assert features["unknown_reason"] == "insufficient_returns_for_rv_windows"
+
+
+def test_build_price_volatility_features_reports_missing_for_absent_ticker() -> None:
+    history = _history(periods=120).assign(ticker="AAPL", provider="marketdata")
+
+    features = build_price_volatility_features(
+        history,
+        ticker="TSLA",
+        provider="marketdata",
+        as_of=date(2026, 5, 22),
+    )
+
+    assert features["source_status"] == SOURCE_MISSING
+    assert features["unknown_reason"] == "ticker_not_in_price_history"
+    assert features["price_history_lookback_sessions"] == 0
+
+
 def test_load_price_volatility_features_reads_public_store(tmp_path) -> None:
     store = PriceHistoryStore(tmp_path / "price-history.db")
     store.upsert_bars(provider="marketdata", ticker="TSLA", history=_history())
@@ -124,6 +161,15 @@ def test_build_iv_features_leaves_history_percentiles_blank_without_history() ->
     assert features["dte_buckets"]["8_14"]["iv_percentile"] is None
 
 
+def test_build_iv_features_rejects_unscoped_option_chain() -> None:
+    chain = _chain().drop(columns=["underlying_symbol"])
+
+    features = build_iv_features(chain, ticker="TSLA", as_of=date(2026, 5, 22))
+
+    assert features["source_status"] == SOURCE_MISSING
+    assert features["unknown_reason"] == "unscoped_option_chain"
+
+
 def test_build_iv_features_uses_optional_history_percentiles() -> None:
     history = pd.DataFrame(
         {
@@ -145,6 +191,27 @@ def test_build_iv_features_uses_optional_history_percentiles() -> None:
     assert features["iv_percentile_1y"] is not None
     assert features["dte_buckets"]["8_14"]["history_observation_count"] == 24
     assert features["dte_buckets"]["8_14"]["iv_percentile"] is not None
+
+
+def test_build_iv_features_ignores_unscoped_iv_history() -> None:
+    history = pd.DataFrame(
+        {
+            "representative_iv": [0.20 + index * 0.002 for index in range(24)],
+            "dte_bucket": ["8_14"] * 24,
+        }
+    )
+
+    features = build_iv_features(
+        _chain(),
+        ticker="TSLA",
+        as_of=date(2026, 5, 22),
+        iv_history=history,
+    )
+
+    assert features["source_status"] == SOURCE_PARTIAL
+    assert features["unknown_reason"] == "missing_iv_history"
+    assert features["iv_history_observation_count"] == 0
+    assert features["iv_percentile_1y"] is None
 
 
 def test_build_iv_features_keeps_sparse_history_partial() -> None:

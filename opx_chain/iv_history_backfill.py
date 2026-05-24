@@ -80,9 +80,11 @@ class IVHistoryBackfillResult:
     estimated_requests: int = 0
 
 
-def _normalize_csv_values(values: Iterable[str] | None) -> tuple[str, ...]:
+def _normalize_csv_values(values: Iterable[str] | str | None) -> tuple[str, ...]:
     if values is None:
         return ()
+    if isinstance(values, str):
+        values = (values,)
     normalized: list[str] = []
     for raw_value in values:
         for item in str(raw_value).split(","):
@@ -143,10 +145,22 @@ def _parse_end_date(value: str | date | None, default_end_date: date) -> date:
         raise ValueError("end_date must be YYYY-MM-DD") from exc
 
 
+def _strict_bool(value: bool, *, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{name} must be a boolean")
+    return value
+
+
+def _positive_int(value: int, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be a positive integer")
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
 def _historical_observation_dates(*, end_date: date, sessions: int) -> tuple[date, ...]:
-    resolved_sessions = int(sessions)
-    if resolved_sessions <= 0:
-        raise ValueError("sessions must be positive")
+    resolved_sessions = _positive_int(sessions, name="sessions")
     business_end = pd.Timestamp(end_date)
     while business_end.dayofweek >= 5:
         business_end -= pd.Timedelta(days=1)
@@ -162,7 +176,7 @@ def _lock_path(config: RuntimeConfig) -> Path:
 
 
 def _since_datetime(config: RuntimeConfig, lookback_days: int) -> datetime:
-    start_day = config.today - timedelta(days=max(int(lookback_days), 0))
+    start_day = config.today - timedelta(days=lookback_days)
     return datetime.combine(start_day, time.min, tzinfo=timezone.utc)
 
 
@@ -225,11 +239,45 @@ def _row_tickers(observations: pd.DataFrame) -> tuple[str, ...]:
     return tuple(sorted(set(observations["ticker"].astype(str).str.upper().str.strip())))
 
 
+def _frame_tickers(frame: pd.DataFrame) -> tuple[str, ...]:
+    if frame.empty:
+        return ()
+    tickers = _dataset_tickers(frame)
+    return tuple(sorted(set(ticker for ticker in tickers if ticker)))
+
+
 def _sync_is_replay_complete(sync) -> bool:
     """Return True when an existing retained-dataset sync has usable IV rows."""
     return (
         sync.status == BACKFILL_STATUS_INGESTED
         and int(sync.stored_rows or 0) > 0
+    )
+
+
+def _sync_has_observations(
+    *,
+    sync,
+    record: DatasetRecord | DatasetHandle,
+    tickers: tuple[str, ...],
+    iv_store: IVHistoryStore,
+) -> bool:
+    """Return True when retained sync metadata matches stored observations."""
+    if not _sync_is_replay_complete(sync) or sync.observation_date is None:
+        return False
+    try:
+        chain = _filter_frame_tickers(_read_chain_dataset(record), tickers)
+    except Exception:  # pylint: disable=broad-exception-caught
+        return False
+    frame_tickers = _frame_tickers(chain)
+    if not frame_tickers:
+        return False
+    return all(
+        iv_store.has_observation_date(
+            provider=record.provider,
+            ticker=ticker,
+            observation_date=sync.observation_date,
+        )
+        for ticker in frame_tickers
     )
 
 
@@ -241,7 +289,7 @@ def _historical_provider_config(config: RuntimeConfig, provider: str) -> Runtime
     return replace(config, data_provider=provider)
 
 
-def _historical_fetch_rows(  # pylint: disable=too-many-arguments,too-many-locals,too-many-nested-blocks
+def _historical_fetch_rows(  # pylint: disable=too-many-arguments,too-many-locals,too-many-nested-blocks,too-many-branches
     *,
     providers: tuple[str, ...],
     tickers: tuple[str, ...],
@@ -291,6 +339,13 @@ def _historical_fetch_rows(  # pylint: disable=too-many-arguments,too-many-local
                 _historical_provider_config(config, provider_name)
             )
             provider = provider_factory(provider_name)
+            actual_provider_name = str(getattr(provider, "name", "") or "").lower()
+            if actual_provider_name != provider_name:
+                raise ValueError(
+                    "provider_factory returned provider "
+                    f"{actual_provider_name or '<missing>'!r} for requested "
+                    f"provider {provider_name!r}"
+                )
             for ticker in tickers:
                 prepare_ticker_fetch = getattr(provider, "prepare_ticker_fetch", None)
                 if callable(prepare_ticker_fetch):
@@ -419,18 +474,17 @@ def run_iv_history_backfill(
     resolved_providers = _normalize_providers(providers, base_config.data_provider)
     resolved_tickers = _normalize_tickers(tickers, base_config.tickers)
     resolved_dataset_ids = _normalize_csv_values(dataset_ids)
-    if fetch_historical and resolved_dataset_ids:
+    resolved_refresh = _strict_bool(refresh, name="refresh")
+    resolved_dry_run = _strict_bool(dry_run, name="dry_run")
+    resolved_fetch_historical = _strict_bool(fetch_historical, name="fetch_historical")
+    if resolved_fetch_historical and resolved_dataset_ids:
         raise ValueError("dataset_ids cannot be used with fetch_historical")
-    resolved_lookback = int(lookback_days)
-    resolved_limit = int(limit)
-    if resolved_lookback <= 0:
-        raise ValueError("lookback_days must be positive")
-    if resolved_limit <= 0:
-        raise ValueError("limit must be positive")
-    resolved_sessions = int(sessions)
+    resolved_lookback = _positive_int(lookback_days, name="lookback_days")
+    resolved_limit = _positive_int(limit, name="limit")
+    resolved_sessions = _positive_int(sessions, name="sessions")
     resolved_end_date = _parse_end_date(end_date, base_config.today)
     historical_dates: tuple[date, ...] = ()
-    if fetch_historical:
+    if resolved_fetch_historical:
         _validate_historical_providers(resolved_providers)
         if not resolved_tickers:
             raise ValueError("at least one ticker is required for fetch_historical")
@@ -444,13 +498,13 @@ def run_iv_history_backfill(
     rows: list[IVHistoryBackfillRow] = []
 
     try:
-        if fetch_historical:
+        if resolved_fetch_historical:
             rows = _historical_fetch_rows(
                 providers=resolved_providers,
                 tickers=resolved_tickers,
                 observation_dates=historical_dates,
-                refresh=refresh,
-                dry_run=dry_run,
+                refresh=resolved_refresh,
+                dry_run=resolved_dry_run,
                 config=base_config,
                 iv_store=iv_store,
                 provider_factory=provider_factory,
@@ -460,8 +514,8 @@ def run_iv_history_backfill(
                 tickers=resolved_tickers,
                 lookback_days=resolved_lookback,
                 limit=resolved_limit,
-                refresh=refresh,
-                dry_run=dry_run,
+                refresh=resolved_refresh,
+                dry_run=resolved_dry_run,
                 rows=tuple(rows),
                 fetch_historical=True,
                 sessions=resolved_sessions,
@@ -485,7 +539,16 @@ def run_iv_history_backfill(
         )
         for record in records:
             sync = iv_store.get_sync(dataset_id=record.dataset_id)
-            if sync is not None and not refresh and _sync_is_replay_complete(sync):
+            if (
+                sync is not None
+                and not resolved_refresh
+                and _sync_has_observations(
+                    sync=sync,
+                    record=record,
+                    tickers=resolved_tickers,
+                    iv_store=iv_store,
+                )
+            ):
                 rows.append(
                     IVHistoryBackfillRow(
                         provider=record.provider,
@@ -516,13 +579,13 @@ def run_iv_history_backfill(
                 )
                 stored_rows = (
                     len(observations)
-                    if dry_run
+                    if resolved_dry_run
                     else iv_store.upsert_observations(observations)
                 )
-                status = "DRY_RUN" if dry_run else (
+                status = "DRY_RUN" if resolved_dry_run else (
                     BACKFILL_STATUS_INGESTED if stored_rows else "EMPTY"
                 )
-                if not dry_run:
+                if not resolved_dry_run:
                     iv_store.record_sync(
                         dataset_id=record.dataset_id,
                         provider=record.provider,
@@ -550,7 +613,7 @@ def run_iv_history_backfill(
                 )
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 error_summary = str(exc).splitlines()[0]
-                if not dry_run:
+                if not resolved_dry_run:
                     iv_store.record_sync(
                         dataset_id=record.dataset_id,
                         provider=record.provider,
@@ -583,8 +646,8 @@ def run_iv_history_backfill(
         tickers=resolved_tickers,
         lookback_days=resolved_lookback,
         limit=resolved_limit,
-        refresh=refresh,
-        dry_run=dry_run,
+        refresh=resolved_refresh,
+        dry_run=resolved_dry_run,
         rows=tuple(rows),
         fetch_historical=False,
     )

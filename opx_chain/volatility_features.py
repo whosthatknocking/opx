@@ -93,7 +93,36 @@ def _ticker_filter(frame: pd.DataFrame, ticker: str) -> pd.Series:
     for column in ("underlying_symbol", "ticker", "symbol"):
         if column in frame.columns:
             return frame[column].astype(str).str.upper().str.strip() == ticker_key
-    return pd.Series([True] * len(frame), index=frame.index)
+    return pd.Series([False] * len(frame), index=frame.index)
+
+
+def _has_ticker_identity(frame: pd.DataFrame) -> bool:
+    return any(column in frame.columns for column in ("underlying_symbol", "ticker", "symbol"))
+
+
+def _filter_price_identity(
+    frame: pd.DataFrame,
+    *,
+    ticker: str,
+    provider: str | None,
+) -> tuple[pd.DataFrame, str | None]:
+    """Filter direct price history when symbol/provider identity columns exist."""
+    if not isinstance(frame, pd.DataFrame):
+        return pd.DataFrame(), None
+    if frame.empty:
+        return frame, None
+    result = frame.copy()
+    if _has_ticker_identity(result):
+        result = result.loc[_ticker_filter(result, ticker)].copy()
+        if result.empty:
+            return result, "ticker_not_in_price_history"
+    if provider and "provider" in result.columns:
+        provider_key = provider.lower().strip()
+        provider_mask = result["provider"].astype(str).str.lower().str.strip() == provider_key
+        result = result.loc[provider_mask].copy()
+        if result.empty:
+            return result, "provider_not_in_price_history"
+    return result, None
 
 
 def _representative_iv(frame: pd.DataFrame) -> float | None:
@@ -205,6 +234,21 @@ def build_iv_features(  # pylint: disable=too-many-arguments,too-many-locals
             "as_of": _date_to_iso(as_of),
             "source_status": SOURCE_MISSING,
             "unknown_reason": "missing_option_chain",
+            "method": IV_FEATURE_METHOD,
+            "representative_iv": None,
+            "iv_percentile_1y": None,
+            "iv_source_method": "unavailable",
+            "iv_history_observation_count": 0,
+            "iv_state_level": "UNKNOWN",
+            "iv_state_term": "UNKNOWN",
+            "dte_buckets": {},
+        }
+    if not _has_ticker_identity(chain):
+        return {
+            "ticker": ticker_key,
+            "as_of": _date_to_iso(as_of),
+            "source_status": SOURCE_MISSING,
+            "unknown_reason": "unscoped_option_chain",
             "method": IV_FEATURE_METHOD,
             "representative_iv": None,
             "iv_percentile_1y": None,
@@ -342,7 +386,12 @@ def build_price_volatility_features(  # pylint: disable=too-many-arguments,too-m
 ) -> dict[str, Any]:
     """Build close-to-close realized-volatility features from daily OHLCV bars."""
     ticker_key = ticker.upper().strip()
-    normalized = normalize_price_history_frame(history)
+    scoped_history, scoped_missing_reason = _filter_price_identity(
+        history,
+        ticker=ticker_key,
+        provider=provider,
+    )
+    normalized = normalize_price_history_frame(scoped_history)
     if as_of is not None and not normalized.empty:
         normalized = normalized[
             pd.to_datetime(normalized["date"], utc=True).dt.date <= as_of
@@ -364,7 +413,7 @@ def build_price_volatility_features(  # pylint: disable=too-many-arguments,too-m
         "provider": provider,
         "as_of": _date_to_iso(as_of),
         "source_status": SOURCE_MISSING,
-        "unknown_reason": "missing_price_history",
+        "unknown_reason": scoped_missing_reason or "missing_price_history",
         "method": PRICE_VOL_METHOD,
         "newest_completed_session": None,
         "price_history_lookback_sessions": int(len(valid)),

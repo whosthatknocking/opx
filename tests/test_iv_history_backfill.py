@@ -91,6 +91,12 @@ class HistoricalProvider:
         return pd.DataFrame(rows)
 
 
+class WrongHistoricalProvider(HistoricalProvider):
+    """Provider stub with mismatched public identity."""
+
+    name = "yfinance"
+
+
 def _record(path, *, dataset_id: str = "dataset-1") -> DatasetRecord:
     return DatasetRecord(
         dataset_id=dataset_id,
@@ -127,6 +133,32 @@ def test_iv_history_backfill_ingests_retained_dataset(tmp_path):
     assert result.rows[0].status == "INGESTED"
     assert result.rows[0].source_rows == 3
     assert result.rows[0].stored_rows > 0
+    assert store.stats(provider="marketdata", ticker="TSLA").observation_dates == 1
+
+
+def test_iv_history_backfill_accepts_scalar_csv_strings(tmp_path):
+    """Programmatic callers should not have scalar provider/ticker strings split."""
+    path = tmp_path / "chain.csv"
+    _dataset(path)
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    config = make_runtime_config(
+        data_provider="marketdata",
+        tickers=("TSLA",),
+        today=datetime(2026, 5, 22, tzinfo=timezone.utc).date(),
+    )
+
+    result = run_iv_history_backfill(
+        providers="marketdata",
+        tickers="TSLA",
+        dataset_ids="dataset-1",
+        config=config,
+        store=store,
+        storage=FakeStorage([_record(path)]),
+    )
+
+    assert result.providers == ("marketdata",)
+    assert result.tickers == ("TSLA",)
+    assert result.rows[0].status == "INGESTED"
     assert store.stats(provider="marketdata", ticker="TSLA").observation_dates == 1
 
 
@@ -238,6 +270,82 @@ def test_iv_history_backfill_retries_failed_or_empty_sync_without_refresh(
     assert store.stats(provider="marketdata", ticker="TSLA").observation_dates == 1
 
 
+def test_iv_history_backfill_retries_ingested_sync_without_observations(tmp_path):
+    """Successful sync metadata alone should not suppress a retained replay."""
+    path = tmp_path / "chain.csv"
+    _dataset(path, quote_time="2026-05-22T20:00:00Z")
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    record = _record(path)
+    store.record_sync(
+        dataset_id=record.dataset_id,
+        provider=record.provider,
+        run_id=record.run_id,
+        status="INGESTED",
+        observation_date=date(2026, 5, 22),
+        source_rows=3,
+        stored_rows=8,
+    )
+    config = make_runtime_config(data_provider="marketdata", tickers=("TSLA",))
+
+    result = run_iv_history_backfill(
+        providers=("marketdata",),
+        config=config,
+        store=store,
+        storage=FakeStorage([record]),
+    )
+
+    assert result.rows[0].status == "INGESTED"
+    assert result.rows[0].source_rows == 3
+    assert result.rows[0].stored_rows > 0
+    assert store.stats(provider="marketdata", ticker="TSLA").observation_dates == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("refresh", "false", "refresh must be a boolean"),
+        ("dry_run", "false", "dry_run must be a boolean"),
+        ("fetch_historical", "false", "fetch_historical must be a boolean"),
+    ],
+)
+def test_iv_history_backfill_rejects_false_like_boolean_strings(
+    tmp_path,
+    field,
+    value,
+    message,
+):
+    """Programmatic callers must pass real booleans for mutation controls."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    config = make_runtime_config(data_provider="marketdata", tickers=("TSLA",))
+    kwargs = {field: value}
+
+    with pytest.raises(ValueError, match=message):
+        run_iv_history_backfill(config=config, store=store, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("lookback_days", "365", "lookback_days must be a positive integer"),
+        ("limit", 1.5, "limit must be a positive integer"),
+        ("sessions", True, "sessions must be a positive integer"),
+    ],
+)
+def test_iv_history_backfill_rejects_loosely_typed_numeric_windows(
+    tmp_path,
+    field,
+    value,
+    message,
+):
+    """Programmatic callers must pass integer windows, not coercible values."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    config = make_runtime_config(data_provider="marketdata", tickers=("TSLA",))
+    kwargs = {field: value}
+
+    with pytest.raises(ValueError, match=message):
+        run_iv_history_backfill(config=config, store=store, **kwargs)
+
+
 def test_iv_history_historical_dry_run_estimates_requests_without_fetch(tmp_path):
     """Historical dry-run should show provider calls without consuming API quota."""
     store = IVHistoryStore(tmp_path / "iv-history.db")
@@ -320,6 +428,30 @@ def test_iv_history_historical_fetch_ingests_marketdata_snapshots(tmp_path):
     stats = store.stats(provider="marketdata", ticker="TSLA")
     assert stats.observation_dates == 2
     assert stats.latest_date == date(2026, 5, 22)
+
+
+def test_iv_history_historical_fetch_rejects_provider_identity_mismatch(tmp_path):
+    """Historical fetch should not label rows with a different requested provider."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    provider = WrongHistoricalProvider()
+    config = make_runtime_config(
+        data_provider="marketdata",
+        tickers=("TSLA",),
+        today=date(2026, 5, 22),
+    )
+
+    with pytest.raises(ValueError, match="provider_factory returned provider"):
+        run_iv_history_backfill(
+            providers=("marketdata",),
+            tickers=("TSLA",),
+            fetch_historical=True,
+            sessions=1,
+            config=config,
+            store=store,
+            provider_factory=lambda _provider_name: provider,
+        )
+
+    assert store.stats(provider="marketdata", ticker="TSLA").row_count == 0
 
 
 def test_iv_history_historical_fetch_filters_mixed_provider_tickers(tmp_path):

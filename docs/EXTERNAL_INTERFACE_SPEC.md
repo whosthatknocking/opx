@@ -171,8 +171,9 @@ remains the manual replay, repair, and historical-seeding surface.
 
 The default retained-dataset replay path does not call provider APIs.
 Without `--refresh`, retained-dataset replay skips only prior successful syncs
-that stored usable IV rows; prior failed or empty attempts are retried so the
-command can repair transient read or ingestion gaps.
+that stored usable IV rows and still have matching observations in
+`iv-history.db`; prior failed, empty, or metadata-only attempts are retried so
+the command can repair transient read, ingestion, or restore gaps.
 
 ```
 opx-iv-history-backfill --providers marketdata --tickers TSLA,NVDA --lookback-days 365
@@ -243,6 +244,9 @@ Rows are stored independently in `iv-history.db` by
 `(provider, ticker, observation_date, option_type, dte_bucket, delta_bucket)`.
 The public feature helpers consume ticker-wide and DTE-bucket aggregate rows to
 compute one-year IV percentiles without re-reading raw option-chain artifacts.
+Programmatic callers must pass real booleans for `refresh`, `dry_run`, and
+`fetch_historical`, and positive integers for `lookback_days`, `limit`, and
+`sessions`; CLI parsing performs this typing before invoking the runner.
 
 ### 2.4 No other `opx-fetch` CLI arguments are part of the external interface
 
@@ -702,6 +706,10 @@ figures. `iv` uses current-chain representative IV plus optional IV-history
 percentiles. When no durable IV history is supplied, historical percentile
 fields remain `null` and `iv_source_method` is `current_chain_proxy`; consumers
 must not treat current cross-section rank as a historical IV percentile.
+Direct helper calls enforce ticker scope at the public boundary: price-history
+frames with ticker/provider identity columns are filtered to the requested
+symbol and provider, option-chain frames must carry a ticker identity column,
+and unscoped IV-history frames are ignored for ticker-specific percentiles.
 
 `source_status` uses the stable vocabulary `READY`, `PARTIAL`,
 `INSUFFICIENT_HISTORY`, `STALE`, `MISSING`, and `ERROR`. Strategy-layer policy
