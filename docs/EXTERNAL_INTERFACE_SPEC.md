@@ -710,6 +710,11 @@ Direct helper calls enforce ticker scope at the public boundary: price-history
 frames with ticker/provider identity columns are filtered to the requested
 symbol and provider, option-chain frames must carry a ticker identity column,
 and unscoped IV-history frames are ignored for ticker-specific percentiles.
+Volatility helper identity and window arguments are validated before store or
+calculation work starts: tickers and required providers must be non-empty
+strings, `as_of` must be a `date`, `datetime`, or `YYYY-MM-DD` string, lookback
+and minimum-history windows must be positive integers, and stale-day windows
+must be non-negative integers.
 
 `source_status` uses the stable vocabulary `READY`, `PARTIAL`,
 `INSUFFICIENT_HISTORY`, `STALE`, `MISSING`, and `ERROR`. Strategy-layer policy

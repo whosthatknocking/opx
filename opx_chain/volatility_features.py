@@ -52,8 +52,64 @@ def _date_value(value: Any) -> date | None:
         return None
 
 
+def _normalize_as_of(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("as_of must be a date, datetime, or YYYY-MM-DD string") from exc
+    raise ValueError("as_of must be a date, datetime, or YYYY-MM-DD string")
+
+
 def _date_to_iso(value: date | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _normalize_ticker_arg(value: Any, *, name: str = "ticker") -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a non-empty string")
+    text = value.strip().upper()
+    if not text:
+        raise ValueError(f"{name} must be a non-empty string")
+    return text
+
+
+def _normalize_provider_arg(
+    value: Any,
+    *,
+    required: bool,
+    name: str = "provider",
+) -> str | None:
+    if value is None and not required:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a non-empty string")
+    text = value.strip().lower()
+    if not text:
+        raise ValueError(f"{name} must be a non-empty string")
+    return text
+
+
+def _positive_int_arg(value: Any, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be a positive integer")
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _non_negative_int_arg(value: Any, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be a non-negative integer")
+    if value < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return value
 
 
 def _rounded(value: Any, digits: int = 6) -> float | None:
@@ -227,11 +283,20 @@ def build_iv_features(  # pylint: disable=too-many-arguments,too-many-locals
     observations and explicitly leaves percentile fields blank rather than
     pretending current cross-section rank is a historical percentile.
     """
-    ticker_key = ticker.upper().strip()
+    ticker_key = _normalize_ticker_arg(ticker)
+    resolved_as_of = _normalize_as_of(as_of)
+    resolved_iv_lookback_days = _positive_int_arg(
+        iv_lookback_days,
+        name="iv_lookback_days",
+    )
+    resolved_min_iv_history_observations = _positive_int_arg(
+        min_iv_history_observations,
+        name="min_iv_history_observations",
+    )
     if not isinstance(chain, pd.DataFrame) or chain.empty:
         return {
             "ticker": ticker_key,
-            "as_of": _date_to_iso(as_of),
+            "as_of": _date_to_iso(resolved_as_of),
             "source_status": SOURCE_MISSING,
             "unknown_reason": "missing_option_chain",
             "method": IV_FEATURE_METHOD,
@@ -246,7 +311,7 @@ def build_iv_features(  # pylint: disable=too-many-arguments,too-many-locals
     if not _has_ticker_identity(chain):
         return {
             "ticker": ticker_key,
-            "as_of": _date_to_iso(as_of),
+            "as_of": _date_to_iso(resolved_as_of),
             "source_status": SOURCE_MISSING,
             "unknown_reason": "unscoped_option_chain",
             "method": IV_FEATURE_METHOD,
@@ -263,7 +328,7 @@ def build_iv_features(  # pylint: disable=too-many-arguments,too-many-locals
     if ticker_frame.empty:
         return {
             "ticker": ticker_key,
-            "as_of": _date_to_iso(as_of),
+            "as_of": _date_to_iso(resolved_as_of),
             "source_status": SOURCE_MISSING,
             "unknown_reason": "ticker_not_in_option_chain",
             "method": IV_FEATURE_METHOD,
@@ -287,8 +352,8 @@ def build_iv_features(  # pylint: disable=too-many-arguments,too-many-locals
         _historical_iv_frame(
             iv_history,
             ticker_key,
-            as_of=as_of,
-            lookback_days=iv_lookback_days,
+            as_of=resolved_as_of,
+            lookback_days=resolved_iv_lookback_days,
         )
         if iv_history is not None
         else pd.DataFrame()
@@ -325,7 +390,7 @@ def build_iv_features(  # pylint: disable=too-many-arguments,too-many-locals
             "representative_iv": current_median,
             "iv_percentile": (
                 _percentile_rank(history_values, current_median)
-                if history_observations >= int(min_iv_history_observations)
+                if history_observations >= resolved_min_iv_history_observations
                 else None
             ),
         }
@@ -334,7 +399,7 @@ def build_iv_features(  # pylint: disable=too-many-arguments,too-many-locals
     unknown_reason = "missing_iv_history"
     iv_source_method = "current_chain_proxy"
     if not history.empty:
-        has_enough_history = history_observation_count >= int(min_iv_history_observations)
+        has_enough_history = history_observation_count >= resolved_min_iv_history_observations
         source_status = (
             SOURCE_READY
             if iv_percentile is not None and has_enough_history
@@ -353,7 +418,7 @@ def build_iv_features(  # pylint: disable=too-many-arguments,too-many-locals
 
     return {
         "ticker": ticker_key,
-        "as_of": _date_to_iso(as_of),
+        "as_of": _date_to_iso(resolved_as_of),
         "source_status": source_status,
         "unknown_reason": unknown_reason,
         "method": IV_FEATURE_METHOD,
@@ -385,16 +450,29 @@ def build_price_volatility_features(  # pylint: disable=too-many-arguments,too-m
     max_stale_days: int = 7,
 ) -> dict[str, Any]:
     """Build close-to-close realized-volatility features from daily OHLCV bars."""
-    ticker_key = ticker.upper().strip()
+    ticker_key = _normalize_ticker_arg(ticker)
+    provider_key = _normalize_provider_arg(
+        provider,
+        required=provider is not None,
+    )
+    resolved_as_of = _normalize_as_of(as_of)
+    resolved_min_context_sessions = _positive_int_arg(
+        min_context_sessions,
+        name="min_context_sessions",
+    )
+    resolved_max_stale_days = _non_negative_int_arg(
+        max_stale_days,
+        name="max_stale_days",
+    )
     scoped_history, scoped_missing_reason = _filter_price_identity(
         history,
         ticker=ticker_key,
-        provider=provider,
+        provider=provider_key,
     )
     normalized = normalize_price_history_frame(scoped_history)
-    if as_of is not None and not normalized.empty:
+    if resolved_as_of is not None and not normalized.empty:
         normalized = normalized[
-            pd.to_datetime(normalized["date"], utc=True).dt.date <= as_of
+            pd.to_datetime(normalized["date"], utc=True).dt.date <= resolved_as_of
         ]
     normalized = normalized.sort_values("date").drop_duplicates(
         subset=["date"],
@@ -410,8 +488,8 @@ def build_price_volatility_features(  # pylint: disable=too-many-arguments,too-m
 
     base: dict[str, Any] = {
         "ticker": ticker_key,
-        "provider": provider,
-        "as_of": _date_to_iso(as_of),
+        "provider": provider_key,
+        "as_of": _date_to_iso(resolved_as_of),
         "source_status": SOURCE_MISSING,
         "unknown_reason": scoped_missing_reason or "missing_price_history",
         "method": PRICE_VOL_METHOD,
@@ -428,8 +506,8 @@ def build_price_volatility_features(  # pylint: disable=too-many-arguments,too-m
 
     newest_session = _date_value(valid["date"].iloc[-1])
     base["newest_completed_session"] = _date_to_iso(newest_session)
-    if as_of is not None and newest_session is not None:
-        base["stale_session_days"] = max((as_of - newest_session).days, 0)
+    if resolved_as_of is not None and newest_session is not None:
+        base["stale_session_days"] = max((resolved_as_of - newest_session).days, 0)
 
     log_returns = np.log(valid["close"] / valid["close"].shift(1)).replace(
         [np.inf, -np.inf], np.nan
@@ -443,12 +521,12 @@ def build_price_volatility_features(  # pylint: disable=too-many-arguments,too-m
     if len(valid) < max(RV_WINDOWS) + 1:
         base["source_status"] = SOURCE_INSUFFICIENT_HISTORY
         base["unknown_reason"] = "insufficient_returns_for_rv_windows"
-    elif len(valid) < min_context_sessions:
+    elif len(valid) < resolved_min_context_sessions:
         base["source_status"] = SOURCE_INSUFFICIENT_HISTORY
         base["unknown_reason"] = "insufficient_context_history"
     elif (
         base["stale_session_days"] is not None
-        and int(base["stale_session_days"]) > max_stale_days
+        and int(base["stale_session_days"]) > resolved_max_stale_days
     ):
         base["source_status"] = SOURCE_STALE
         base["unknown_reason"] = "stale_price_history"
@@ -469,19 +547,33 @@ def load_price_volatility_features(  # pylint: disable=too-many-arguments
     max_stale_days: int = 7,
 ) -> dict[str, Any]:
     """Load stored daily bars and derive realized-volatility features."""
+    provider_key = _normalize_provider_arg(provider, required=True)
+    ticker_key = _normalize_ticker_arg(ticker)
+    resolved_as_of = _normalize_as_of(as_of)
+    if resolved_as_of is None:
+        raise ValueError("as_of is required for store-backed volatility features")
+    resolved_lookback_days = _positive_int_arg(lookback_days, name="lookback_days")
+    resolved_min_context_sessions = _positive_int_arg(
+        min_context_sessions,
+        name="min_context_sessions",
+    )
+    resolved_max_stale_days = _non_negative_int_arg(
+        max_stale_days,
+        name="max_stale_days",
+    )
     history = store.load_recent_bars(
-        provider=provider,
-        ticker=ticker,
-        lookback_days=lookback_days,
-        end_date=as_of,
+        provider=provider_key,
+        ticker=ticker_key,
+        lookback_days=resolved_lookback_days,
+        end_date=resolved_as_of,
     )
     return build_price_volatility_features(
         history,
-        ticker=ticker,
-        provider=provider,
-        as_of=as_of,
-        min_context_sessions=min_context_sessions,
-        max_stale_days=max_stale_days,
+        ticker=ticker_key,
+        provider=provider_key,
+        as_of=resolved_as_of,
+        min_context_sessions=resolved_min_context_sessions,
+        max_stale_days=resolved_max_stale_days,
     )
 
 
@@ -502,45 +594,79 @@ def build_ticker_volatility_features(  # pylint: disable=too-many-arguments,too-
     max_stale_days: int = 7,
 ) -> dict[str, Any]:
     """Build a JSON-safe ticker feature snapshot for volatility advisory use."""
-    ticker_key = ticker.upper().strip()
-    if price_history is None and price_history_store is not None and provider and as_of:
+    ticker_key = _normalize_ticker_arg(ticker)
+    provider_required = (
+        provider is not None
+        or price_history_store is not None
+        or iv_history_store is not None
+    )
+    provider_key = _normalize_provider_arg(
+        provider,
+        required=provider_required,
+    )
+    resolved_as_of = _normalize_as_of(as_of)
+    resolved_price_lookback_days = _positive_int_arg(
+        price_lookback_days,
+        name="price_lookback_days",
+    )
+    resolved_iv_lookback_days = _positive_int_arg(
+        iv_lookback_days,
+        name="iv_lookback_days",
+    )
+    resolved_min_context_sessions = _positive_int_arg(
+        min_context_sessions,
+        name="min_context_sessions",
+    )
+    resolved_max_stale_days = _non_negative_int_arg(
+        max_stale_days,
+        name="max_stale_days",
+    )
+    resolved_min_iv_history_observations = _positive_int_arg(
+        min_iv_history_observations,
+        name="min_iv_history_observations",
+    )
+    if price_history_store is not None and resolved_as_of is None:
+        raise ValueError("as_of is required when price_history_store is supplied")
+    if iv_history_store is not None and resolved_as_of is None:
+        raise ValueError("as_of is required when iv_history_store is supplied")
+    if price_history is None and price_history_store is not None:
         price_features = load_price_volatility_features(
             price_history_store,
-            provider=provider,
+            provider=provider_key,
             ticker=ticker_key,
-            as_of=as_of,
-            lookback_days=price_lookback_days,
-            min_context_sessions=min_context_sessions,
-            max_stale_days=max_stale_days,
+            as_of=resolved_as_of,
+            lookback_days=resolved_price_lookback_days,
+            min_context_sessions=resolved_min_context_sessions,
+            max_stale_days=resolved_max_stale_days,
         )
     else:
         price_features = build_price_volatility_features(
             price_history if price_history is not None else pd.DataFrame(),
             ticker=ticker_key,
-            provider=provider,
-            as_of=as_of,
-            min_context_sessions=min_context_sessions,
-            max_stale_days=max_stale_days,
+            provider=provider_key,
+            as_of=resolved_as_of,
+            min_context_sessions=resolved_min_context_sessions,
+            max_stale_days=resolved_max_stale_days,
         )
 
     iv_history_source_method = None
-    if iv_history is None and iv_history_store is not None and provider and as_of:
+    if iv_history is None and iv_history_store is not None:
         iv_history = iv_history_store.load_history(
-            provider=provider,
+            provider=provider_key,
             ticker=ticker_key,
-            lookback_days=iv_lookback_days,
-            end_date=as_of,
+            lookback_days=resolved_iv_lookback_days,
+            end_date=resolved_as_of,
         )
         iv_history_source_method = "durable_iv_history"
 
     iv_features = build_iv_features(
         chain,
         ticker=ticker_key,
-        as_of=as_of,
+        as_of=resolved_as_of,
         iv_history=iv_history,
         iv_history_source_method=iv_history_source_method,
-        iv_lookback_days=iv_lookback_days,
-        min_iv_history_observations=min_iv_history_observations,
+        iv_lookback_days=resolved_iv_lookback_days,
+        min_iv_history_observations=resolved_min_iv_history_observations,
     )
     source_statuses = {
         str(price_features.get("source_status") or SOURCE_MISSING),
@@ -559,8 +685,8 @@ def build_ticker_volatility_features(  # pylint: disable=too-many-arguments,too-
         "schema_version": VOLATILITY_FEATURE_SCHEMA_VERSION,
         "method": VOLATILITY_FEATURE_METHOD,
         "ticker": ticker_key,
-        "as_of": _date_to_iso(as_of),
-        "provider": provider,
+        "as_of": _date_to_iso(resolved_as_of),
+        "provider": provider_key,
         "source_status": source_status,
         "price": price_features,
         "iv": iv_features,
