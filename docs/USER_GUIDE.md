@@ -264,6 +264,21 @@ observation date, option type, DTE bucket, and delta bucket in `iv-history.db`.
 Use `--dry-run` to inspect matching retained datasets and aggregate row counts
 without writing the store.
 
+When retained datasets do not provide enough observation dates, MarketData can
+seed the same store from historical option-chain snapshots. This mode is
+explicit because it may consume provider API requests. Run a dry-run first to
+see the provider/ticker/date request plan:
+
+```bash
+opx-iv-history-backfill --providers marketdata --tickers TSLA,NVDA,GOOGL --fetch-historical --sessions 25 --dry-run
+```
+
+Then omit `--dry-run` to write aggregate rows to `iv-history.db`. Historical
+fetch mode writes only the IV-history store; it does not create retained chain
+datasets or pipeline run records. V1 supports MarketData historical chains.
+Existing yfinance IV history can still coexist in the same store when replayed
+from retained yfinance datasets.
+
 #### Shared Viewer Defaults
 
 - `viewer_host = "127.0.0.1"`: default bind host used by `opx-view`.
@@ -461,10 +476,12 @@ bars and fetch only required backfill or recent tail data after
 
 Durable implied-volatility history for volatility advisory features lives in
 `iv-history.db` under the same base directory. It is populated by
-`opx-iv-history-backfill` from retained option-chain datasets, not from
-additional provider calls. The store keeps provider-scoped daily aggregate IV
-observations so downstream consumers can compute ticker-wide and DTE-bucket IV
-percentiles without relying on a current-chain proxy.
+`opx-iv-history-backfill` from retained option-chain datasets by default, or
+from explicit MarketData historical option-chain fetches when retained datasets
+are too sparse. The historical-fetch path writes only aggregate IV rows and may
+consume provider API requests. The store keeps provider-scoped daily aggregate
+IV observations so downstream consumers can compute ticker-wide and DTE-bucket
+IV percentiles without relying on a current-chain proxy.
 
 Current fields include `support_1`, `support_2`, `resistance_1`,
 `resistance_2`, `20d_high`, `20d_low`, `50dma`, `200dma`, `vwap`,

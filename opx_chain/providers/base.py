@@ -236,6 +236,15 @@ class DataProvider(ABC):
         """Return daily OHLCV history for optional price context, when supported."""
         return pd.DataFrame()
 
+    def load_historical_option_chain_frame(
+        self,
+        ticker: str,  # pylint: disable=unused-argument
+        *,
+        observation_date: date,  # pylint: disable=unused-argument
+    ) -> pd.DataFrame:
+        """Return a historical option-chain frame for IV-history seeding, when supported."""
+        return pd.DataFrame()
+
     @abstractmethod
     def load_underlying_snapshot(self, ticker: str) -> dict:
         """Load the current underlying snapshot for one ticker."""

@@ -149,7 +149,7 @@ class MarketDataProvider(DataProvider):
         self._request_throttle = RequestThrottle()
         self._client_cache_key: tuple[str] | None = None
         self._client_cache: OpxMarketDataClient | None = None
-        self._chain_frame_cache: dict[tuple[str, Mode | None], pd.DataFrame] = {}
+        self._chain_frame_cache: dict[tuple[str, Mode | None, str | None], pd.DataFrame] = {}
         self._stock_quote_snapshot_cache: dict[tuple[str, Mode | None], dict | None] = {}
 
     @property
@@ -396,10 +396,16 @@ class MarketDataProvider(DataProvider):
             raise ProviderQuotaError(f"Market Data {context} failed: {detail}")
         raise RuntimeError(f"Market Data {context} failed: {message or f'HTTP {status_code}'}")
 
-    def _chain_frame(self, ticker: str, mode: Mode | None) -> pd.DataFrame:
+    def _chain_frame(
+        self,
+        ticker: str,
+        mode: Mode | None,
+        *,
+        chain_date: date | None = None,
+    ) -> pd.DataFrame:
         """Load the full option chain once and split/filter it in memory."""
         ticker_key = ticker.upper()
-        cache_key = (ticker_key, mode)
+        cache_key = (ticker_key, mode, chain_date.isoformat() if chain_date else None)
         cached = self._chain_frame_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -407,11 +413,16 @@ class MarketDataProvider(DataProvider):
         self._debug_call_sequence = 0
         self._active_debug_ticker = ticker_key
         try:
+            chain_kwargs = {
+                "expiration": "all",
+                "output_format": OutputFormat.INTERNAL,
+                "mode": mode,
+            }
+            if chain_date is not None:
+                chain_kwargs["date"] = chain_date.isoformat()
             result = self._client().options.chain(
                 ticker_key,
-                expiration="all",
-                output_format=OutputFormat.INTERNAL,
-                mode=mode,
+                **chain_kwargs,
             )  # pylint: disable=missing-kwoa
             chain = self._raise_if_error(result, context="options chain request")
             payload = {
@@ -687,6 +698,82 @@ class MarketDataProvider(DataProvider):
         calls = scoped.loc[scoped["side"] == OPTION_TYPE_CALL].copy()
         puts = scoped.loc[scoped["side"] == OPTION_TYPE_PUT].copy()
         return OptionChainFrames(calls=calls, puts=puts)
+
+    @staticmethod
+    def _iv_history_frame(
+        frame: pd.DataFrame,
+        *,
+        ticker: str,
+        observation_date: date,
+    ) -> pd.DataFrame:
+        """Map a raw Market Data chain payload into IV-history input columns."""
+        if frame.empty:
+            return pd.DataFrame()
+        result = frame.copy()
+        if "expiration_date" not in result.columns and "expiration" in result.columns:
+            result["expiration_date"] = _normalize_marketdata_expiration_series(
+                result["expiration"]
+            )
+        renamed = result.rename(
+            columns={
+                "underlying": "underlying_symbol",
+                "updated": "option_quote_time",
+                "iv": "implied_volatility",
+                "side": "option_type",
+            }
+        )
+        if "underlying_symbol" not in renamed.columns:
+            renamed["underlying_symbol"] = ticker.upper()
+        else:
+            renamed["underlying_symbol"] = renamed["underlying_symbol"].fillna(
+                ticker.upper()
+            )
+        if "days_to_expiration" not in renamed.columns:
+            expirations = pd.to_datetime(
+                renamed.get("expiration_date"),
+                utc=False,
+                errors="coerce",
+            )
+            renamed["days_to_expiration"] = [
+                (expiration.date() - observation_date).days
+                if not pd.isna(expiration)
+                else np.nan
+                for expiration in expirations
+            ]
+        if "option_quote_time" in renamed.columns:
+            renamed["option_quote_time"] = renamed["option_quote_time"].map(
+                normalize_timestamp
+            )
+        else:
+            renamed["option_quote_time"] = pd.NaT
+        columns = [
+            column
+            for column in (
+                "underlying_symbol",
+                "implied_volatility",
+                "option_type",
+                "days_to_expiration",
+                "expiration_date",
+                "delta",
+                "option_quote_time",
+            )
+            if column in renamed.columns
+        ]
+        return renamed[columns].copy()
+
+    def load_historical_option_chain_frame(
+        self,
+        ticker: str,
+        *,
+        observation_date: date,
+    ) -> pd.DataFrame:
+        """Fetch a historical Market Data option-chain snapshot for IV-history seeding."""
+        frame = self._chain_frame(ticker, self._mode(), chain_date=observation_date)
+        return self._iv_history_frame(
+            frame,
+            ticker=ticker,
+            observation_date=observation_date,
+        )
 
     def normalize_option_frame(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,

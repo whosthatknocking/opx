@@ -441,6 +441,31 @@ class IVHistoryStore:
             latest_date=_parse_date(row["latest_date"]),
         )
 
+    def has_observation_date(
+        self,
+        *,
+        provider: str,
+        ticker: str,
+        observation_date: date,
+    ) -> bool:
+        """Return True when any IV aggregate exists for one provider/ticker/date."""
+        provider_key = _normalize_provider(provider)
+        ticker_key = str(ticker).upper().strip()
+        with self._lock:
+            conn = self._connection_for_use()
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM iv_observations
+                WHERE provider = ?
+                  AND ticker = ?
+                  AND observation_date = ?
+                LIMIT 1
+                """,
+                (provider_key, ticker_key, observation_date.isoformat()),
+            ).fetchone()
+        return row is not None
+
     def get_sync(self, *, dataset_id: str) -> IVHistorySync | None:
         """Return last ingestion metadata for one option-chain dataset."""
         with self._lock:

@@ -156,10 +156,14 @@ the same ticker can coexist without overwriting each other.
 ### 2.3 `opx-iv-history-backfill`
 
 `opx-iv-history-backfill` is the stable operational command for building
-durable implied-volatility percentile history from option-chain datasets already
-retained by opx-chain storage. It does not call provider APIs, write a new
-option-chain dataset, or create a storage run record. It only reconciles
+durable implied-volatility percentile history. By default it replays
+option-chain datasets already retained by opx-chain storage and does not call
+provider APIs, write a new option-chain dataset, or create a storage run record.
+When explicitly invoked with `--fetch-historical`, it fetches historical
+provider option-chain snapshots and writes only aggregate rows to
 `iv-history.db`.
+
+The default retained-dataset replay path does not call provider APIs.
 
 ```
 opx-iv-history-backfill --providers marketdata --tickers TSLA,NVDA --lookback-days 365
@@ -188,15 +192,43 @@ Maximum retained datasets to inspect per provider. Defaults to `200`.
 **`--dataset-id <id>` (optional)**
 
 Specific retained dataset to ingest. Can be repeated or comma-separated.
+Cannot be combined with `--fetch-historical`.
+
+**`--fetch-historical` (optional)**
+
+Fetches historical option-chain snapshots from supported providers and writes
+the derived aggregate IV rows directly to `iv-history.db`. This path does not
+write retained option-chain datasets or storage run records. It may consume
+provider API requests, so operators should run `--dry-run` first. V1 supports
+`marketdata`; retained-dataset replay remains the path for existing `yfinance`
+datasets.
+
+```bash
+opx-iv-history-backfill --providers marketdata --tickers TSLA,NVDA --fetch-historical --sessions 25 --dry-run
+```
+
+**`--sessions <n>` (optional)**
+
+Historical business sessions to fetch when `--fetch-historical` is set.
+Defaults to `20`.
+
+**`--end-date <YYYY-MM-DD>` (optional)**
+
+Last historical observation date for `--fetch-historical`. Defaults to the
+configured market date.
 
 **`--refresh` (optional)**
 
-Reingests datasets even when an `iv_history_syncs` record already exists.
+Reingests datasets even when an `iv_history_syncs` record already exists. In
+historical-fetch mode, refetches provider/ticker/date rows even when local
+coverage already exists.
 
 **`--dry-run` (optional)**
 
-Reads matching datasets and reports derived aggregate row counts without writing
-`iv-history.db`.
+For retained-dataset replay, reads matching datasets and reports derived
+aggregate row counts without writing `iv-history.db`. For `--fetch-historical`,
+reports the provider/ticker/date request plan and estimated provider-request
+count without calling provider APIs or writing the store.
 
 Rows are stored independently in `iv-history.db` by
 `(provider, ticker, observation_date, option_type, dte_bucket, delta_bucket)`.

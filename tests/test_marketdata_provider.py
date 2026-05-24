@@ -248,6 +248,31 @@ def test_marketdata_provider_load_price_history_uses_daily_candles(monkeypatch):
     assert client.last_candles_kwargs["mode"].value == "delayed"  # pylint: disable=no-member
 
 
+def test_marketdata_provider_loads_historical_chain_for_iv_history(monkeypatch):
+    """Historical IV seeding should pass a provider date and return canonical columns."""
+    patch_marketdata_client(monkeypatch)
+    monkeypatch.setattr(
+        "opx_chain.providers.marketdata.get_runtime_config",
+        lambda: make_runtime_config(marketdata_mode="delayed"),
+    )
+    provider = MarketDataProvider()
+
+    frame = provider.load_historical_option_chain_frame(
+        "TSLA",
+        observation_date=date(2026, 4, 1),
+    )
+    client = fake_client(provider)
+
+    assert client.last_chain_kwargs["date"] == "2026-04-01"  # pylint: disable=no-member
+    assert client.last_chain_kwargs["expiration"] == "all"  # pylint: disable=no-member
+    assert client.last_chain_kwargs["mode"].value == "delayed"  # pylint: disable=no-member
+    assert frame["underlying_symbol"].tolist() == ["TSLA", "TSLA"]
+    assert frame["option_type"].tolist() == ["call", "put"]
+    assert frame["implied_volatility"].tolist() == [0.31, 0.29]
+    assert frame["days_to_expiration"].tolist() == [16, 16]
+    assert str(frame["option_quote_time"].iloc[0]) == "2024-03-20 13:40:00+00:00"
+
+
 def test_marketdata_prepare_ticker_fetch_clears_ticker_caches(monkeypatch):
     """Market Data should not reuse in-process quote or chain caches across fetches."""
     patch_marketdata_client(monkeypatch)
