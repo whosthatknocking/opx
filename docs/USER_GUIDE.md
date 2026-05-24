@@ -237,6 +237,18 @@ be positive. Non-finite TOML floats such as `inf`, `-inf`, and `nan` are invalid
 Use `opx-fetch --enable-price-context` to write the artifact alongside a normal option-chain run, or
 `opx-fetch --price-context-only` to reconcile the local price-history store and
 write only the price-context JSON artifact without exporting option chains.
+Use `opx-price-history-backfill` when you want to populate or refresh the
+provider-scoped daily-bar store without writing a price-context artifact. For
+example, the weekend volatility-advisory backfill can run both supported
+providers over the same ticker set:
+
+```bash
+opx-price-history-backfill --providers marketdata,yfinance --tickers TSLA,NVDA,GOOGL --refresh
+```
+
+The command writes rows independently by provider, ticker, and trading date in
+`price-history.db`. Use `--dry-run` to inspect current local coverage without
+provider API calls or writes.
 
 #### Shared Viewer Defaults
 

@@ -317,6 +317,15 @@ tail data after the price-context TTL expires. It does not alter the canonical
 option-chain CSV schema; consumers join the versioned JSON artifact by ticker
 when they need row-level price context.
 
+`opx-price-history-backfill` provides the operational backfill path for
+volatility-advisory feature readiness. It reconciles the same `price-history.db`
+daily-bar store without writing option-chain datasets or price-context
+artifacts. The store is keyed by provider, ticker, and trading date, so
+`marketdata` and `yfinance` backfills can coexist for the same ticker set
+without overwriting each other. `--dry-run` reports current local coverage
+without provider API calls, and `--refresh` bypasses the price-history sync TTL
+when the operator intentionally wants a weekend refresh.
+
 Current provider behavior:
 
 - `marketdata`: fetches daily split-adjusted stock candles from the official SDK.

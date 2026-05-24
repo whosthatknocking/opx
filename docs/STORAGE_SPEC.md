@@ -223,7 +223,9 @@ Daily price-context history is stored durably in `price-history.db` under the
 configured opx-chain data directory. It is not a provider response cache entry:
 the store is keyed by provider, ticker, and trading date so old bars can be
 reused across runs while reconciliation fetches only missing backfill or recent
-tail data.
+tail data. `opx-price-history-backfill` uses the same store and keying to
+populate `marketdata` and `yfinance` coverage independently without creating an
+option-chain dataset or price-context artifact.
 
 ### 5.5 Viewer Preference Store
 

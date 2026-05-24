@@ -109,7 +109,51 @@ must not poll storage for a new dataset after this mode.
 | `0` | Command completed successfully. For a normal option-chain fetch, at least one dataset was written to storage. For `--dry-run`, no dataset or artifact is written. For `--price-context-only`, only the standalone price-context artifact is written. |
 | non-zero | Fetch failed or was interrupted; no new dataset should be assumed |
 
-### 2.2 No other CLI arguments are part of the external interface
+### 2.2 `opx-price-history-backfill`
+
+`opx-price-history-backfill` is the stable operational command for refreshing
+the local daily OHLCV store used by price context and volatility-advisory
+features. It does not write an option-chain dataset, storage run record, or
+price-context artifact. It only reconciles `price-history.db`.
+
+Supported provider behavior is intentionally explicit:
+
+```
+opx-price-history-backfill --providers marketdata,yfinance --tickers TSLA,NVDA --refresh
+```
+
+**`--providers <provider[,provider...]>` (optional)**
+
+Comma-separated provider list. Supported values are `marketdata` and
+`yfinance`. When absent, the configured provider is used if it supports
+price-history backfill.
+
+**`--tickers <ticker[,ticker...]>` (optional)**
+
+Comma-separated ticker list. When absent, `settings.tickers` from the resolved
+config is used.
+
+**`--lookback-days <n>` (optional)**
+
+Daily-bar lookback to reconcile. When absent, `price_context.lookback_days` is
+used.
+
+**`--refresh` (optional)**
+
+Bypasses the price-history sync TTL so the command attempts provider
+reconciliation immediately. Without it, already-fresh provider/ticker/lookback
+syncs may be served from local coverage.
+
+**`--dry-run` (optional)**
+
+Reports current provider/ticker coverage from local storage without provider
+API calls or writes.
+
+Rows are stored independently in `price-history.db` by
+`(provider, ticker, trading_date)`, so `marketdata` and `yfinance` coverage for
+the same ticker can coexist without overwriting each other.
+
+### 2.3 No other `opx-fetch` CLI arguments are part of the external interface
 
 `--enable-filters` and `--disable-filters` are internal operational flags, not part
 of the stable downstream interface. A downstream orchestrator should not set them.

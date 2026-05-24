@@ -169,6 +169,21 @@ def test_external_interface_documents_special_fetch_modes():
     assert "storage dataset or run record" in normalized_run_fetch
 
 
+def test_external_interface_documents_price_history_backfill_cli():
+    """The external contract should document provider-scoped price-history backfill."""
+    spec = (ROOT / "docs" / "EXTERNAL_INTERFACE_SPEC.md").read_text(encoding="utf-8")
+    section = spec.split("### 2.2 `opx-price-history-backfill`", maxsplit=1)[1]
+    section = section.split("### 2.3", maxsplit=1)[0]
+
+    assert "--providers" in section
+    assert "--tickers" in section
+    assert "--lookback-days" in section
+    assert "--refresh" in section
+    assert "--dry-run" in section
+    assert "(provider, ticker, trading_date)" in section
+    assert "does not write an option-chain dataset" in section
+
+
 def test_agents_architecture_map_lists_load_bearing_modules():
     """Agent guidance should keep the architecture map aligned with core modules."""
     agents_doc = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
