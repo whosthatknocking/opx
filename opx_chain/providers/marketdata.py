@@ -17,6 +17,8 @@ import pandas as pd
 from marketdata.client import MarketDataClient
 from marketdata.input_types.base import Mode, OutputFormat
 from marketdata.sdk_error import MarketDataClientErrorResult
+from scipy.optimize import brentq
+from scipy.stats import norm
 
 from opx_chain.config import (
     SCRIPT_VERSION,
@@ -24,7 +26,7 @@ from opx_chain.config import (
     get_runtime_config,
 )
 from opx_chain.json_utils import loads_strict_json
-from opx_chain.option_types import OPTION_TYPE_CALL, OPTION_TYPE_PUT
+from opx_chain.option_types import OPTION_TYPE_CALL, OPTION_TYPE_PUT, OPTION_TYPES
 from opx_chain.paths import get_default_config_path
 from opx_chain.providers.base import (
     DataProvider,
@@ -51,6 +53,8 @@ TRANSIENT_REQUEST_EXCEPTIONS = (
     httpx.NetworkError,
     httpx.RemoteProtocolError,
 )
+_MIN_DERIVED_IV = 0.0001
+_MAX_DERIVED_IV = 5.0
 
 
 @dataclass(frozen=True)
@@ -118,6 +122,179 @@ def _normalize_marketdata_expiration_series(series: pd.Series) -> pd.Series:
     return series.map(_parse_event_date).map(
         lambda value: value.isoformat() if value is not None else np.nan
     )
+
+
+def _black_scholes_price(  # pylint: disable=too-many-arguments
+    option_type: str,
+    *,
+    spot: float,
+    strike: float,
+    years: float,
+    risk_free_rate: float,
+    sigma: float,
+) -> float:
+    """Return the Black-Scholes option value for one row."""
+    sqrt_years = math.sqrt(years)
+    d1 = (
+        math.log(spot / strike)
+        + (risk_free_rate + 0.5 * sigma * sigma) * years
+    ) / (sigma * sqrt_years)
+    d2 = d1 - sigma * sqrt_years
+    discounted_strike = strike * math.exp(-risk_free_rate * years)
+    if option_type == OPTION_TYPE_CALL:
+        return (spot * norm.cdf(d1)) - (discounted_strike * norm.cdf(d2))
+    return (discounted_strike * norm.cdf(-d2)) - (spot * norm.cdf(-d1))
+
+
+def _black_scholes_delta(  # pylint: disable=too-many-arguments
+    option_type: str,
+    *,
+    spot: float,
+    strike: float,
+    years: float,
+    risk_free_rate: float,
+    sigma: float,
+) -> float:
+    """Return the Black-Scholes delta for one row."""
+    sqrt_years = math.sqrt(years)
+    d1 = (
+        math.log(spot / strike)
+        + (risk_free_rate + 0.5 * sigma * sigma) * years
+    ) / (sigma * sqrt_years)
+    if option_type == OPTION_TYPE_CALL:
+        return float(norm.cdf(d1))
+    return float(norm.cdf(d1) - 1.0)
+
+
+def _option_intrinsic_value(option_type: str, *, spot: float, strike: float) -> float:
+    if option_type == OPTION_TYPE_CALL:
+        return max(spot - strike, 0.0)
+    return max(strike - spot, 0.0)
+
+
+def _derived_historical_iv(  # pylint: disable=too-many-arguments,too-many-boolean-expressions
+    option_type: str,
+    *,
+    price: float,
+    spot: float,
+    strike: float,
+    days_to_expiration: float,
+    risk_free_rate: float,
+) -> float:
+    """Solve implied volatility from historical quote price when vendor IV is absent."""
+    years = days_to_expiration / 365.0
+    if (
+        option_type not in OPTION_TYPES
+        or not np.isfinite(price)
+        or not np.isfinite(spot)
+        or not np.isfinite(strike)
+        or not np.isfinite(years)
+        or price <= 0
+        or spot <= 0
+        or strike <= 0
+        or years <= 0
+    ):
+        return np.nan
+    intrinsic = _option_intrinsic_value(option_type, spot=spot, strike=strike)
+    if price <= intrinsic + 1e-8:
+        return np.nan
+
+    def objective(sigma: float) -> float:
+        return _black_scholes_price(
+            option_type,
+            spot=spot,
+            strike=strike,
+            years=years,
+            risk_free_rate=risk_free_rate,
+            sigma=sigma,
+        ) - price
+
+    try:
+        low_value = objective(_MIN_DERIVED_IV)
+        high_value = objective(_MAX_DERIVED_IV)
+        if not np.isfinite(low_value) or not np.isfinite(high_value):
+            return np.nan
+        if low_value * high_value > 0:
+            return np.nan
+        return float(brentq(objective, _MIN_DERIVED_IV, _MAX_DERIVED_IV, maxiter=100))
+    except (ValueError, OverflowError, ZeroDivisionError):
+        return np.nan
+
+
+def _historical_reference_prices(frame: pd.DataFrame) -> pd.Series:
+    """Return the quote price used to derive historical IV."""
+    index = frame.index
+    mid = pd.to_numeric(frame.get("mid", pd.Series(np.nan, index=index)), errors="coerce")
+    bid = pd.to_numeric(frame.get("bid", pd.Series(np.nan, index=index)), errors="coerce")
+    ask = pd.to_numeric(frame.get("ask", pd.Series(np.nan, index=index)), errors="coerce")
+    last = pd.to_numeric(frame.get("last", pd.Series(np.nan, index=index)), errors="coerce")
+    calculated_mid = ((bid + ask) / 2).where(
+        bid.notna() & ask.notna() & (bid >= 0) & (ask >= bid)
+    )
+    price = mid.where(mid > 0, calculated_mid)
+    return price.where(price > 0, last)
+
+
+def _fill_historical_risk_model(  # pylint: disable=too-many-locals,too-many-boolean-expressions
+    frame: pd.DataFrame,
+) -> pd.DataFrame:
+    """Fill missing historical IV/delta from option quote price when possible."""
+    required = {"option_type", "strike", "underlying_price", "days_to_expiration"}
+    if frame.empty or not required.issubset(frame.columns):
+        return frame
+    result = frame.copy()
+    risk_free_rate = get_runtime_config().risk_free_rate
+    prices = _historical_reference_prices(result)
+    existing_iv = pd.to_numeric(
+        result.get("implied_volatility", pd.Series(np.nan, index=result.index)),
+        errors="coerce",
+    )
+    existing_delta = pd.to_numeric(
+        result.get("delta", pd.Series(np.nan, index=result.index)),
+        errors="coerce",
+    )
+    strikes = pd.to_numeric(result["strike"], errors="coerce")
+    spots = pd.to_numeric(result["underlying_price"], errors="coerce")
+    days = pd.to_numeric(result["days_to_expiration"], errors="coerce")
+    option_types = result["option_type"].astype(str).str.strip().str.lower()
+
+    derived_iv: list[float] = []
+    derived_delta: list[float] = []
+    for idx in result.index:
+        iv_value = existing_iv.loc[idx]
+        if not np.isfinite(iv_value) or iv_value <= 0:
+            iv_value = _derived_historical_iv(
+                option_types.loc[idx],
+                price=float(prices.loc[idx]),
+                spot=float(spots.loc[idx]),
+                strike=float(strikes.loc[idx]),
+                days_to_expiration=float(days.loc[idx]),
+                risk_free_rate=risk_free_rate,
+            )
+        derived_iv.append(iv_value)
+        delta_value = existing_delta.loc[idx]
+        years = float(days.loc[idx]) / 365.0
+        if (
+            (not np.isfinite(delta_value))
+            and np.isfinite(iv_value)
+            and iv_value > 0
+            and years > 0
+            and np.isfinite(spots.loc[idx])
+            and np.isfinite(strikes.loc[idx])
+        ):
+            delta_value = _black_scholes_delta(
+                option_types.loc[idx],
+                spot=float(spots.loc[idx]),
+                strike=float(strikes.loc[idx]),
+                years=years,
+                risk_free_rate=risk_free_rate,
+                sigma=float(iv_value),
+            )
+        derived_delta.append(delta_value)
+
+    result["implied_volatility"] = pd.Series(derived_iv, index=result.index, dtype=float)
+    result["delta"] = pd.Series(derived_delta, index=result.index, dtype=float)
+    return result
 
 
 def _row_value(values: Any, index: int) -> Any:
@@ -717,6 +894,7 @@ class MarketDataProvider(DataProvider):
         renamed = result.rename(
             columns={
                 "underlying": "underlying_symbol",
+                "underlyingPrice": "underlying_price",
                 "updated": "option_quote_time",
                 "iv": "implied_volatility",
                 "side": "option_type",
@@ -746,6 +924,7 @@ class MarketDataProvider(DataProvider):
             )
         else:
             renamed["option_quote_time"] = pd.NaT
+        renamed = _fill_historical_risk_model(renamed)
         columns = [
             column
             for column in (

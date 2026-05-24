@@ -273,6 +273,34 @@ def test_marketdata_provider_loads_historical_chain_for_iv_history(monkeypatch):
     assert str(frame["option_quote_time"].iloc[0]) == "2024-03-20 13:40:00+00:00"
 
 
+def test_marketdata_provider_derives_historical_iv_when_vendor_iv_missing(monkeypatch):
+    """Historical IV seeding should derive IV from quotes when Market Data omits it."""
+    patch_marketdata_client(monkeypatch)
+    monkeypatch.setattr(
+        "opx_chain.providers.marketdata.get_runtime_config",
+        lambda: make_runtime_config(marketdata_mode="delayed", risk_free_rate=0.04),
+    )
+    provider = MarketDataProvider()
+    client = fake_client(provider)
+    client._chain_result.iv = [None, None]  # pylint: disable=protected-access,no-member
+    client._chain_result.delta = [None, None]  # pylint: disable=protected-access,no-member
+    client._chain_result.bid = [4.0, 0.8]  # pylint: disable=protected-access,no-member
+    client._chain_result.mid = [4.1, 0.9]  # pylint: disable=protected-access,no-member
+    client._chain_result.ask = [4.2, 1.0]  # pylint: disable=protected-access,no-member
+    client._chain_result.last = [4.1, 0.9]  # pylint: disable=protected-access,no-member
+
+    frame = provider.load_historical_option_chain_frame(
+        "TSLA",
+        observation_date=date(2026, 4, 1),
+    )
+
+    assert frame["implied_volatility"].notna().all()
+    assert frame["delta"].notna().all()
+    assert frame["implied_volatility"].gt(0).all()
+    assert frame.loc[frame["option_type"] == "call", "delta"].iloc[0] > 0
+    assert frame.loc[frame["option_type"] == "put", "delta"].iloc[0] < 0
+
+
 def test_marketdata_prepare_ticker_fetch_clears_ticker_caches(monkeypatch):
     """Market Data should not reuse in-process quote or chain caches across fetches."""
     patch_marketdata_client(monkeypatch)

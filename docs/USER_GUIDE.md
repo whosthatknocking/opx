@@ -276,6 +276,9 @@ opx-iv-history-backfill --providers marketdata --tickers TSLA,NVDA,GOOGL --fetch
 Then omit `--dry-run` to write aggregate rows to `iv-history.db`. Historical
 fetch mode writes only the IV-history store; it does not create retained chain
 datasets or pipeline run records. V1 supports MarketData historical chains.
+When MarketData historical snapshots omit vendor IV and delta, the backfill
+derives them from the historical quote price, strike, expiration, and underlying
+price before storing aggregate IV observations.
 Existing yfinance IV history can still coexist in the same store when replayed
 from retained yfinance datasets.
 
@@ -479,9 +482,11 @@ Durable implied-volatility history for volatility advisory features lives in
 `opx-iv-history-backfill` from retained option-chain datasets by default, or
 from explicit MarketData historical option-chain fetches when retained datasets
 are too sparse. The historical-fetch path writes only aggregate IV rows and may
-consume provider API requests. The store keeps provider-scoped daily aggregate
-IV observations so downstream consumers can compute ticker-wide and DTE-bucket
-IV percentiles without relying on a current-chain proxy.
+consume provider API requests. MarketData historical snapshots may omit vendor
+IV and delta, so opx-chain derives missing values from the historical option
+quote before aggregation. The store keeps provider-scoped daily aggregate IV
+observations so downstream consumers can compute ticker-wide and DTE-bucket IV
+percentiles without relying on a current-chain proxy.
 
 Current fields include `support_1`, `support_2`, `resistance_1`,
 `resistance_2`, `20d_high`, `20d_low`, `50dma`, `200dma`, `vwap`,
