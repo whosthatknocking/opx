@@ -150,6 +150,14 @@ from opx_chain.price_context import (
     PriceContextStatus,
     blank_price_context,
 )
+from opx_chain.volatility_features import (
+    VOLATILITY_FEATURE_SCHEMA_VERSION,
+    build_iv_features,
+    build_price_volatility_features,
+    build_ticker_volatility_features,
+    dte_bucket,
+    load_price_volatility_features,
+)
 from opx_chain.option_types import (
     OPTION_TYPE_CALL,
     OPTION_TYPE_PUT,
@@ -174,6 +182,14 @@ and parsed-position fingerprint as `opx-fetch`.
 `PriceContextStatus`, and `blank_price_context` are the stable price-context
 artifact vocabulary for downstream consumers that join optional daily-OHLCV
 levels to option-chain rows.
+
+`VOLATILITY_FEATURE_SCHEMA_VERSION`, `build_price_volatility_features`,
+`load_price_volatility_features`, `build_iv_features`,
+`build_ticker_volatility_features`, and `dte_bucket` are the stable volatility
+feature surface for downstream advisory consumers. These helpers expose
+stored daily-price realized-volatility features, current-chain IV context, and
+optional IV-history percentiles without requiring consumers to inspect
+`price-history.db` or option-chain internals directly.
 
 `OPTION_TYPE_CALL`, `OPTION_TYPE_PUT`, `OPTION_TYPES`,
 `normalize_option_type`, and `option_type_label` are the stable option-type
@@ -480,6 +496,71 @@ need row-level price context.
 
 `records[].price_context_staleness_status` uses the stable
 `PriceContextStatus` vocabulary: `FRESH`, `STALE`, `MISSING`, and `ERROR`.
+
+### 5.5 `VOLATILITY_FEATURE_SCHEMA_VERSION` constant
+
+Volatility advisory feature snapshots are a separate programmatic contract, not
+part of the option-chain CSV schema. They are built on demand from the local
+daily-price history store and the current option-chain frame:
+
+```python
+from opx_chain.price_history import get_price_history_store
+from opx_chain.volatility_features import build_ticker_volatility_features
+
+snapshot = build_ticker_volatility_features(
+    ticker="TSLA",
+    chain=chain_df,
+    price_history_store=get_price_history_store(config),
+    provider="marketdata",
+    as_of=date(2026, 5, 22),
+)
+```
+
+The snapshot is JSON-safe:
+
+```json
+{
+  "schema_version": 1,
+  "method": "vrp_lite_features_v1",
+  "ticker": "TSLA",
+  "provider": "marketdata",
+  "source_status": "PARTIAL",
+  "price": {
+    "method": "close_to_close_rv_v1",
+    "newest_completed_session": "2026-05-22",
+    "price_history_lookback_sessions": 260,
+    "rv_3d": 0.0182,
+    "rv_3d_percentile_1y": 62.5
+  },
+  "iv": {
+    "method": "current_chain_with_optional_history_v1",
+    "representative_iv": 0.345,
+    "iv_percentile_1y": null,
+    "iv_source_method": "current_chain_proxy",
+    "dte_buckets": {
+      "8_14": {
+        "representative_iv": 0.345,
+        "iv_percentile": null,
+        "current_observation_count": 42,
+        "history_observation_count": 0
+      }
+    }
+  }
+}
+```
+
+`price` uses close-to-close log-return realized volatility over 3, 5, and
+10-trading-day windows and percentile ranks those values against the loaded
+history window. Values are decimal volatility over the window, not annualized
+figures. `iv` uses current-chain representative IV plus optional IV-history
+percentiles. When no durable IV history is supplied, historical percentile
+fields remain `null` and `iv_source_method` is `current_chain_proxy`; consumers
+must not treat current cross-section rank as a historical IV percentile.
+
+`source_status` uses the stable vocabulary `READY`, `PARTIAL`,
+`INSUFFICIENT_HISTORY`, `STALE`, `MISSING`, and `ERROR`. Strategy-layer policy
+decides whether these features are advisory, affect ranking, or are ignored;
+`opx-chain` only supplies data facts and readiness metadata.
 
 ---
 
