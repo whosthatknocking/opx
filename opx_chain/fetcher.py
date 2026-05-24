@@ -21,6 +21,7 @@ from opx_chain.config import (
 )
 from opx_chain.export import prepare_export_frame, write_options_csv
 from opx_chain.fetch import fetch_ticker_option_chain, fetch_ticker_price_context
+from opx_chain.iv_history_backfill import run_iv_history_backfill
 from opx_chain.json_utils import dumps_strict_json
 from opx_chain.locks import acquire_nonblocking_file_lock, release_file_lock
 from opx_chain.paths import get_runs_dir
@@ -367,6 +368,81 @@ def _record_validation_findings(storage, run_id: str, findings: list[ValidationF
         ))
 
 
+def _dataset_tickers(frame: pd.DataFrame) -> tuple[str, ...]:
+    """Return normalized ticker symbols present in a just-written dataset."""
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        return ()
+    ticker_column = next(
+        (
+            column
+            for column in ("underlying_symbol", "ticker", "symbol")
+            if column in frame.columns
+        ),
+        None,
+    )
+    if ticker_column is None:
+        return ()
+    values = []
+    for raw_value in frame[ticker_column].dropna():
+        value = str(raw_value).strip().upper()
+        if value:
+            values.append(value)
+    return tuple(dict.fromkeys(values))
+
+
+def _format_iv_history_ingest_summary(result) -> str:
+    """Return a compact one-line summary for automatic IV-history ingestion."""
+    rows = tuple(getattr(result, "rows", ()) or ())
+    status_counts: dict[str, int] = {}
+    source_rows = 0
+    stored_rows = 0
+    for row in rows:
+        status = str(getattr(row, "status", None) or "UNKNOWN")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        source_rows += int(getattr(row, "source_rows", 0) or 0)
+        stored_rows += int(getattr(row, "stored_rows", 0) or 0)
+    statuses = ",".join(
+        f"{status}:{count}" for status, count in sorted(status_counts.items())
+    ) or "none"
+    return (
+        f"datasets={len(rows)}  status={statuses}  "
+        f"source_rows={source_rows}  stored_rows={stored_rows}"
+    )
+
+
+def _ingest_iv_history_for_dataset(dataset_record, frame, config, storage, logger) -> str | None:
+    """Ingest the just-published dataset into durable IV history without failing fetch."""
+    if dataset_record is None or storage is None:
+        return None
+    tickers = _dataset_tickers(frame)
+    try:
+        result = run_iv_history_backfill(
+            providers=(dataset_record.provider,),
+            tickers=tickers or None,
+            dataset_ids=(dataset_record.dataset_id,),
+            config=config,
+            storage=storage,
+        )
+        summary = _format_iv_history_ingest_summary(result)
+        if logger:
+            logger.info(
+                "iv_history_ingest dataset_id=%s %s",
+                dataset_record.dataset_id,
+                summary,
+            )
+        return summary
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        error_summary = str(exc).splitlines()[0]
+        if logger:
+            logger.warning(
+                "iv_history_ingest_failed dataset_id=%s error=%s",
+                dataset_record.dataset_id,
+                error_summary,
+                exc_info=True,
+            )
+        return f"skipped  dataset={dataset_record.dataset_id[:8]}  error={error_summary}"
+
+
 def _delete_prepublication_artifacts(storage, run_id: str, dataset_record) -> None:
     """Remove run artifacts when fetch exits before dataset publication."""
     if dataset_record is not None:
@@ -430,6 +506,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
     storage = None
     run_id = None
     dataset_record = None
+    iv_history_summary = None
     try:
         storage = get_storage_backend(config)
         if dry_run:
@@ -636,6 +713,13 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
                 format=config.storage_dataset_format,
             ))
             storage.finalize_run(run_id, RunSummary(status="complete"))
+            iv_history_summary = _ingest_iv_history_for_dataset(
+                dataset_record,
+                export_df,
+                config,
+                storage,
+                logger,
+            )
 
         print()
         if write_csv:
@@ -653,6 +737,8 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
                 f"Storage: run={run_short}  "
                 f"artifact={artifact_path}  {artifact_size}"
             )
+        if iv_history_summary is not None:
+            print(f"IV history: {iv_history_summary}")
 
         if write_csv:
             file_size = format_file_size(file_size_bytes)

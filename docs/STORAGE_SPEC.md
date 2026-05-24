@@ -765,10 +765,11 @@ All seven steps are complete and shipped.
   and events responses with configurable TTLs
 - price context uses the separate durable `price-history.db` daily-bar store;
   `price_context_ttl` controls reconciliation attempts, not artifact retention
-- IV history uses the separate durable `iv-history.db` aggregate store populated
-  from retained option-chain datasets by default, or from explicit historical
-  provider fetches when the operator runs `opx-iv-history-backfill
-  --fetch-historical`
+- IV history uses the separate durable `iv-history.db` aggregate store. Each
+  successful storage-backed option-chain fetch automatically ingests the just-
+  written dataset after run finalization; operators can also replay retained
+  datasets or run explicit historical provider fetches with
+  `opx-iv-history-backfill --fetch-historical`
 - Market Data cache keys include the configured `[providers.marketdata].mode`
   (`live`, `cached`, `delayed`, or provider default) so changing mode does not
   reuse responses from a different recency mode

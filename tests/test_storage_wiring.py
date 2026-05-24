@@ -1,9 +1,10 @@
 """Tests for the storage-enabled branches of fetcher.py and check_positions.py."""
-# pylint: disable=duplicate-code
+# pylint: disable=duplicate-code,too-many-lines
 
 import builtins
 from contextlib import ExitStack, nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -197,6 +198,75 @@ def test_fetcher_finalizes_run_on_success(tmp_path: Path):
     run_id = backend.list_datasets()[0].run_id
     run = backend._runs[run_id]  # pylint: disable=protected-access
     assert run.status == "complete"
+
+
+def test_fetcher_ingests_iv_history_after_dataset_publication(tmp_path: Path):
+    """Successful storage-backed fetches should ingest the exact published dataset."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True, tickers=("AAA",))
+    ticker_df = pd.DataFrame({
+        "underlying_symbol": ["AAA", "BBB"],
+        "strike": [100.0, 110.0],
+        "expiration_date": ["2026-06-20", "2026-06-20"],
+        "passes_primary_screen": [True, True],
+        "implied_volatility": [0.25, 0.30],
+    })
+    patches = _fetcher_patches(tmp_path, config, backend, ticker_df=ticker_df)
+    backfill_result = SimpleNamespace(rows=(
+        SimpleNamespace(status="INGESTED", source_rows=2, stored_rows=7),
+    ))
+
+    with ExitStack() as stack:
+        for patcher in patches:
+            stack.enter_context(patcher)
+        mock_backfill = stack.enter_context(
+            patch.object(fetcher, "run_iv_history_backfill", return_value=backfill_result)
+        )
+        result = fetcher.main([])
+
+    assert result == 0
+    dataset = backend.list_datasets()[0]
+    mock_backfill.assert_called_once()
+    call_kwargs = mock_backfill.call_args.kwargs
+    assert call_kwargs["providers"] == ("yfinance",)
+    assert call_kwargs["tickers"] == ("AAA", "BBB")
+    assert call_kwargs["dataset_ids"] == (dataset.dataset_id,)
+    assert call_kwargs["config"] is config
+    assert call_kwargs["storage"] is backend
+
+
+def test_fetcher_keeps_run_complete_when_iv_history_ingest_fails(
+    tmp_path: Path,
+    capsys,
+):
+    """Automatic IV-history ingestion is advisory and must not fail a fetch run."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True)
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        for patcher in patches:
+            stack.enter_context(patcher)
+        stack.enter_context(
+            patch.object(
+                fetcher,
+                "run_iv_history_backfill",
+                side_effect=RuntimeError("iv store unavailable"),
+            )
+        )
+        result = fetcher.main([])
+
+    stdout = capsys.readouterr().out
+    assert result == 0
+    run_id = backend.list_datasets()[0].run_id
+    run = backend._runs[run_id]  # pylint: disable=protected-access
+    assert run.status == "complete"
+    assert "IV history: skipped" in stdout
+    assert "iv store unavailable" in stdout
 
 
 def test_fetcher_snapshots_positions_only_after_success(tmp_path: Path):

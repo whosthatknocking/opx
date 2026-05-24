@@ -332,10 +332,15 @@ without overwriting each other. `--dry-run` reports current local coverage
 without provider API calls, and `--refresh` bypasses the price-history sync TTL
 when the operator intentionally wants a weekend refresh.
 
-`opx-iv-history-backfill` provides the corresponding historical-IV backfill
-path. It replays retained option-chain datasets from opx-chain storage and
-writes daily aggregate IV observations into `iv-history.db`. It does not call
-provider APIs, create new option-chain datasets, or write storage run records.
+Historical-IV coverage is maintained automatically for successful
+storage-backed option-chain fetches: after a run and dataset are finalized,
+opx-chain ingests the just-written dataset into `iv-history.db` without
+changing the fetch result if the IV-history sync fails. `opx-iv-history-backfill`
+provides the corresponding manual replay, repair, and seeding path. It replays
+retained option-chain datasets from opx-chain storage and writes daily
+aggregate IV observations into `iv-history.db`. The retained-dataset replay
+path does not call provider APIs, create new option-chain datasets, or write
+storage run records.
 Rows are keyed by provider, ticker, observation date, option type, DTE bucket,
 and delta bucket, which lets downstream volatility-advisory consumers compute
 historical IV percentiles from durable local history instead of from the current

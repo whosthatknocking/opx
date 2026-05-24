@@ -163,6 +163,12 @@ When explicitly invoked with `--fetch-historical`, it fetches historical
 provider option-chain snapshots and writes only aggregate rows to
 `iv-history.db`.
 
+Successful storage-backed `opx-fetch` runs automatically invoke the retained-
+dataset replay path for the just-written dataset after the run and dataset are
+finalized. That automatic sync is non-fatal: an IV-history write failure is
+logged and reported, but the option-chain fetch remains complete. The CLI
+remains the manual replay, repair, and historical-seeding surface.
+
 The default retained-dataset replay path does not call provider APIs.
 
 ```

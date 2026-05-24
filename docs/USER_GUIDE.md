@@ -250,10 +250,12 @@ The command writes rows independently by provider, ticker, and trading date in
 `price-history.db`. Use `--dry-run` to inspect current local coverage without
 provider API calls or writes.
 
-Use `opx-iv-history-backfill` after normal option-chain datasets have been
-retained when you want stronger historical-IV percentiles for volatility
-advisory features. This command replays stored option-chain datasets only; it
-does not call provider APIs or create a new fetch run:
+Successful storage-backed option-chain fetches automatically ingest the just-
+written dataset into `iv-history.db` after the run is finalized. Use
+`opx-iv-history-backfill` when you want to replay older retained datasets,
+repair missing syncs, refresh existing syncs, or inspect coverage manually.
+The retained-dataset replay path does not call provider APIs or create a new
+fetch run:
 
 ```bash
 opx-iv-history-backfill --providers marketdata,yfinance --tickers TSLA,NVDA,GOOGL --lookback-days 365
@@ -478,10 +480,11 @@ bars and fetch only required backfill or recent tail data after
 `storage.price_context_ttl` expires.
 
 Durable implied-volatility history for volatility advisory features lives in
-`iv-history.db` under the same base directory. It is populated by
-`opx-iv-history-backfill` from retained option-chain datasets by default, or
-from explicit MarketData historical option-chain fetches when retained datasets
-are too sparse. The historical-fetch path writes only aggregate IV rows and may
+`iv-history.db` under the same base directory. Successful storage-backed
+option-chain fetches automatically populate it from the just-written dataset;
+`opx-iv-history-backfill` can also replay retained option-chain datasets or
+explicit MarketData historical option-chain fetches when retained datasets are
+too sparse. The historical-fetch path writes only aggregate IV rows and may
 consume provider API requests. MarketData historical snapshots may omit vendor
 IV and delta, so opx-chain derives missing values from the historical option
 quote before aggregation. The store keeps provider-scoped daily aggregate IV
