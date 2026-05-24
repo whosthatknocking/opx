@@ -58,9 +58,10 @@ class HistoricalProvider:
 
     name = "marketdata"
 
-    def __init__(self) -> None:
+    def __init__(self, *, response_tickers: tuple[str, ...] | None = None) -> None:
         self.prepared: list[str] = []
         self.calls: list[tuple[str, date]] = []
+        self.response_tickers = response_tickers
 
     def prepare_ticker_fetch(self, ticker: str) -> None:
         """Record ticker preparation."""
@@ -75,24 +76,19 @@ class HistoricalProvider:
         """Return a minimal historical option-chain frame."""
         self.calls.append((ticker, observation_date))
         expiration = (observation_date + timedelta(days=21)).isoformat()
-        return pd.DataFrame(
-            [
+        response_tickers = self.response_tickers or (ticker, ticker)
+        rows = []
+        for index, response_ticker in enumerate(response_tickers):
+            rows.append(
                 {
-                    "underlying_symbol": ticker,
+                    "underlying_symbol": response_ticker,
                     "expiration_date": expiration,
-                    "option_type": "PUT",
-                    "delta": -0.20,
-                    "implied_volatility": 0.30,
-                },
-                {
-                    "underlying_symbol": ticker,
-                    "expiration_date": expiration,
-                    "option_type": "CALL",
-                    "delta": 0.20,
-                    "implied_volatility": 0.34,
-                },
-            ]
-        )
+                    "option_type": "PUT" if index % 2 == 0 else "CALL",
+                    "delta": -0.20 if index % 2 == 0 else 0.20,
+                    "implied_volatility": 0.30 + (index * 0.02),
+                }
+            )
+        return pd.DataFrame(rows)
 
 
 def _record(path, *, dataset_id: str = "dataset-1") -> DatasetRecord:
@@ -289,6 +285,58 @@ def test_iv_history_historical_fetch_ingests_marketdata_snapshots(tmp_path):
     stats = store.stats(provider="marketdata", ticker="TSLA")
     assert stats.observation_dates == 2
     assert stats.latest_date == date(2026, 5, 22)
+
+
+def test_iv_history_historical_fetch_filters_mixed_provider_tickers(tmp_path):
+    """Historical fetch should write only rows matching the requested ticker."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    provider = HistoricalProvider(response_tickers=("TSLA", "NVDA"))
+    config = make_runtime_config(
+        data_provider="marketdata",
+        tickers=("TSLA",),
+        today=date(2026, 5, 22),
+    )
+
+    result = run_iv_history_backfill(
+        providers=("marketdata",),
+        tickers=("TSLA",),
+        fetch_historical=True,
+        sessions=1,
+        config=config,
+        store=store,
+        provider_factory=lambda _provider_name: provider,
+    )
+
+    assert result.rows[0].status == "INGESTED"
+    assert result.rows[0].tickers == ("TSLA",)
+    assert store.stats(provider="marketdata", ticker="TSLA").observation_dates == 1
+    assert store.stats(provider="marketdata", ticker="NVDA").row_count == 0
+
+
+def test_iv_history_historical_fetch_rejects_wrong_ticker_only_response(tmp_path):
+    """Historical fetch should not pollute IV history when the provider returns another ticker."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    provider = HistoricalProvider(response_tickers=("NVDA", "NVDA"))
+    config = make_runtime_config(
+        data_provider="marketdata",
+        tickers=("TSLA",),
+        today=date(2026, 5, 22),
+    )
+
+    result = run_iv_history_backfill(
+        providers=("marketdata",),
+        tickers=("TSLA",),
+        fetch_historical=True,
+        sessions=1,
+        config=config,
+        store=store,
+        provider_factory=lambda _provider_name: provider,
+    )
+
+    assert result.rows[0].status == "ERROR"
+    assert "requested ticker TSLA" in (result.rows[0].error_summary or "")
+    assert store.stats(provider="marketdata", ticker="TSLA").row_count == 0
+    assert store.stats(provider="marketdata", ticker="NVDA").row_count == 0
 
 
 def test_iv_history_historical_fetch_skips_existing_date_without_refresh(tmp_path):

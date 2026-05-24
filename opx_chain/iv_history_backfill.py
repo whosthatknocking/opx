@@ -232,7 +232,7 @@ def _historical_provider_config(config: RuntimeConfig, provider: str) -> Runtime
     return replace(config, data_provider=provider)
 
 
-def _historical_fetch_rows(  # pylint: disable=too-many-arguments,too-many-locals
+def _historical_fetch_rows(  # pylint: disable=too-many-arguments,too-many-locals,too-many-nested-blocks
     *,
     providers: tuple[str, ...],
     tickers: tuple[str, ...],
@@ -312,10 +312,16 @@ def _historical_fetch_rows(  # pylint: disable=too-many-arguments,too-many-local
                         )
                         continue
                     try:
-                        chain = load_historical(
+                        raw_chain = load_historical(
                             ticker,
                             observation_date=observation_date,
                         )
+                        chain = _filter_frame_tickers(raw_chain, (ticker,))
+                        if not raw_chain.empty and chain.empty:
+                            raise ValueError(
+                                "historical option-chain response did not include "
+                                f"requested ticker {ticker}"
+                            )
                         observations = build_iv_observation_frame(
                             chain,
                             provider=provider_name,
