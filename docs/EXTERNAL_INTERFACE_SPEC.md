@@ -170,6 +170,9 @@ logged and reported, but the option-chain fetch remains complete. The CLI
 remains the manual replay, repair, and historical-seeding surface.
 
 The default retained-dataset replay path does not call provider APIs.
+Without `--refresh`, retained-dataset replay skips only prior successful syncs
+that stored usable IV rows; prior failed or empty attempts are retried so the
+command can repair transient read or ingestion gaps.
 
 ```
 opx-iv-history-backfill --providers marketdata --tickers TSLA,NVDA --lookback-days 365

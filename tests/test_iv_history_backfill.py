@@ -203,6 +203,41 @@ def test_iv_history_backfill_skips_already_ingested_dataset(tmp_path):
     assert second.rows[0].status == "SKIPPED"
 
 
+@pytest.mark.parametrize("status", ["ERROR", "EMPTY"])
+def test_iv_history_backfill_retries_failed_or_empty_sync_without_refresh(
+    tmp_path,
+    status,
+):
+    """Failed or empty retained-dataset sync rows should not block repair replay."""
+    path = tmp_path / "chain.csv"
+    _dataset(path)
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    record = _record(path)
+    store.record_sync(
+        dataset_id=record.dataset_id,
+        provider=record.provider,
+        run_id=record.run_id,
+        status=status,
+        observation_date=None,
+        source_rows=0,
+        stored_rows=0,
+        error_summary="prior failure" if status == "ERROR" else None,
+    )
+    config = make_runtime_config(data_provider="marketdata", tickers=("TSLA",))
+
+    result = run_iv_history_backfill(
+        providers=("marketdata",),
+        config=config,
+        store=store,
+        storage=FakeStorage([record]),
+    )
+
+    assert result.rows[0].status == "INGESTED"
+    assert result.rows[0].source_rows == 3
+    assert result.rows[0].stored_rows > 0
+    assert store.stats(provider="marketdata", ticker="TSLA").observation_dates == 1
+
+
 def test_iv_history_historical_dry_run_estimates_requests_without_fetch(tmp_path):
     """Historical dry-run should show provider calls without consuming API quota."""
     store = IVHistoryStore(tmp_path / "iv-history.db")

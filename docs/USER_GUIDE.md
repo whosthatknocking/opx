@@ -255,7 +255,8 @@ written dataset into `iv-history.db` after the run is finalized. Use
 `opx-iv-history-backfill` when you want to replay older retained datasets,
 repair missing syncs, refresh existing syncs, or inspect coverage manually.
 The retained-dataset replay path does not call provider APIs or create a new
-fetch run:
+fetch run. Non-refresh replay skips prior successful syncs with stored IV rows
+and retries prior failed or empty sync attempts:
 
 ```bash
 opx-iv-history-backfill --providers marketdata,yfinance --tickers TSLA,NVDA,GOOGL --lookback-days 365

@@ -43,6 +43,7 @@ _IV_HISTORY_COLUMNS = (
     "option_quote_time",
 )
 BACKFILL_STATUS_ERROR = "ERROR"
+BACKFILL_STATUS_INGESTED = "INGESTED"
 HISTORICAL_IV_FETCH_PROVIDERS = frozenset({"marketdata"})
 HISTORICAL_STATUS_WOULD_FETCH = "WOULD_FETCH"
 
@@ -222,6 +223,14 @@ def _row_tickers(observations: pd.DataFrame) -> tuple[str, ...]:
     if observations.empty or "ticker" not in observations.columns:
         return ()
     return tuple(sorted(set(observations["ticker"].astype(str).str.upper().str.strip())))
+
+
+def _sync_is_replay_complete(sync) -> bool:
+    """Return True when an existing retained-dataset sync has usable IV rows."""
+    return (
+        sync.status == BACKFILL_STATUS_INGESTED
+        and int(sync.stored_rows or 0) > 0
+    )
 
 
 def _historical_dataset_id(provider: str, ticker: str, observation_date: date) -> str:
@@ -476,7 +485,7 @@ def run_iv_history_backfill(
         )
         for record in records:
             sync = iv_store.get_sync(dataset_id=record.dataset_id)
-            if sync is not None and not refresh:
+            if sync is not None and not refresh and _sync_is_replay_complete(sync):
                 rows.append(
                     IVHistoryBackfillRow(
                         provider=record.provider,
@@ -510,7 +519,9 @@ def run_iv_history_backfill(
                     if dry_run
                     else iv_store.upsert_observations(observations)
                 )
-                status = "DRY_RUN" if dry_run else ("INGESTED" if stored_rows else "EMPTY")
+                status = "DRY_RUN" if dry_run else (
+                    BACKFILL_STATUS_INGESTED if stored_rows else "EMPTY"
+                )
                 if not dry_run:
                     iv_store.record_sync(
                         dataset_id=record.dataset_id,
