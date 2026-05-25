@@ -70,7 +70,7 @@ opx-fetch --dry-run
 
 Dry runs print the tickers that would be fetched, the resolved positions source, and the storage backend check. If parquet output is configured, they also verify that `pyarrow` is installed. They do not create run logs, datasets, sidecars, or provider requests.
 
-Check that every option position in the default positions file appears in the latest output CSV:
+Check that every option position in the default positions file appears in the latest output dataset:
 
 ```bash
 opx-check
@@ -79,13 +79,13 @@ opx-check
 The output line shows the path and when the file was fetched:
 
 ```
-Output:    ~/.local/share/opx-chain/runs/<run-id>/output/<uuid>.parquet  (fetched 2026-04-22 07:07)
+Output:    ~/.local/share/opx-chain/runs/<run-id>/output/<uuid>.csv  (fetched 2026-04-22 07:07)
 ```
 
 Pass `--positions` or `--output` to override the defaults:
 
 ```bash
-opx-check --positions ~/my-positions.csv --output /path/to/artifact.parquet
+opx-check --positions ~/my-positions.csv --output /path/to/artifact.csv
 ```
 
 `opx-check` exits with code `0` when all positions are found and `1` when any are missing, so it can be used in scripts.
@@ -119,7 +119,7 @@ The viewer includes:
 - lightweight positions counts, parsed-position fingerprint, and chain coverage metadata on the `Dataset` tab when the selected dataset has a run-level positions snapshot
 - shareable tab URLs using `?tab=table`, `?tab=summary`, `?tab=chain`, or `?tab=readme`
 - hover descriptions on column headers pulled from this guide
-- a file selector for available CSV exports
+- a file selector for available dataset exports
 - a `Reference` tab that shows the CSV field documentation
 - an `Overview` tab for per-ticker snapshot metrics plus `Most Profitable`, `Moderate Risk`, `High Conviction Call`, and `High Conviction Put` highlights
 - a `Chain View` tab for per-ticker/per-expiration chart inspection of chain structure, premium, theta efficiency, and screening/liquidity summaries

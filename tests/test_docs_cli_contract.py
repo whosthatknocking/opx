@@ -344,3 +344,22 @@ def test_storage_dataset_format_default_is_documented_consistently():
         text = path.read_text(encoding="utf-8")
         assert 'dataset_format = "csv"' in text, path.name
         assert 'dataset_format = "parquet" (default)' not in text, path.name
+
+
+def test_user_guide_storage_format_examples_match_dataset_contract():
+    """High-visibility guide examples should not imply parquet or CSV-only behavior."""
+    guides = (
+        ROOT / "docs" / "USER_GUIDE.md",
+        ROOT / "opx_chain" / "docs" / "USER_GUIDE.md",
+    )
+
+    for path in guides:
+        text = path.read_text(encoding="utf-8")
+        quick_check = text.split("Check that every option position", 1)[1]
+        quick_check = quick_check.split("Use `--freshness`", 1)[0]
+        assert "latest output dataset" in quick_check, path
+        assert "output/<uuid>.csv" in quick_check, path
+        assert "output/<uuid>.parquet" not in quick_check, path
+        assert "--output /path/to/artifact.csv" in quick_check, path
+        assert "file selector for available dataset exports" in text, path
+        assert "file selector for available CSV exports" not in text, path
