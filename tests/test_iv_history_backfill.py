@@ -111,6 +111,26 @@ def _record(path, *, dataset_id: str = "dataset-1") -> DatasetRecord:
     )
 
 
+def _record_for_provider(
+    path,
+    *,
+    provider: str,
+    dataset_id: str,
+) -> DatasetRecord:
+    record = _record(path, dataset_id=dataset_id)
+    return DatasetRecord(
+        dataset_id=record.dataset_id,
+        run_id=record.run_id,
+        created_at=record.created_at,
+        provider=provider,
+        schema_version=record.schema_version,
+        row_count=record.row_count,
+        format=record.format,
+        location=record.location,
+        content_hash=record.content_hash,
+    )
+
+
 def test_iv_history_backfill_ingests_retained_dataset(tmp_path):
     """Backfill should derive IV aggregates without provider API calls."""
     path = tmp_path / "chain.csv"
@@ -160,6 +180,58 @@ def test_iv_history_backfill_accepts_scalar_csv_strings(tmp_path):
     assert result.tickers == ("TSLA",)
     assert result.rows[0].status == "INGESTED"
     assert store.stats(provider="marketdata", ticker="TSLA").observation_dates == 1
+
+
+@pytest.mark.parametrize("bad_ticker", ["BAD/TICKER", "...", "TSLA1", "ABCDEFGHIJK"])
+def test_iv_history_backfill_rejects_malformed_tickers(tmp_path, bad_ticker):
+    """Backfill should validate direct ticker scope before provider/store work."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    config = make_runtime_config(data_provider="marketdata", tickers=("TSLA",))
+
+    with pytest.raises(ValueError, match="valid stock ticker"):
+        run_iv_history_backfill(
+            providers=("marketdata",),
+            tickers=(bad_ticker,),
+            config=config,
+            store=store,
+            storage=FakeStorage([]),
+        )
+
+
+def test_iv_history_backfill_filters_explicit_dataset_ids_by_provider(tmp_path):
+    """Explicit retained datasets should still respect requested provider scope."""
+    marketdata_path = tmp_path / "marketdata.csv"
+    yfinance_path = tmp_path / "yfinance.csv"
+    _dataset(marketdata_path)
+    _dataset(yfinance_path)
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    config = make_runtime_config(data_provider="marketdata", tickers=("TSLA",))
+    storage = FakeStorage(
+        [
+            _record_for_provider(
+                marketdata_path,
+                provider="marketdata",
+                dataset_id="marketdata-dataset",
+            ),
+            _record_for_provider(
+                yfinance_path,
+                provider="yfinance",
+                dataset_id="yfinance-dataset",
+            ),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="outside requested provider scope"):
+        run_iv_history_backfill(
+            providers=("marketdata",),
+            dataset_ids=("yfinance-dataset",),
+            config=config,
+            store=store,
+            storage=storage,
+        )
+
+    assert store.stats(provider="marketdata", ticker="TSLA").row_count == 0
+    assert store.stats(provider="yfinance", ticker="TSLA").row_count == 0
 
 
 def test_iv_history_backfill_prefers_quote_date_over_dataset_created_at(tmp_path):
@@ -233,6 +305,40 @@ def test_iv_history_backfill_skips_already_ingested_dataset(tmp_path):
 
     assert first.rows[0].status == "INGESTED"
     assert second.rows[0].status == "SKIPPED"
+
+
+def test_iv_history_backfill_ticker_filtered_empty_does_not_downgrade_sync(tmp_path):
+    """A later ticker-filter miss should not overwrite a complete dataset sync."""
+    path = tmp_path / "chain.csv"
+    _dataset(path, ticker="TSLA", quote_time="2026-05-22T20:00:00Z")
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    record = _record(path)
+    storage = FakeStorage([record])
+    config = make_runtime_config(data_provider="marketdata", tickers=("TSLA",))
+
+    first = run_iv_history_backfill(
+        providers=("marketdata",),
+        tickers=("TSLA",),
+        config=config,
+        store=store,
+        storage=storage,
+    )
+    second = run_iv_history_backfill(
+        providers=("marketdata",),
+        tickers=("NVDA",),
+        config=config,
+        store=store,
+        storage=storage,
+    )
+    sync = store.get_sync(dataset_id=record.dataset_id)
+
+    assert first.rows[0].status == "INGESTED"
+    assert second.rows[0].status == "SKIPPED"
+    assert sync is not None
+    assert sync.status == "INGESTED"
+    assert sync.stored_rows == first.rows[0].stored_rows
+    assert store.stats(provider="marketdata", ticker="TSLA").observation_dates == 1
+    assert store.stats(provider="marketdata", ticker="NVDA").row_count == 0
 
 
 @pytest.mark.parametrize("status", ["ERROR", "EMPTY"])

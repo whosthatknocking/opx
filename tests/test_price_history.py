@@ -248,3 +248,135 @@ def test_reconcile_price_history_respects_recent_sync_ttl(tmp_path):
 
     assert result.fetched is False
     assert not provider.lookback_calls
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"provider": "", "ticker": "AAA"}, "provider must be a non-empty string"),
+        ({"provider": False, "ticker": "AAA"}, "provider must be a non-empty string"),
+        ({"provider": "stub", "ticker": "BAD/TICKER"}, "valid stock ticker"),
+        ({"provider": "stub", "ticker": "AAA1"}, "valid stock ticker"),
+    ],
+)
+def test_price_history_read_helpers_validate_identity(
+    tmp_path,
+    kwargs,
+    message,
+) -> None:
+    """Direct read helpers should reject malformed provider/ticker keys."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+
+    with pytest.raises(ValueError, match=message):
+        store.stats(**kwargs)
+    with pytest.raises(ValueError, match=message):
+        store.load_recent_bars(
+            **kwargs,
+            lookback_days=30,
+            end_date=date(2026, 3, 20),
+        )
+    with pytest.raises(ValueError, match=message):
+        store.load_bars(
+            **kwargs,
+            start_date=date(2026, 3, 1),
+            end_date=date(2026, 3, 20),
+        )
+
+
+@pytest.mark.parametrize("bad_lookback", [0, -1, True, "30", 1.5])
+def test_price_history_read_helpers_validate_lookback(tmp_path, bad_lookback) -> None:
+    """Recent-bar reads should require a stable positive-integer lookback."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+
+    with pytest.raises(ValueError, match="lookback_days"):
+        store.load_recent_bars(
+            provider="stub",
+            ticker="AAA",
+            lookback_days=bad_lookback,
+            end_date=date(2026, 3, 20),
+        )
+
+
+def test_price_history_read_helpers_validate_dates(tmp_path) -> None:
+    """Date-window reads should fail cleanly for malformed or inverted windows."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+
+    with pytest.raises(ValueError, match="end_date must be a date"):
+        store.load_recent_bars(
+            provider="stub",
+            ticker="AAA",
+            lookback_days=30,
+            end_date="2026-03-20",
+        )
+    with pytest.raises(ValueError, match="start_date must be on or before end_date"):
+        store.load_bars(
+            provider="stub",
+            ticker="AAA",
+            start_date=date(2026, 3, 21),
+            end_date=date(2026, 3, 20),
+        )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"provider": "", "ticker": "AAA", "fetched_at": None}, "provider"),
+        ({"provider": "stub", "ticker": "BAD/TICKER", "fetched_at": None}, "valid stock ticker"),
+        (
+            {"provider": "stub", "ticker": "AAA", "fetched_at": "2026-03-20"},
+            "fetched_at must be a datetime",
+        ),
+    ],
+)
+def test_price_history_upsert_validates_identity_and_fetch_time(
+    tmp_path,
+    kwargs,
+    message,
+) -> None:
+    """Daily-bar writes should not persist malformed identity metadata."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+
+    with pytest.raises(ValueError, match=message):
+        store.upsert_bars(history=_history(), **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"provider": "", "ticker": "AAA", "status": "ok"}, "provider"),
+        (
+            {"provider": "stub", "ticker": "BAD/TICKER", "status": "ok"},
+            "valid stock ticker",
+        ),
+        ({"provider": "stub", "ticker": "AAA", "status": "empty"}, "status"),
+        (
+            {"provider": "stub", "ticker": "AAA", "status": "ok", "lookback_days": "30"},
+            "lookback_days",
+        ),
+        (
+            {"provider": "stub", "ticker": "AAA", "status": "ok", "fetched_rows": True},
+            "fetched_rows",
+        ),
+    ],
+)
+def test_price_history_record_sync_validates_metadata(
+    tmp_path,
+    kwargs,
+    message,
+) -> None:
+    """Sync writes should enforce the public price-history metadata boundary."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+    params = {
+        "provider": "stub",
+        "ticker": "AAA",
+        "lookback_days": 30,
+        "status": "ok",
+        "requested_lookback_days": 30,
+        "latest_trading_date": date(2026, 3, 20),
+        "fetched_rows": 3,
+        "stored_rows": 3,
+    }
+    params.update(kwargs)
+
+    with pytest.raises(ValueError, match=message):
+        store.record_sync(**params)

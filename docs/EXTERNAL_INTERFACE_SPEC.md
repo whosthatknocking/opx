@@ -151,7 +151,10 @@ API calls or writes.
 
 Rows are stored independently in `price-history.db` by
 `(provider, ticker, trading_date)`, so `marketdata` and `yfinance` coverage for
-the same ticker can coexist without overwriting each other.
+the same ticker can coexist without overwriting each other. The durable
+price-history store validates direct provider, ticker, date, lookback,
+sync-status, row-count, and fetch-timestamp inputs at the public boundary and
+raises `ValueError` for malformed direct calls.
 
 ### 2.3 `opx-iv-history-backfill`
 
@@ -202,7 +205,9 @@ Maximum retained datasets to inspect per provider. Defaults to `200`.
 **`--dataset-id <id>` (optional)**
 
 Specific retained dataset to ingest. Can be repeated or comma-separated.
-Cannot be combined with `--fetch-historical`.
+Cannot be combined with `--fetch-historical`. Explicit dataset ids still remain
+inside the requested provider scope; a dataset retained for a different provider
+is rejected instead of being ingested under the wrong provider summary.
 
 **`--fetch-historical` (optional)**
 
@@ -246,7 +251,9 @@ The public feature helpers consume ticker-wide and DTE-bucket aggregate rows to
 compute one-year IV percentiles without re-reading raw option-chain artifacts.
 Programmatic callers must pass real booleans for `refresh`, `dry_run`, and
 `fetch_historical`, and positive integers for `lookback_days`, `limit`, and
-`sessions`; CLI parsing performs this typing before invoking the runner.
+`sessions`; CLI parsing performs this typing before invoking the runner. Ticker
+filters use the same letters/dots/up-to-ten-character symbol policy as parsed
+portfolio symbols.
 
 ### 2.4 No other `opx-fetch` CLI arguments are part of the external interface
 
@@ -339,7 +346,10 @@ optional IV-history percentiles without requiring consumers to inspect
 the stable durable-IV history surface for downstream consumers that need to
 populate or inspect provider-scoped historical IV percentiles. Consumers should
 prefer `build_ticker_volatility_features(..., iv_history_store=...)` instead of
-querying `iv-history.db` directly.
+querying `iv-history.db` directly. Store read/write helpers validate provider,
+ticker, date, positive-window, sync-status, and row-count inputs at the public
+boundary and raise `ValueError` for malformed direct calls rather than returning
+backend-specific empty windows or raw SQLite errors.
 
 `OPTION_TYPE_CALL`, `OPTION_TYPE_PUT`, `OPTION_TYPES`,
 `normalize_option_type`, and `option_type_label` are the stable option-type

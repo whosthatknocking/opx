@@ -8,6 +8,7 @@ import argparse
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+import re
 from typing import Callable, Iterable, Sequence
 
 import pandas as pd
@@ -46,6 +47,7 @@ BACKFILL_STATUS_ERROR = "ERROR"
 BACKFILL_STATUS_INGESTED = "INGESTED"
 HISTORICAL_IV_FETCH_PROVIDERS = frozenset({"marketdata"})
 HISTORICAL_STATUS_WOULD_FETCH = "WOULD_FETCH"
+_VALID_TICKER_RE = re.compile(r"^[A-Z](?:[A-Z.]{0,9})$")
 
 
 @dataclass(frozen=True)
@@ -124,14 +126,23 @@ def _normalize_tickers(
     values: Iterable[str] | None,
     default_tickers: Sequence[str],
 ) -> tuple[str, ...]:
-    tickers = tuple(ticker.upper() for ticker in _normalize_csv_values(values))
+    tickers = tuple(_normalize_ticker_value(ticker) for ticker in _normalize_csv_values(values))
     if tickers:
         return tickers
     return tuple(
-        str(ticker).upper().strip()
+        _normalize_ticker_value(ticker)
         for ticker in default_tickers
         if str(ticker).strip()
     )
+
+
+def _normalize_ticker_value(value: object) -> str:
+    text = str(value or "").strip().upper()
+    if not text:
+        raise ValueError("ticker must be a non-empty string")
+    if not _VALID_TICKER_RE.fullmatch(text):
+        raise ValueError("ticker must be a valid stock ticker symbol")
+    return text
 
 
 def _parse_end_date(value: str | date | None, default_end_date: date) -> date:
@@ -207,7 +218,24 @@ def _listed_datasets(
     dataset_ids: tuple[str, ...],
 ) -> list[DatasetRecord | DatasetHandle]:
     if dataset_ids:
-        return [storage.get_dataset(dataset_id) for dataset_id in dataset_ids]
+        provider_scope = set(providers)
+        records = [storage.get_dataset(dataset_id) for dataset_id in dataset_ids]
+        outside_scope = [
+            record
+            for record in records
+            if str(record.provider).strip().lower() not in provider_scope
+        ]
+        if outside_scope:
+            details = ", ".join(
+                f"{record.dataset_id} ({record.provider})"
+                for record in outside_scope
+            )
+            expected = ", ".join(sorted(provider_scope))
+            raise ValueError(
+                "dataset_id provider is outside requested provider scope: "
+                f"{details}; expected one of: {expected}"
+            )
+        return records
     records: list[DatasetRecord | DatasetHandle] = []
     for provider in providers:
         records.extend(storage.list_datasets(limit=limit, provider=provider, since=since))
@@ -564,6 +592,20 @@ def run_iv_history_backfill(
                 continue
             try:
                 chain = _filter_frame_tickers(_read_chain_dataset(record), resolved_tickers)
+                if chain.empty and sync is not None and _sync_is_replay_complete(sync):
+                    rows.append(
+                        IVHistoryBackfillRow(
+                            provider=record.provider,
+                            dataset_id=record.dataset_id,
+                            run_id=record.run_id,
+                            status="SKIPPED",
+                            observation_date=_date_text(sync.observation_date),
+                            source_rows=0,
+                            stored_rows=sync.stored_rows,
+                            tickers=resolved_tickers,
+                        )
+                    )
+                    continue
                 observations = build_iv_observation_frame(
                     chain,
                     provider=record.provider,

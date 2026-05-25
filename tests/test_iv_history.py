@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 
 import pandas as pd
+import pytest
 
 from opx_chain.iv_history import IVHistoryStore, build_iv_observation_frame
 from opx_chain.price_history import PriceHistoryStore
@@ -71,6 +72,120 @@ def test_iv_history_store_persists_ticker_and_dte_aggregates(tmp_path):
     assert {"ALL", "8_14", "15_30"} <= set(history["dte_bucket"])
     assert stats.observation_dates == 1
     assert stats.latest_date == date(2026, 5, 22)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("provider", "", "provider must be a non-empty string"),
+        ("provider", False, "provider must be a non-empty string"),
+        ("ticker", "BAD/TICKER", "ticker must be a valid stock ticker symbol"),
+        ("observation_date", "not-a-date", "observation_date must be YYYY-MM-DD"),
+        ("observation_count", "3", "observation_count must be a positive integer"),
+        ("observation_count", True, "observation_count must be a positive integer"),
+    ],
+)
+def test_iv_history_store_validates_observation_metadata(
+    tmp_path,
+    field,
+    value,
+    message,
+) -> None:
+    """Direct observation writes should fail at a stable store boundary."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    observations = build_iv_observation_frame(
+        _chain(),
+        provider="marketdata",
+        dataset_id="dataset-1",
+        run_id="run-1",
+        observed_at=date(2026, 5, 22),
+    )
+    observations[field] = observations[field].astype(object)
+    observations.loc[0, field] = value
+
+    with pytest.raises(ValueError, match=message):
+        store.upsert_observations(observations)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"provider": "", "ticker": "TSLA"}, "provider must be a non-empty string"),
+        ({"provider": "marketdata", "ticker": "TSLA1"}, "valid stock ticker"),
+    ],
+)
+def test_iv_history_store_query_helpers_validate_identity(
+    tmp_path,
+    kwargs,
+    message,
+) -> None:
+    """Read helpers should reject malformed provider/ticker inputs consistently."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+
+    with pytest.raises(ValueError, match=message):
+        store.stats(**kwargs)
+
+    with pytest.raises(ValueError, match=message):
+        store.has_observation_date(
+            **kwargs,
+            observation_date=date(2026, 5, 22),
+        )
+
+
+def test_iv_history_store_has_observation_date_validates_date(tmp_path) -> None:
+    """Observation-date probes should not leak raw attribute errors."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+
+    with pytest.raises(ValueError, match="observation_date must be a date"):
+        store.has_observation_date(
+            provider="marketdata",
+            ticker="TSLA",
+            observation_date="2026-05-22",
+        )
+
+
+@pytest.mark.parametrize("bad_lookback", [0, -1, True, "365", 1.5])
+def test_iv_history_store_load_history_validates_lookback(
+    tmp_path,
+    bad_lookback,
+) -> None:
+    """Stored IV-history windows should require explicit positive integers."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+
+    with pytest.raises(ValueError, match="lookback_days"):
+        store.load_history(
+            provider="marketdata",
+            ticker="TSLA",
+            lookback_days=bad_lookback,
+            end_date=date(2026, 5, 22),
+        )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"dataset_id": "", "provider": "marketdata", "status": "INGESTED"}, "dataset_id"),
+        ({"dataset_id": "dataset-1", "provider": "", "status": "INGESTED"}, "provider"),
+        ({"dataset_id": "dataset-1", "provider": "marketdata", "status": "ok"}, "status"),
+    ],
+)
+def test_iv_history_store_record_sync_validates_required_metadata(
+    tmp_path,
+    kwargs,
+    message,
+) -> None:
+    """Sync writes should not persist malformed ingestion metadata."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    params = {
+        "run_id": None,
+        "observation_date": date(2026, 5, 22),
+        "source_rows": 3,
+        "stored_rows": 8,
+    }
+    params.update(kwargs)
+
+    with pytest.raises(ValueError, match=message):
+        store.record_sync(**params)  # pylint: disable=missing-kwoa
 
 
 def test_ticker_volatility_features_use_durable_iv_history(tmp_path):

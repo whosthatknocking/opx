@@ -1,11 +1,15 @@
 """Durable daily OHLCV history store for price-context calculations."""
 
+# pylint: disable=too-many-locals
+
 from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
+from numbers import Integral
 from pathlib import Path
+import re
 import sqlite3
 import threading
 import weakref
@@ -21,6 +25,8 @@ from opx_chain.utils import finite_float_or_none
 PRICE_HISTORY_SCHEMA_VERSION = 1
 PRICE_HISTORY_SCHEMA_MIGRATIONS: dict[int, str] = {}
 PRICE_HISTORY_TAIL_REFRESH_DAYS = 7
+_VALID_TICKER_RE = re.compile(r"^[A-Z](?:[A-Z.]{0,9})$")
+_SYNC_STATUSES = frozenset({"ok", "error"})
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS _schema_meta (
@@ -76,6 +82,70 @@ def _parse_date(value: str | None) -> date | None:
 def _history_db_path(config=None) -> Path:
     base = Path(config.storage_dir) if config is not None and config.storage_dir else get_data_dir()
     return base / "price-history.db"
+
+
+def _non_empty_text(value: object, *, name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a non-empty string")
+    text = value.strip()
+    if not text:
+        raise ValueError(f"{name} must be a non-empty string")
+    return text
+
+
+def _optional_text(value: object, *, name: str) -> str | None:
+    if value is None:
+        return None
+    return _non_empty_text(value, name=name)
+
+
+def _normalize_provider(value: object) -> str:
+    return _non_empty_text(value, name="provider").strip()
+
+
+def _normalize_ticker(value: object) -> str:
+    text = _non_empty_text(value, name="ticker").upper().strip()
+    if not _VALID_TICKER_RE.fullmatch(text):
+        raise ValueError("ticker must be a valid stock ticker symbol")
+    return text
+
+
+def _positive_int(value: object, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise ValueError(f"{name} must be a positive integer")
+    resolved = int(value)
+    if resolved <= 0:
+        raise ValueError(f"{name} must be positive")
+    return resolved
+
+
+def _non_negative_int(value: object, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise ValueError(f"{name} must be a non-negative integer")
+    resolved = int(value)
+    if resolved < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return resolved
+
+
+def _date_arg(value: object, *, name: str) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    raise ValueError(f"{name} must be a date")
+
+
+def _optional_date_arg(value: object, *, name: str) -> date | None:
+    if value is None:
+        return None
+    return _date_arg(value, name=name)
+
+
+def _datetime_arg(value: object, *, name: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise ValueError(f"{name} must be a datetime")
+    return value
 
 
 @dataclass(frozen=True)
@@ -219,10 +289,6 @@ class PriceHistoryStore:
                 (str(next_version),),
             )
 
-    @staticmethod
-    def _normalize_key(value: str) -> str:
-        return value.upper().strip()
-
     def load_bars(
         self,
         *,
@@ -232,8 +298,12 @@ class PriceHistoryStore:
         end_date: date,
     ) -> pd.DataFrame:
         """Load stored daily bars for an inclusive date window."""
-        provider_key = provider.strip()
-        ticker_key = self._normalize_key(ticker)
+        provider_key = _normalize_provider(provider)
+        ticker_key = _normalize_ticker(ticker)
+        start = _date_arg(start_date, name="start_date")
+        end = _date_arg(end_date, name="end_date")
+        if start > end:
+            raise ValueError("start_date must be on or before end_date")
         with self._lock:
             conn = self._connection_for_use()
             rows = conn.execute(
@@ -249,8 +319,8 @@ class PriceHistoryStore:
                 (
                     provider_key,
                     ticker_key,
-                    start_date.isoformat(),
-                    end_date.isoformat(),
+                    start.isoformat(),
+                    end.isoformat(),
                 ),
             ).fetchall()
         if not rows:
@@ -275,8 +345,10 @@ class PriceHistoryStore:
         end_date: date,
     ) -> pd.DataFrame:
         """Load the latest stored daily bars up to an inclusive end date."""
-        provider_key = provider.strip()
-        ticker_key = self._normalize_key(ticker)
+        provider_key = _normalize_provider(provider)
+        ticker_key = _normalize_ticker(ticker)
+        resolved_lookback = _positive_int(lookback_days, name="lookback_days")
+        end = _date_arg(end_date, name="end_date")
         with self._lock:
             conn = self._connection_for_use()
             rows = conn.execute(
@@ -289,7 +361,7 @@ class PriceHistoryStore:
                 ORDER BY trading_date DESC
                 LIMIT ?
                 """,
-                (provider_key, ticker_key, end_date.isoformat(), max(lookback_days, 0)),
+                (provider_key, ticker_key, end.isoformat(), resolved_lookback),
             ).fetchall()
         if not rows:
             return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
@@ -307,8 +379,8 @@ class PriceHistoryStore:
 
     def stats(self, *, provider: str, ticker: str) -> PriceHistoryStats:
         """Return total coverage stats for one provider/ticker."""
-        provider_key = provider.strip()
-        ticker_key = self._normalize_key(ticker)
+        provider_key = _normalize_provider(provider)
+        ticker_key = _normalize_ticker(ticker)
         with self._lock:
             conn = self._connection_for_use()
             row = conn.execute(
@@ -339,9 +411,13 @@ class PriceHistoryStore:
         normalized = normalize_price_history_frame(history)
         if normalized.empty:
             return 0
-        provider_key = provider.strip()
-        ticker_key = self._normalize_key(ticker)
-        fetched_at = fetched_at or utc_now()
+        provider_key = _normalize_provider(provider)
+        ticker_key = _normalize_ticker(ticker)
+        fetched = (
+            _datetime_arg(fetched_at, name="fetched_at")
+            if fetched_at is not None
+            else utc_now()
+        )
         rows = []
         for _, row in normalized.iterrows():
             high = finite_float_or_none(row["high"])
@@ -359,7 +435,7 @@ class PriceHistoryStore:
                     low,
                     close,
                     finite_float_or_none(row.get("volume")),
-                    fetched_at.isoformat(),
+                    fetched.isoformat(),
                 )
             )
         if not rows:
@@ -391,8 +467,9 @@ class PriceHistoryStore:
         lookback_days: int,
     ) -> PriceHistorySync | None:
         """Return last sync metadata for one provider/ticker/lookback."""
-        provider_key = provider.strip()
-        ticker_key = self._normalize_key(ticker)
+        provider_key = _normalize_provider(provider)
+        ticker_key = _normalize_ticker(ticker)
+        resolved_lookback = _positive_int(lookback_days, name="lookback_days")
         with self._lock:
             conn = self._connection_for_use()
             row = conn.execute(
@@ -402,7 +479,7 @@ class PriceHistoryStore:
                 FROM price_history_syncs
                 WHERE provider = ? AND ticker = ? AND lookback_days = ?
                 """,
-                (provider_key, ticker_key, lookback_days),
+                (provider_key, ticker_key, resolved_lookback),
             ).fetchone()
         if row is None:
             return None
@@ -431,9 +508,27 @@ class PriceHistoryStore:
         checked_at: datetime | None = None,
     ) -> None:
         """Record the latest reconciliation attempt."""
-        provider_key = provider.strip()
-        ticker_key = self._normalize_key(ticker)
-        checked_at = checked_at or utc_now()
+        provider_key = _normalize_provider(provider)
+        ticker_key = _normalize_ticker(ticker)
+        lookback = _positive_int(lookback_days, name="lookback_days")
+        status_key = _non_empty_text(status, name="status").lower()
+        if status_key not in _SYNC_STATUSES:
+            expected = ", ".join(sorted(_SYNC_STATUSES))
+            raise ValueError(f"status must be one of: {expected}")
+        requested_lookback = (
+            _positive_int(requested_lookback_days, name="requested_lookback_days")
+            if requested_lookback_days is not None
+            else None
+        )
+        latest = _optional_date_arg(latest_trading_date, name="latest_trading_date")
+        fetched_count = _non_negative_int(fetched_rows, name="fetched_rows")
+        stored_count = _non_negative_int(stored_rows, name="stored_rows")
+        error_text = _optional_text(error_summary, name="error_summary")
+        checked = (
+            _datetime_arg(checked_at, name="checked_at")
+            if checked_at is not None
+            else utc_now()
+        )
         with self._open_connection() as conn:
             conn.execute(
                 """
@@ -454,14 +549,14 @@ class PriceHistoryStore:
                 (
                     provider_key,
                     ticker_key,
-                    lookback_days,
-                    checked_at.isoformat(),
-                    status,
-                    requested_lookback_days,
-                    _date_to_str(latest_trading_date),
-                    fetched_rows,
-                    stored_rows,
-                    error_summary,
+                    lookback,
+                    checked.isoformat(),
+                    status_key,
+                    requested_lookback,
+                    _date_to_str(latest),
+                    fetched_count,
+                    stored_count,
+                    error_text,
                 ),
             )
             conn.commit()

@@ -1,6 +1,6 @@
 """Durable implied-volatility history store for volatility advisory features."""
 
-# pylint: disable=duplicate-code,too-many-arguments,too-many-instance-attributes
+# pylint: disable=duplicate-code,too-many-arguments,too-many-instance-attributes,too-many-locals
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
+import re
 import sqlite3
 import threading
 import weakref
@@ -27,6 +28,8 @@ IV_HISTORY_SCHEMA_MIGRATIONS: dict[int, str] = {}
 DELTA_BUCKET_ALL = "ALL"
 OPTION_TYPE_ALL = "ALL"
 DTE_BUCKET_ALL = "ALL"
+_VALID_TICKER_RE = re.compile(r"^[A-Z](?:[A-Z.]{0,9})$")
+_SYNC_STATUSES = frozenset({"INGESTED", "EMPTY", "ERROR", "SKIPPED"})
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS _schema_meta (
@@ -92,13 +95,78 @@ def _parse_date(value: str | None) -> date | None:
         return None
 
 
-def _normalize_ticker(value: object) -> str | None:
-    text = str(value or "").strip().upper()
-    return text or None
+def _non_empty_text(value: object, *, name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a non-empty string")
+    text = value.strip()
+    if not text:
+        raise ValueError(f"{name} must be a non-empty string")
+    return text
 
 
-def _normalize_provider(value: str) -> str:
-    return str(value).strip().lower()
+def _optional_text(value: object, *, name: str) -> str | None:
+    if value is None:
+        return None
+    return _non_empty_text(value, name=name)
+
+
+def _normalize_ticker(value: object, *, required: bool = False) -> str | None:
+    if not isinstance(value, str):
+        if required:
+            raise ValueError("ticker must be a non-empty string")
+        return None
+    text = value.strip().upper()
+    if not text:
+        if required:
+            raise ValueError("ticker must be a non-empty string")
+        return None
+    if not _VALID_TICKER_RE.fullmatch(text):
+        if required:
+            raise ValueError("ticker must be a valid stock ticker symbol")
+        return None
+    return text
+
+
+def _normalize_provider(value: object) -> str:
+    return _non_empty_text(value, name="provider").lower()
+
+
+def _positive_int(value: object, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+        raise ValueError(f"{name} must be a positive integer")
+    resolved = int(value)
+    if resolved <= 0:
+        raise ValueError(f"{name} must be positive")
+    return resolved
+
+
+def _non_negative_int(value: object, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+        raise ValueError(f"{name} must be a non-negative integer")
+    resolved = int(value)
+    if resolved < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return resolved
+
+
+def _date_arg(value: object, *, name: str) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    raise ValueError(f"{name} must be a date")
+
+
+def _optional_date_arg(value: object, *, name: str) -> date | None:
+    if value is None:
+        return None
+    return _date_arg(value, name=name)
+
+
+def _datetime_arg(value: object, *, name: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise ValueError(f"{name} must be a datetime")
+    return value
 
 
 def _normalize_option_type(value: object) -> str:
@@ -295,29 +363,34 @@ class IVHistoryStore:
         rows = []
         for _, row in observations.iterrows():
             representative_iv = finite_float_or_none(row.get("representative_iv"))
-            observation_count = int(row.get("observation_count") or 0)
-            ticker = _normalize_ticker(row.get("ticker"))
+            observation_count = _positive_int(
+                row.get("observation_count"),
+                name="observation_count",
+            )
+            provider = _normalize_provider(row.get("provider"))
+            ticker = _normalize_ticker(row.get("ticker"), required=True)
             if representative_iv is None or representative_iv <= 0 or observation_count <= 0:
-                continue
-            if ticker is None:
                 continue
             observed = _parse_date(str(row.get("observation_date") or ""))
             if observed is None:
-                continue
+                raise ValueError("observation_date must be YYYY-MM-DD")
+            option_type = _non_empty_text(row.get("option_type"), name="option_type")
+            dte_bucket_value = _non_empty_text(row.get("dte_bucket"), name="dte_bucket")
+            delta_bucket_value = _non_empty_text(row.get("delta_bucket"), name="delta_bucket")
             rows.append(
                 (
-                    _normalize_provider(str(row.get("provider") or "")),
+                    provider,
                     ticker,
                     observed.isoformat(),
-                    str(row.get("option_type") or OPTION_TYPE_ALL).upper().strip(),
-                    str(row.get("dte_bucket") or DTE_BUCKET_ALL).upper().strip(),
-                    str(row.get("delta_bucket") or DELTA_BUCKET_ALL).upper().strip(),
+                    option_type.upper().strip(),
+                    dte_bucket_value.upper().strip(),
+                    delta_bucket_value.upper().strip(),
                     representative_iv,
                     observation_count,
-                    row.get("dataset_id"),
-                    row.get("run_id"),
-                    row.get("source_created_at"),
-                    row.get("fetched_at") or fetched_at,
+                    _optional_text(row.get("dataset_id"), name="dataset_id"),
+                    _optional_text(row.get("run_id"), name="run_id"),
+                    _optional_text(row.get("source_created_at"), name="source_created_at"),
+                    _optional_text(row.get("fetched_at"), name="fetched_at") or fetched_at,
                 )
             )
         if not rows:
@@ -358,10 +431,12 @@ class IVHistoryStore:
     ) -> pd.DataFrame:
         """Load ticker-wide and DTE-bucket IV observations for percentile features."""
         provider_key = _normalize_provider(provider)
-        ticker_key = str(ticker).upper().strip()
-        start_date = end_date - timedelta(days=max(int(lookback_days), 0))
+        ticker_key = _normalize_ticker(ticker, required=True)
+        resolved_lookback = _positive_int(lookback_days, name="lookback_days")
+        resolved_end_date = _date_arg(end_date, name="end_date")
+        start_date = resolved_end_date - timedelta(days=resolved_lookback)
         option_type_key = _normalize_option_type(option_type)
-        delta_bucket_key = str(delta_bucket or DELTA_BUCKET_ALL).upper().strip()
+        delta_bucket_key = _non_empty_text(delta_bucket, name="delta_bucket").upper().strip()
         with self._lock:
             conn = self._connection_for_use()
             rows = conn.execute(
@@ -381,7 +456,7 @@ class IVHistoryStore:
                     provider_key,
                     ticker_key,
                     start_date.isoformat(),
-                    end_date.isoformat(),
+                    resolved_end_date.isoformat(),
                     option_type_key,
                     delta_bucket_key,
                 ),
@@ -421,7 +496,7 @@ class IVHistoryStore:
     def stats(self, *, provider: str, ticker: str) -> IVHistoryStats:
         """Return total coverage stats for one provider/ticker."""
         provider_key = _normalize_provider(provider)
-        ticker_key = str(ticker).upper().strip()
+        ticker_key = _normalize_ticker(ticker, required=True)
         with self._lock:
             conn = self._connection_for_use()
             row = conn.execute(
@@ -451,7 +526,8 @@ class IVHistoryStore:
     ) -> bool:
         """Return True when any IV aggregate exists for one provider/ticker/date."""
         provider_key = _normalize_provider(provider)
-        ticker_key = str(ticker).upper().strip()
+        ticker_key = _normalize_ticker(ticker, required=True)
+        observed = _date_arg(observation_date, name="observation_date")
         with self._lock:
             conn = self._connection_for_use()
             row = conn.execute(
@@ -463,12 +539,13 @@ class IVHistoryStore:
                   AND observation_date = ?
                 LIMIT 1
                 """,
-                (provider_key, ticker_key, observation_date.isoformat()),
+                (provider_key, ticker_key, observed.isoformat()),
             ).fetchone()
         return row is not None
 
     def get_sync(self, *, dataset_id: str) -> IVHistorySync | None:
         """Return last ingestion metadata for one option-chain dataset."""
+        dataset_key = _non_empty_text(dataset_id, name="dataset_id")
         with self._lock:
             conn = self._connection_for_use()
             row = conn.execute(
@@ -478,7 +555,7 @@ class IVHistoryStore:
                 FROM iv_history_syncs
                 WHERE dataset_id = ?
                 """,
-                (dataset_id,),
+                (dataset_key,),
             ).fetchone()
         if row is None:
             return None
@@ -507,7 +584,22 @@ class IVHistoryStore:
         checked_at: datetime | None = None,
     ) -> None:
         """Record the latest ingestion attempt for a dataset."""
-        checked_at = checked_at or utc_now()
+        dataset_key = _non_empty_text(dataset_id, name="dataset_id")
+        provider_key = _normalize_provider(provider)
+        run_id_value = _optional_text(run_id, name="run_id")
+        status_key = _non_empty_text(status, name="status").upper()
+        if status_key not in _SYNC_STATUSES:
+            expected = ", ".join(sorted(_SYNC_STATUSES))
+            raise ValueError(f"status must be one of: {expected}")
+        observed = _optional_date_arg(observation_date, name="observation_date")
+        source_row_count = _non_negative_int(source_rows, name="source_rows")
+        stored_row_count = _non_negative_int(stored_rows, name="stored_rows")
+        error_text = _optional_text(error_summary, name="error_summary")
+        checked = (
+            _datetime_arg(checked_at, name="checked_at")
+            if checked_at is not None
+            else utc_now()
+        )
         with self._open_connection() as conn:
             conn.execute(
                 """
@@ -526,15 +618,15 @@ class IVHistoryStore:
                     error_summary = excluded.error_summary
                 """,
                 (
-                    dataset_id,
-                    _normalize_provider(provider),
-                    run_id,
-                    checked_at.isoformat(),
-                    status,
-                    _date_to_str(observation_date),
-                    source_rows,
-                    stored_rows,
-                    error_summary,
+                    dataset_key,
+                    provider_key,
+                    run_id_value,
+                    checked.isoformat(),
+                    status_key,
+                    _date_to_str(observed),
+                    source_row_count,
+                    stored_row_count,
+                    error_text,
                 ),
             )
             conn.commit()
