@@ -168,6 +168,34 @@ def test_compute_greeks_does_not_preserve_non_finite_provider_greeks():
     assert bool(result.loc[0, "has_valid_greeks"]) is False
 
 
+def test_compute_greeks_does_not_preserve_boolean_provider_greeks():
+    """Provider-native boolean risk values should fall back to derived Greeks."""
+    frame = pd.DataFrame(
+        [
+            {
+                "strike": 100,
+                "time_to_expiration_years": 0.5,
+                "implied_volatility": 0.25,
+                "option_type": "call",
+                "delta": True,
+                "probability_itm": False,
+                "gamma": True,
+                "vega": False,
+                "theta": True,
+            },
+        ]
+    )
+
+    result = compute_greeks(frame.copy(), underlying_price=110, risk_free_rate=0.045)
+
+    for field in ("delta", "probability_itm", "gamma", "vega", "theta"):
+        assert not isinstance(result.loc[0, field], (bool, type(pd.NA)))
+        assert pd.notna(result.loc[0, field])
+    assert result.loc[0, "delta"] != 1.0
+    assert result.loc[0, "probability_itm"] != 0.0
+    assert bool(result.loc[0, "has_valid_greeks"]) is True
+
+
 def test_compute_greeks_adds_delta_safety_pct_from_delta_abs():
     """Delta safety should be the inverse absolute-delta percentage."""
     frame = pd.DataFrame(
@@ -646,6 +674,41 @@ def test_add_screening_and_freshness_flags_marks_non_finite_scores_missing(monke
     assert pd.isna(result.loc[0, "option_score"])
 
 
+def test_add_option_score_requires_finite_probability_itm(monkeypatch):
+    """Non-finite risk-model probabilities should not produce ranking scores."""
+    monkeypatch.setattr("opx_chain.metrics.get_runtime_config", make_score_config)
+    frame = pd.DataFrame([make_scored_row(probability_itm=float("inf"))])
+
+    result = add_option_score(frame.copy())
+
+    assert pd.isna(result.loc[0, "option_score"])
+    assert pd.isna(result.loc[0, "final_score"])
+    assert pd.isna(result.loc[0, "score_validation"])
+
+
+def test_add_quote_quality_metrics_rejects_boolean_quotes():
+    """Boolean bid/ask inputs should not crash or become valid quote prices."""
+    frame = pd.DataFrame(
+        [
+            {
+                "strike": 100.0,
+                "bid": True,
+                "ask": False,
+                "volume": 10,
+                "open_interest": 20,
+                "implied_volatility": 0.30,
+            }
+        ]
+    )
+
+    result = add_quote_quality_metrics(frame.copy(), underlying_price=101.0)
+
+    assert pd.isna(result.loc[0, "bid"])
+    assert pd.isna(result.loc[0, "ask"])
+    assert bool(result.loc[0, "has_valid_quote"]) is False
+    assert pd.isna(result.loc[0, "bid_ask_spread"])
+
+
 def test_add_option_score_returns_bounded_value(monkeypatch):
     """Option score should stay within 0-100 and reward stronger inputs."""
     monkeypatch.setattr("opx_chain.metrics.get_runtime_config", make_score_config)
@@ -875,6 +938,25 @@ def test_add_event_risk_flags_handles_missing_columns_gracefully():
     assert "earnings_within_5d" in result.columns
     assert "event_risk_score" in result.columns
     assert pd.isna(result.loc[0, "event_risk_score"])
+
+
+def test_add_event_risk_flags_treats_malformed_day_counts_as_missing():
+    """Boolean and string event-day values should not score or raise."""
+    frame = pd.DataFrame(
+        [
+            {"days_to_expiration": 30, "days_to_earnings": True, "days_to_ex_div": False},
+            {"days_to_expiration": 30, "days_to_earnings": "true", "days_to_ex_div": "false"},
+            {"days_to_expiration": 30, "days_to_earnings": float("inf"), "days_to_ex_div": 2.0},
+        ]
+    )
+
+    result = add_event_risk_flags(frame.copy())
+
+    assert pd.isna(result.loc[0, "event_risk_score"])
+    assert pd.isna(result.loc[1, "event_risk_score"])
+    assert result.loc[2, "event_risk_score"] == pytest.approx(40.0)
+    assert result.loc[0, "earnings_within_5d"] is None
+    assert result.loc[0, "ex_div_within_3d"] is None
 
 
 def test_add_screening_and_freshness_flags_is_stale_quote_stays_nullable_boolean(monkeypatch):

@@ -12,6 +12,7 @@ from opx_chain.price_context import (
     PriceContextStatus,
     blank_price_context,
     compute_price_context,
+    normalize_price_history_frame,
 )
 
 
@@ -107,6 +108,28 @@ def test_compute_price_context_returns_blank_payload_for_missing_history():
     )
 
     assert context == blank_price_context(source="unit")
+
+
+def test_price_context_normalization_drops_boolean_ohlcv_rows():
+    """Boolean OHLCV values should not become one-dollar price-context levels."""
+    history = _history(periods=30)
+    for column in ("High", "Low", "Close", "Volume"):
+        history[column] = history[column].astype(object)
+        history.loc[history.index[-1], column] = True
+
+    normalized = normalize_price_history_frame(history)
+    context = compute_price_context(
+        history,
+        source="unit",
+        today=date(2025, 8, 11),
+        max_age_days=7,
+    )
+
+    assert len(normalized) == 29
+    assert normalized["date"].max().date().isoformat() == "2025-08-08"
+    assert context["price_context_as_of"] == "2025-08-08"
+    assert context["support_1"] != 1.0
+    assert context["resistance_1"] != 1.0
 
 
 def test_blank_price_context_accepts_status_enum():

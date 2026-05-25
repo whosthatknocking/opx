@@ -1,4 +1,5 @@
 """Shared row-level and file-level validation for canonical option data."""
+# pylint: disable=duplicate-code
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import pandas as pd
 
 from opx_chain.option_types import OPTION_TYPES
 from opx_chain.schema import BOOLEAN_FIELDS, TIMESTAMP_FIELDS
+from opx_chain.utils import finite_numeric_series
 
 
 REQUIRED_CORE_FIELDS = (
@@ -23,15 +25,80 @@ REQUIRED_CORE_FIELDS = (
     "ask",
 )
 NUMERIC_FIELDS = (
+    "days_to_expiration",
+    "time_to_expiration_years",
     "strike",
     "underlying_price",
+    "underlying_day_change_pct",
+    "historical_volatility",
+    "underlying_price_age_seconds",
+    "days_to_earnings",
+    "days_to_ex_div",
+    "dividend_amount",
+    "event_risk_score",
     "bid",
     "ask",
     "last_trade_price",
+    "mark_price_mid",
+    "expected_fill_price",
+    "bid_ask_spread",
+    "bid_ask_spread_pct_of_mid",
+    "spread_to_strike_pct",
+    "spread_to_bid_pct",
     "volume",
     "open_interest",
+    "oi_to_volume_ratio",
+    "listed_strike_increment",
     "implied_volatility",
+    "change",
+    "percent_change",
+    "quote_age_seconds",
+    "strike_minus_spot",
+    "strike_vs_spot_pct",
+    "strike_distance_pct",
+    "itm_amount",
+    "otm_pct",
+    "intrinsic_value",
+    "extrinsic_value_bid",
+    "extrinsic_value_mid",
+    "extrinsic_value_ask",
+    "extrinsic_pct_mid",
+    "premium_to_strike",
+    "premium_to_strike_bid",
+    "premium_to_strike_annualized",
+    "premium_per_day",
+    "iv_adjusted_premium_per_day",
+    "estimated_margin_requirement",
+    "return_on_margin",
+    "return_on_margin_annualized",
+    "break_even_if_short",
+    "expected_move",
+    "expected_move_pct",
+    "expected_move_lower_bound",
+    "expected_move_upper_bound",
+    "delta",
+    "delta_abs",
+    "delta_safety_pct",
+    "delta_itm_proxy",
+    "probability_itm",
+    "gamma",
+    "vega",
+    "vega_per_day",
+    "theta",
+    "theta_dollars_per_day",
+    "theta_to_premium_ratio",
+    "capital_required",
+    "theta_efficiency",
+    "spread_score",
+    "dte_score",
+    "quote_quality_score",
+    "option_score",
+    "score_adjustment",
+    "final_score",
+    "risk_free_rate_used",
 )
+
+
 @dataclass(frozen=True)
 class ValidationFinding:
     """One validation finding emitted during row or file checks."""
@@ -85,7 +152,7 @@ def _numeric_series(df: pd.DataFrame, field: str) -> pd.Series:
     """Return a numeric series for a field, coercing invalid values to NaN."""
     if field not in df.columns:
         return pd.Series(np.nan, index=df.index, dtype=float)
-    return pd.to_numeric(df[field], errors="coerce")
+    return finite_numeric_series(df[field])
 
 
 def _invalid_numeric_mask(df: pd.DataFrame, field: str) -> pd.Series:

@@ -151,6 +151,31 @@ def test_yfinance_provider_load_ticker_events_parses_earnings_and_dividends(monk
     assert events["dividend_amount"] == pytest.approx(0.88)
 
 
+def test_yfinance_provider_rejects_boolean_dividend_amounts(monkeypatch):
+    """Malformed Yahoo dividend booleans should not become one-dollar amounts."""
+    class EventTicker(FakeTicker):  # pylint: disable=too-few-public-methods
+        """Ticker fixture with malformed boolean dividend data."""
+
+        def __init__(self, ticker):
+            super().__init__(ticker)
+            self.dividends = pd.Series(
+                [True],
+                index=pd.to_datetime(["2026-04-18"]),
+                dtype="object",
+            )
+
+    monkeypatch.setattr(
+        "opx_chain.providers.yfinance.get_runtime_config",
+        lambda: make_runtime_config(today=date(2026, 4, 17)),
+    )
+    monkeypatch.setattr("opx_chain.providers.yfinance.yf.Ticker", EventTicker)
+
+    events = YFinanceProvider().load_ticker_events("TSLA")
+
+    assert events["next_ex_div_date"] == "2026-04-18"
+    assert pd.isna(events["dividend_amount"])
+
+
 def test_yfinance_provider_load_price_history_uses_daily_adjusted_history(monkeypatch):
     """Price-context history should use the provider's paced Yahoo history call."""
     calls = []

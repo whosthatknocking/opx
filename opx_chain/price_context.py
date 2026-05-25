@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from opx_chain.utils import finite_float_or_none
+from opx_chain.utils import finite_float_or_none, finite_numeric_series
 
 PRICE_CONTEXT_FIELDS: tuple[str, ...] = (
     "support_1",
@@ -130,15 +130,13 @@ def _normalize_history_frame(history: pd.DataFrame) -> pd.DataFrame:
     normalized = pd.DataFrame(
         {
             "date": _normalize_dates(frame[column_map["date"]]),
-            "open": pd.to_numeric(
-                frame[column_map["open"]], errors="coerce"
-            ) if column_map["open"] is not None else np.nan,
-            "high": pd.to_numeric(frame[column_map["high"]], errors="coerce"),
-            "low": pd.to_numeric(frame[column_map["low"]], errors="coerce"),
-            "close": pd.to_numeric(frame[column_map["close"]], errors="coerce"),
-            "volume": pd.to_numeric(
-                frame[column_map["volume"]], errors="coerce"
-            ) if column_map["volume"] is not None else np.nan,
+            "open": finite_numeric_series(frame[column_map["open"]])
+            if column_map["open"] is not None else np.nan,
+            "high": finite_numeric_series(frame[column_map["high"]]),
+            "low": finite_numeric_series(frame[column_map["low"]]),
+            "close": finite_numeric_series(frame[column_map["close"]]),
+            "volume": finite_numeric_series(frame[column_map["volume"]])
+            if column_map["volume"] is not None else np.nan,
         }
     )
     normalized = normalized.dropna(subset=["date", "high", "low", "close"])
@@ -201,7 +199,7 @@ def _rolling_vwap(history: pd.DataFrame, window: int = 20) -> float | None:
     recent = history.tail(window)
     if recent.empty or "volume" not in recent.columns:
         return None
-    volume = pd.to_numeric(recent["volume"], errors="coerce")
+    volume = finite_numeric_series(recent["volume"])
     valid = volume.notna() & (volume > 0)
     if not valid.any():
         return None
@@ -213,7 +211,7 @@ def _volume_node(history: pd.DataFrame, window: int = 60) -> float | None:
     recent = history.tail(window)
     if recent.empty or "volume" not in recent.columns:
         return None
-    volume = pd.to_numeric(recent["volume"], errors="coerce")
+    volume = finite_numeric_series(recent["volume"])
     valid = volume.notna() & (volume > 0)
     if not valid.any():
         return None

@@ -5,15 +5,15 @@ import pandas as pd
 from scipy.stats import norm
 
 from opx_chain.option_types import OPTION_TYPE_CALL
-from opx_chain.utils import finite_float
+from opx_chain.utils import finite_float, finite_numeric_series
 
 
 def _merge_provider_and_derived(existing, derived):
     """Keep provider-native values when present and fill gaps with derived ones."""
     if existing is None:
         return derived
-    numeric = pd.to_numeric(existing, errors="coerce")
-    valid = numeric.notna() & np.isfinite(numeric)
+    numeric = finite_numeric_series(existing)
+    valid = numeric.notna()
     return numeric.where(valid, derived)
 
 
@@ -23,8 +23,8 @@ def _provider_greek_available(df):
     for field in ("delta", "probability_itm", "gamma", "vega", "theta"):
         existing = df.get(field)
         if existing is not None:
-            numeric = pd.to_numeric(existing, errors="coerce")
-            available |= numeric.notna() & np.isfinite(numeric)
+            numeric = finite_numeric_series(existing)
+            available |= numeric.notna()
     return available
 
 
@@ -37,13 +37,9 @@ def compute_greeks(  # pylint: disable=too-many-locals
     provider_greek_available = _provider_greek_available(df)
     spot_price = finite_float(underlying_price)
     has_valid_spot = spot_price > 0
-    strike = df["strike"].to_numpy(dtype=float)
-    time_to_expiration = df["time_to_expiration_years"].to_numpy(dtype=float)
-    sigma = (
-        pd.to_numeric(df["implied_volatility"], errors="coerce")
-        .replace(0, np.nan)
-        .to_numpy(dtype=float)
-    )
+    strike = finite_numeric_series(df["strike"]).to_numpy(dtype=float)
+    time_to_expiration = finite_numeric_series(df["time_to_expiration_years"]).to_numpy(dtype=float)
+    sigma = finite_numeric_series(df["implied_volatility"]).replace(0, np.nan).to_numpy(dtype=float)
 
     valid = (
         has_valid_spot

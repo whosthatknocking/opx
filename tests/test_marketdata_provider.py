@@ -992,6 +992,30 @@ def test_marketdata_provider_load_ticker_events_parses_earnings_and_dividends(mo
     assert events["dividend_amount"] == pytest.approx(0.88)
 
 
+def test_marketdata_provider_rejects_boolean_dividend_amounts(monkeypatch):
+    """Malformed MarketData dividend booleans should not become one-dollar amounts."""
+    patch_marketdata_client(monkeypatch)
+    today = date(2026, 4, 16)
+    monkeypatch.setattr(
+        "opx_chain.providers.marketdata.get_runtime_config",
+        lambda: make_runtime_config(today=today),
+    )
+    provider = MarketDataProvider()
+    client = fake_client(provider)
+    market_tz = ZoneInfo("America/New_York")
+    ex_div_ts = int(datetime(2026, 4, 18, tzinfo=market_tz).timestamp())
+    client._dividend_payload = {  # pylint: disable=protected-access
+        "s": "ok",
+        "exDate": [ex_div_ts],
+        "amount": [True],
+    }
+
+    events = provider.load_ticker_events("TSLA")
+
+    assert events["next_ex_div_date"] == "2026-04-18"
+    assert pd.isna(events["dividend_amount"])
+
+
 def test_marketdata_provider_ignores_fiscal_period_end_date_for_future_earnings(monkeypatch):
     """Market Data `date` is fiscal period end, not the upcoming report event."""
     patch_marketdata_client(monkeypatch)

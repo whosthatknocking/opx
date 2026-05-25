@@ -9,7 +9,7 @@ from opx_chain.metrics import (
     add_quote_quality_metrics,
     add_screening_and_freshness_flags,
 )
-from opx_chain.utils import is_finite_positive_number
+from opx_chain.utils import finite_numeric_series, is_finite_positive_number
 
 
 def normalize_vendor_option_frame(  # pylint: disable=too-many-arguments,too-many-positional-arguments
@@ -65,7 +65,7 @@ def normalize_vendor_option_frame(  # pylint: disable=too-many-arguments,too-man
     ]
     for column in numeric_columns:
         if column in df.columns:
-            df[column] = pd.to_numeric(df[column], errors="coerce")
+            df[column] = finite_numeric_series(df[column])
 
     df["option_quote_time"] = pd.to_datetime(df["option_quote_time"], utc=True, errors="coerce")
     return df
@@ -86,7 +86,7 @@ def filter_zero_bid_quotes(df):
     """Exclude contracts without a finite positive bid from the fetched dataset."""
     if df.empty:
         return df.copy()
-    bid = pd.to_numeric(df["bid"], errors="coerce")
+    bid = finite_numeric_series(df["bid"])
     return df[bid.map(is_finite_positive_number)].copy()
 
 

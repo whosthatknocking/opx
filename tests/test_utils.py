@@ -12,8 +12,10 @@ import pytest
 from opx_chain.coerce import coerce_bool_or_default
 from opx_chain.storage.serializers import get_serializer
 from opx_chain.utils import (
+    coerce_float,
     finite_float,
     finite_float_or_none,
+    finite_numeric_series,
     first_non_missing,
     is_finite_positive_number,
     is_missing_or_non_finite,
@@ -188,6 +190,21 @@ def test_finite_float_or_none_shares_finite_float_policy(value, expected):
     else:
         assert result == pytest.approx(expected)
         assert finite_float(value) == pytest.approx(expected)
+
+
+def test_coerce_float_uses_strict_finite_float_policy():
+    """Legacy provider coercion should not treat booleans as numeric prices."""
+    assert math.isnan(coerce_float(True))
+    assert math.isnan(coerce_float(np.bool_(False)))
+    assert coerce_float("2.5") == pytest.approx(2.5)
+
+
+def test_finite_numeric_series_masks_booleans_and_non_finite_values():
+    """Vector numeric coercion should share scalar finite-float boolean handling."""
+    result = finite_numeric_series(pd.Series([True, False, "2.5", math.inf, "bad"]))
+
+    assert result.isna().tolist() == [True, True, False, True, True]
+    assert result.loc[2] == pytest.approx(2.5)
 
 
 def test_first_non_missing_rejects_non_finite_numeric_values():

@@ -6,7 +6,7 @@ import pandas as pd
 from opx_chain.config import get_runtime_config
 from opx_chain.greeks import compute_greeks
 from opx_chain.option_types import OPTION_TYPE_CALL, OPTION_TYPES
-from opx_chain.utils import finite_float, is_finite_positive_number
+from opx_chain.utils import finite_float, finite_numeric_series, is_finite_positive_number
 
 
 DAYS_BUCKET_THRESHOLDS = (10.0, 18.0, 26.0)
@@ -43,10 +43,7 @@ def _clip_zero_to_one(values):
 
 def _finite_numeric_series(values):
     """Return numeric values with non-finite entries masked as NaN."""
-    numeric = pd.to_numeric(values, errors="coerce")
-    if not isinstance(numeric, pd.Series):
-        numeric = pd.Series(numeric)
-    return numeric.where(np.isfinite(numeric))
+    return finite_numeric_series(values)
 
 
 def _compute_spread_score(spread_pct):
@@ -111,24 +108,26 @@ def _compute_theta_efficiency_score(theta_efficiency):
 
 def _series_finite_positive(series):
     """Return True only for finite numeric values greater than zero."""
-    numeric = pd.to_numeric(series, errors="coerce")
+    numeric = _finite_numeric_series(series)
     return numeric.notna() & np.isfinite(numeric) & (numeric > 0)
 
 
 def _series_finite_nonnegative(series):
     """Return True only for finite numeric values greater than or equal to zero."""
-    numeric = pd.to_numeric(series, errors="coerce")
+    numeric = _finite_numeric_series(series)
     return numeric.notna() & np.isfinite(numeric) & (numeric >= 0)
 
 
 def _compute_risk_level(df):
     """Classify row-level risk using delta as the score driver and ITM probability as validation."""
+    delta_abs = _finite_numeric_series(df["delta_abs"])
+    probability_itm = _finite_numeric_series(df["probability_itm"])
     return np.select(
         [
-            (df["delta_abs"] < 0.30) & (df["probability_itm"] < 0.25),
-            ((df["delta_abs"] >= 0.30) & (df["delta_abs"] <= 0.40))
-            | ((df["probability_itm"] >= 0.25) & (df["probability_itm"] <= 0.35)),
-            (df["delta_abs"] > 0.40) | (df["probability_itm"] > 0.35),
+            (delta_abs < 0.30) & (probability_itm < 0.25),
+            ((delta_abs >= 0.30) & (delta_abs <= 0.40))
+            | ((probability_itm >= 0.25) & (probability_itm <= 0.35)),
+            (delta_abs > 0.40) | (probability_itm > 0.35),
         ],
         ["LOW", "MODERATE", "HIGH"],
         default="UNKNOWN",
@@ -180,11 +179,30 @@ def add_option_score(df):
         df["final_score"] = np.nan
         return df
 
-    income_score = _compute_income_score(df["iv_adjusted_premium_per_day"])
-    spread_score_norm = _clip_zero_to_one(df["spread_score"] / 100.0)
-    dte_score_norm = _clip_zero_to_one(df["dte_score"] / 100.0)
-    risk_score = _compute_risk_score(df["delta_abs"])
-    theta_efficiency_score = _compute_theta_efficiency_score(df["theta_efficiency"])
+    numeric_inputs = {
+        field: _finite_numeric_series(df[field])
+        for field in (
+            "premium_per_day",
+            "bid",
+            "ask",
+            "open_interest",
+            "volume",
+            "delta_abs",
+            "probability_itm",
+            "days_to_expiration",
+            "strike",
+            "underlying_price",
+            "iv_adjusted_premium_per_day",
+            "spread_score",
+            "dte_score",
+            "theta_efficiency",
+        )
+    }
+    income_score = _compute_income_score(numeric_inputs["iv_adjusted_premium_per_day"])
+    spread_score_norm = _clip_zero_to_one(numeric_inputs["spread_score"] / 100.0)
+    dte_score_norm = _clip_zero_to_one(numeric_inputs["dte_score"] / 100.0)
+    risk_score = _compute_risk_score(numeric_inputs["delta_abs"])
+    theta_efficiency_score = _compute_theta_efficiency_score(numeric_inputs["theta_efficiency"])
     efficiency_score = (dte_score_norm * 0.5) + (theta_efficiency_score * 0.5)
 
     weighted_score = (
@@ -195,20 +213,20 @@ def add_option_score(df):
     ) / total_weight
 
     required = (
-        df["premium_per_day"].notna()
-        & df["bid"].notna()
-        & df["ask"].notna()
-        & df["open_interest"].notna()
-        & df["volume"].notna()
-        & df["delta_abs"].notna()
-        & df["probability_itm"].notna()
-        & df["days_to_expiration"].notna()
-        & df["strike"].notna()
-        & df["underlying_price"].notna()
-        & df["iv_adjusted_premium_per_day"].notna()
-        & df["spread_score"].notna()
-        & df["dte_score"].notna()
-        & df["theta_efficiency"].notna()
+        numeric_inputs["premium_per_day"].notna()
+        & numeric_inputs["bid"].notna()
+        & numeric_inputs["ask"].notna()
+        & numeric_inputs["open_interest"].notna()
+        & numeric_inputs["volume"].notna()
+        & numeric_inputs["delta_abs"].notna()
+        & numeric_inputs["probability_itm"].notna()
+        & numeric_inputs["days_to_expiration"].notna()
+        & numeric_inputs["strike"].notna()
+        & numeric_inputs["underlying_price"].notna()
+        & numeric_inputs["iv_adjusted_premium_per_day"].notna()
+        & numeric_inputs["spread_score"].notna()
+        & numeric_inputs["dte_score"].notna()
+        & numeric_inputs["theta_efficiency"].notna()
         & df["option_type"].isin(OPTION_TYPES)
     )
     df["option_score"] = np.where(required, _clip_zero_to_one(weighted_score) * 100, np.nan)
@@ -235,6 +253,9 @@ def add_option_score(df):
 
 def add_quote_quality_metrics(df, underlying_price):
     """Add quote validation and basic liquidity quality fields."""
+    for column in ("strike", "bid", "ask", "volume", "open_interest", "implied_volatility"):
+        if column in df.columns:
+            df[column] = _finite_numeric_series(df[column])
     df["has_valid_underlying"] = is_finite_positive_number(underlying_price)
     df["has_valid_strike"] = _series_finite_positive(df["strike"])
     df["bid_le_ask"] = df["bid"] <= df["ask"]
@@ -437,9 +458,17 @@ def add_derived_pricing_metrics(df, underlying_price):
 def add_event_risk_flags(df):
     """Add earnings/dividend proximity flags and a composite event risk score."""
     blank = pd.Series(np.nan, index=df.index)
-    dte = df["days_to_earnings"] if "days_to_earnings" in df.columns else blank
-    dtd = df["days_to_ex_div"] if "days_to_ex_div" in df.columns else blank
-    row_dte = df["days_to_expiration"] if "days_to_expiration" in df.columns else blank
+    dte = (
+        _finite_numeric_series(df["days_to_earnings"])
+        if "days_to_earnings" in df.columns
+        else blank
+    )
+    dtd = _finite_numeric_series(df["days_to_ex_div"]) if "days_to_ex_div" in df.columns else blank
+    row_dte = (
+        _finite_numeric_series(df["days_to_expiration"])
+        if "days_to_expiration" in df.columns
+        else blank
+    )
 
     spans_earnings = dte.notna() & ((row_dte.isna()) | ((dte >= 0) & (dte <= row_dte)))
     spans_ex_div = dtd.notna() & ((row_dte.isna()) | ((dtd >= 0) & (dtd <= row_dte)))
@@ -486,12 +515,14 @@ def add_screening_and_freshness_flags(df, fetched_at):
     df["spread_score"] = _compute_spread_score(df["bid_ask_spread_pct_of_mid"])
     df["dte_score"] = _compute_dte_score(df["days_to_expiration"])
     df["risk_level"] = _compute_risk_level(df)
-    risk_model_available = df["delta_abs"].notna() & df["probability_itm"].notna()
+    delta_abs = _finite_numeric_series(df["delta_abs"])
+    probability_itm = _finite_numeric_series(df["probability_itm"])
+    risk_model_available = delta_abs.notna() & probability_itm.notna()
     risk_model_inconsistent = pd.Series(pd.NA, index=df.index, dtype="boolean")
     risk_model_inconsistent.loc[risk_model_available] = (
         np.abs(
-            df.loc[risk_model_available, "delta_abs"]
-            - df.loc[risk_model_available, "probability_itm"]
+            delta_abs.loc[risk_model_available]
+            - probability_itm.loc[risk_model_available]
         )
         > 0.15
     )

@@ -87,7 +87,17 @@ def read_dataset_file(
 
 def coerce_float(value):
     """Convert scalar inputs to float while keeping missing values as NaN."""
-    return pd.to_numeric(value, errors="coerce")
+    return finite_float(value)
+
+
+def finite_numeric_series(values) -> pd.Series:
+    """Return numeric values with booleans and non-finite entries masked as NaN."""
+    source = values if isinstance(values, pd.Series) else pd.Series(values)
+    numeric = pd.to_numeric(source, errors="coerce")
+    if not isinstance(numeric, pd.Series):
+        numeric = pd.Series(numeric, index=source.index)
+    boolean_mask = source.map(lambda value: isinstance(value, (bool, np.bool_)))
+    return numeric.where(~boolean_mask & np.isfinite(numeric))
 
 
 def is_missing_or_non_finite(value) -> bool:

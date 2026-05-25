@@ -42,7 +42,7 @@ from opx_chain.providers.base import (
 )
 from opx_chain.providers._dates import parse_event_date as _parse_event_date
 from opx_chain.runlog import get_logger, logger_name
-from opx_chain.utils import coerce_float, normalize_timestamp
+from opx_chain.utils import coerce_float, finite_float_or_none, normalize_timestamp
 
 CALLER_USER_AGENT = f"opx-chain/{SCRIPT_VERSION}"
 _SDK_LOGGER_SUFFIX = "providers.marketdata.sdk"
@@ -809,10 +809,8 @@ class MarketDataProvider(DataProvider):
                 "marketdata.exDate",
                 "confirmed",
             )
-            try:
-                return event, float(next_amount)
-            except (TypeError, ValueError):
-                return event, np.nan
+            amount = finite_float_or_none(next_amount)
+            return event, np.nan if amount is None else amount
         except (ProviderAuthenticationError, ProviderQuotaError):
             raise
         except Exception:  # pylint: disable=broad-exception-caught

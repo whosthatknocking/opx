@@ -106,6 +106,23 @@ def test_validate_option_rows_flags_non_finite_numeric_fields():
     assert invalid_fields.count("implied_volatility") == 2
 
 
+def test_validate_option_rows_flags_boolean_numeric_fields():
+    """Booleans in numeric fields should not pass as finite one/zero values."""
+    rows = [
+        make_valid_row(contract_symbol=f"BOOL_{field}", **{field: True})
+        for field in NUMERIC_FIELDS
+    ]
+
+    findings = validate_option_rows(pd.DataFrame(rows))
+    invalid_fields = {
+        finding.field
+        for finding in findings
+        if finding.code == "invalid_numeric_field"
+    }
+
+    assert invalid_fields == set(NUMERIC_FIELDS)
+
+
 def test_exported_boolean_fields_are_validated():
     """Every exported boolean-like field should be covered by row validation."""
     assert DERIVED_BOOLEAN_FIELDS.issubset(BOOLEAN_FIELDS)
