@@ -627,7 +627,9 @@ def test_check_positions_uses_storage_when_enabled(tmp_path: Path):
     from opx_chain import check_positions as cp  # pylint: disable=import-outside-toplevel
     from opx_chain.storage.models import DatasetRecord  # pylint: disable=import-outside-toplevel
 
-    artifact = tmp_path / "ds.csv"
+    runs_dir = tmp_path / "runs"
+    artifact = runs_dir / "run-1" / "output" / "ds.csv"
+    artifact.parent.mkdir(parents=True)
     artifact.write_text(
         "underlying_symbol,strike,expiration_date,passes_primary_screen\n"
         "TSLA,100.0,2026-06-20,True\n",
@@ -640,6 +642,7 @@ def test_check_positions_uses_storage_when_enabled(tmp_path: Path):
         format="csv", location=str(artifact), content_hash="a" * 64,
     )
     mock_backend = MagicMock()
+    setattr(mock_backend, "_runs_dir", runs_dir)
     mock_backend.list_datasets.return_value = [record]
 
     positions_file = tmp_path / "positions.csv"
@@ -673,6 +676,9 @@ def test_check_positions_prefers_csv_over_parquet_dataset(tmp_path: Path):
         location="/fake/output/parquet-id.parquet",
         content_hash="a" * 64,
     )
+    runs_dir = tmp_path / "runs"
+    csv_path = runs_dir / "run-1" / "output" / "csv-id.csv"
+    csv_path.parent.mkdir(parents=True)
     csv_record = DatasetRecord(
         dataset_id="csv-id",
         run_id="run-1",
@@ -681,16 +687,17 @@ def test_check_positions_prefers_csv_over_parquet_dataset(tmp_path: Path):
         schema_version=1,
         row_count=2,
         format="csv",
-        location=str(tmp_path / "csv-id.csv"),
+        location=str(csv_path),
         content_hash="b" * 64,
     )
-    (tmp_path / "csv-id.csv").write_text(
+    csv_path.write_text(
         "underlying_symbol,strike,expiration_date,passes_primary_screen\n"
         "TSLA,100.0,2026-06-20,True\n",
         encoding="utf-8",
     )
 
     mock_backend = MagicMock()
+    setattr(mock_backend, "_runs_dir", runs_dir)
     mock_backend.list_datasets.return_value = [parquet_record, csv_record]
 
     positions_file = tmp_path / "positions.csv"
@@ -723,6 +730,9 @@ def test_check_positions_skips_records_with_missing_artifact(tmp_path: Path):
         location="/old/workspace/output/stale-id.csv",
         content_hash="a" * 64,
     )
+    runs_dir = tmp_path / "runs"
+    current_path = runs_dir / "run-2" / "output" / "current-id.csv"
+    current_path.parent.mkdir(parents=True)
     current_record = DatasetRecord(
         dataset_id="current-id",
         run_id="run-2",
@@ -731,16 +741,17 @@ def test_check_positions_skips_records_with_missing_artifact(tmp_path: Path):
         schema_version=1,
         row_count=2,
         format="csv",
-        location=str(tmp_path / "current-id.csv"),
+        location=str(current_path),
         content_hash="b" * 64,
     )
-    (tmp_path / "current-id.csv").write_text(
+    current_path.write_text(
         "underlying_symbol,strike,expiration_date,passes_primary_screen\n"
         "TSLA,100.0,2026-06-20,True\n",
         encoding="utf-8",
     )
 
     mock_backend = MagicMock()
+    setattr(mock_backend, "_runs_dir", runs_dir)
     mock_backend.list_datasets.return_value = [stale_record, current_record]
 
     positions_file = tmp_path / "positions.csv"

@@ -37,6 +37,7 @@ from opx_chain.positions import (
     positions_fingerprint,
 )
 from opx_chain.storage.factory import get_data_dir, get_storage_backend
+from opx_chain.storage._disk import retained_path_under_roots
 from opx_chain.timestamps import format_utc_z_seconds
 from opx_chain.utils import read_dataset_file
 
@@ -184,7 +185,12 @@ def discover_dataset_paths() -> list[Path]:
         storage = get_storage_backend()
         if storage is not None:
             records = storage.list_datasets(limit=VIEWER_DATASET_DISCOVERY_LIMIT)
-            paths = [Path(r.location) for r in records if Path(r.location).exists()]
+            roots = (getattr(storage, "_runs_dir", None) or _runtime_runs_dir(),)
+            paths = []
+            for record in records:
+                path = retained_path_under_roots(record.location, roots)
+                if path is not None and path.exists():
+                    paths.append(path)
             if paths:
                 return paths
 
@@ -281,7 +287,8 @@ def normalize_row_value(column: str, value: Any) -> Any:
     """Normalize row values, preserving integer semantics for whole-day fields."""
     normalized = normalize_value(value)
     if column in INTEGER_VIEWER_COLUMNS and normalized is not None:
-        return int(normalized)
+        number = coerce_scalar_number(normalized)
+        return int(number) if number is not None else None
     return normalized
 
 
@@ -292,9 +299,13 @@ def is_truthy(value: Any) -> bool:
 
 def coerce_number(series: Any) -> pd.Series:
     """Coerce an arbitrary series-like input into numeric pandas values."""
+    if isinstance(series, pd.Series) and is_bool_dtype(series):
+        return pd.Series(float("nan"), index=series.index)
     numbers = pd.to_numeric(series, errors="coerce")
     if not isinstance(numbers, pd.Series):
         numbers = pd.Series(numbers)
+    if is_bool_dtype(numbers):
+        return pd.Series(float("nan"), index=numbers.index)
     finite_mask = numbers.map(
         lambda value: pd.notna(value) and math.isfinite(float(value))
     )
@@ -303,6 +314,8 @@ def coerce_number(series: Any) -> pd.Series:
 
 def coerce_scalar_number(value: Any) -> float | None:
     """Coerce a single scalar into a float while preserving missing values."""
+    if isinstance(value, bool):
+        return None
     number = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
     if pd.isna(number):
         return None
@@ -752,6 +765,20 @@ def extract_ticker_event_fields(
     return next_earnings_date_value, event_risk_value, next_earnings_date_is_estimated
 
 
+def _count_matching_values(frame: pd.DataFrame, column: str, expected: str) -> int:
+    """Return a safe equality count for optional string columns."""
+    if column not in frame.columns:
+        return 0
+    return int(frame[column].eq(expected).sum())
+
+
+def _nunique_column(frame: pd.DataFrame, column: str) -> int:
+    """Return the number of unique non-null values for an optional column."""
+    if column not in frame.columns:
+        return 0
+    return int(frame[column].nunique())
+
+
 def build_ticker_summary(  # pylint: disable=too-many-locals
     ticker: str, frame: pd.DataFrame,
 ) -> TickerSummary:
@@ -778,9 +805,9 @@ def build_ticker_summary(  # pylint: disable=too-many-locals
     return {
         "ticker": ticker,
         "row_count": int(len(frame.index)),
-        "call_count": int((frame.get("option_type") == OPTION_TYPE_CALL).sum()),
-        "put_count": int((frame.get("option_type") == OPTION_TYPE_PUT).sum()),
-        "expiration_count": int(frame.get("expiration_date").nunique()),
+        "call_count": _count_matching_values(frame, "option_type", OPTION_TYPE_CALL),
+        "put_count": _count_matching_values(frame, "option_type", OPTION_TYPE_PUT),
+        "expiration_count": _nunique_column(frame, "expiration_date"),
         "underlying_price": underlying_price_value,
         "underlying_day_change_pct": format_percent(day_change_value),
         "median_implied_volatility_pct": median_iv_value,

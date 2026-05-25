@@ -16,6 +16,7 @@ from opx_chain.positions import (
     load_positions,
     resolve_positions_path,
 )
+from opx_chain.storage._disk import retained_path_under_roots
 from opx_chain.storage.factory import get_data_dir, get_storage_backend
 from opx_chain.storage.models import DatasetRecord
 from opx_chain.timestamps import format_utc_z_seconds, utc_now_timestamp
@@ -75,6 +76,10 @@ def check_positions(positions_path: Path | None = None, output_path: Path | None
         return [], list(position_set.option_keys)
 
     df = read_dataset_file(resolved_output)
+    required_columns = {"underlying_symbol", "expiration_date", "option_type", "strike"}
+    if not required_columns.issubset(df.columns):
+        return [], list(position_set.option_keys)
+    strike_values = pd.to_numeric(df["strike"], errors="coerce")
 
     found, missing = [], []
     for key in sorted(
@@ -82,10 +87,10 @@ def check_positions(positions_path: Path | None = None, output_path: Path | None
         key=lambda k: (k.ticker, k.expiration_date, k.option_type),
     ):
         mask = (
-            (df["underlying_symbol"] == key.ticker)
-            & (df["expiration_date"] == key.expiration_date)
-            & (df["option_type"] == key.option_type)
-            & ((df["strike"] - key.strike).abs() < STRIKE_MATCH_TOLERANCE)
+            (df["underlying_symbol"].astype(str) == key.ticker)
+            & (df["expiration_date"].astype(str) == key.expiration_date)
+            & (df["option_type"].astype(str) == key.option_type)
+            & ((strike_values - key.strike).abs() < STRIKE_MATCH_TOLERANCE)
         )
         if df[mask].empty:
             missing.append(key)
@@ -375,8 +380,8 @@ def _format_found_position_lines(key, row: pd.Series) -> list[str]:
     )
     lines = [(
         f"  FOUND    {key.ticker:<6} {key.expiration_date}  {key.option_type:<4}  "
-        f"strike={key.strike:>7.1f}  bid={_format_quote_value(row['bid']):>6}  "
-        f"ask={_format_quote_value(row['ask']):>6}  {screen_status}"
+        f"strike={key.strike:>7.1f}  bid={_format_quote_value(row.get('bid')):>6}  "
+        f"ask={_format_quote_value(row.get('ask')):>6}  {screen_status}"
     )]
     if failed_filters:
         lines.append("           failed_filters:")
@@ -387,11 +392,14 @@ def _format_found_position_lines(key, row: pd.Series) -> list[str]:
     return lines
 
 
-def _pick_csv_record(records: list[DatasetRecord]) -> Path | None:
+def _pick_csv_record(records: list[DatasetRecord], *, runs_dir: Path | None = None) -> Path | None:
     """Return the newest existing CSV artifact; fall back to the newest existing of any format."""
+    roots = (runs_dir or _runtime_runs_dir(),)
     fallback: Path | None = None
     for record in records:
-        path = Path(record.location)
+        path = retained_path_under_roots(record.location, roots)
+        if path is None:
+            continue
         if not path.exists():
             continue
         if record.format == "csv":
@@ -399,6 +407,13 @@ def _pick_csv_record(records: list[DatasetRecord]) -> Path | None:
         if fallback is None:
             fallback = path
     return fallback
+
+
+def _pick_storage_record(storage) -> Path | None:
+    """Return the newest retained dataset path from a storage backend."""
+    records = storage.list_datasets(limit=100)
+    runs_dir = getattr(storage, "_runs_dir", None) or _runtime_runs_dir()
+    return _pick_csv_record(records, runs_dir=runs_dir)
 
 
 def main(argv=None):
@@ -442,8 +457,7 @@ def main(argv=None):
     else:
         storage = get_storage_backend()
         if storage is not None:
-            records = storage.list_datasets(limit=100)
-            resolved_output = _pick_csv_record(records) or find_latest_output()
+            resolved_output = _pick_storage_record(storage) or find_latest_output()
         else:
             resolved_output = find_latest_output()
     if resolved_output is None:

@@ -1,4 +1,5 @@
 """Viewer helper tests for field descriptions, cards, and freshness metadata."""
+# pylint: disable=too-many-lines
 from datetime import datetime, timezone
 import io
 from http import HTTPStatus
@@ -46,6 +47,14 @@ def test_viewer_is_truthy_uses_canonical_boolean_coercion():
     assert viewer.is_truthy("on") is True
     assert viewer.is_truthy(1.0) is True
     assert viewer.is_truthy("off") is False
+
+
+def test_viewer_numeric_coercion_treats_booleans_as_missing():
+    """Boolean cells should not be accepted as numeric market-data values."""
+    series = viewer.coerce_number(pd.Series([True, False]))
+
+    assert series.dropna().empty
+    assert viewer.coerce_scalar_number(True) is None
 
 
 def test_viewer_packaged_docs_match_canonical_docs():
@@ -342,6 +351,27 @@ def test_load_csv_payload_includes_run_positions_summary_cards(
     assert {"Positions", "Position Fingerprint", "Position Coverage"} <= card_names
 
 
+def test_load_csv_payload_treats_malformed_integer_fields_as_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Malformed integer-like viewer fields should not crash JSON serialization."""
+    dataset_path = tmp_path / "options_engine_output_20260422_120000.csv"
+    dataset_path.write_text(
+        "underlying_symbol,days_to_earnings,days_to_ex_div,event_risk_score\n"
+        "NVDA,soon,later,bad\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(viewer, "discover_dataset_paths", lambda: [dataset_path])
+
+    payload = viewer.load_csv_payload(dataset_path.name)
+
+    assert payload["rows"][0]["days_to_earnings"] is None
+    assert payload["rows"][0]["days_to_ex_div"] is None
+    assert payload["rows"][0]["event_risk_score"] is None
+
+
 def test_resolve_csv_path_rejects_undiscovered_dataset_names(tmp_path: Path, monkeypatch):
     """Viewer dataset selection should only accept discovered dataset basenames."""
     output_dir = tmp_path / "output"
@@ -396,6 +426,7 @@ def test_discover_dataset_paths_requests_uncapped_storage_listing(tmp_path: Path
         def __init__(self, records: list[DatasetRecord]) -> None:
             self.records = records
             self.requested_limit = None
+            self._runs_dir = tmp_path
 
         def list_datasets(self, limit=50, **_kwargs):
             """Return records up to the supplied limit."""
@@ -429,6 +460,62 @@ def test_discover_dataset_paths_requests_uncapped_storage_listing(tmp_path: Path
 
     assert storage.requested_limit == viewer.VIEWER_DATASET_DISCOVERY_LIMIT
     assert len(discovered) == len(records)
+
+
+def test_discover_dataset_paths_skips_storage_records_outside_runs_root(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """Storage-backed discovery should not trust retained locations outside runs."""
+
+    class FakeStorage:  # pylint: disable=too-few-public-methods
+        """Storage stub with an explicit runs root."""
+
+        def __init__(self, records: list[DatasetRecord], runs_dir: Path) -> None:
+            self.records = records
+            self._runs_dir = runs_dir
+
+        def list_datasets(self, limit=50, **_kwargs):
+            """Return all records without applying extra filtering."""
+            return self.records[:limit]
+
+    runs_dir = tmp_path / "runs"
+    inside = runs_dir / "run-1" / "output" / "options_engine_output_inside.csv"
+    inside.parent.mkdir(parents=True)
+    inside.write_text("underlying_symbol\nAAPL\n", encoding="utf-8")
+    outside = tmp_path / "outside.csv"
+    outside.write_text("underlying_symbol\nMSFT\n", encoding="utf-8")
+    records = [
+        DatasetRecord(
+            dataset_id="outside",
+            run_id="run-outside",
+            created_at=datetime(2026, 1, 2, 12, 1, tzinfo=timezone.utc),
+            provider="yfinance",
+            schema_version=1,
+            row_count=1,
+            format="csv",
+            location=str(outside),
+            content_hash="outside-hash",
+        ),
+        DatasetRecord(
+            dataset_id="inside",
+            run_id="run-inside",
+            created_at=datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc),
+            provider="yfinance",
+            schema_version=1,
+            row_count=1,
+            format="csv",
+            location=str(inside),
+            content_hash="inside-hash",
+        ),
+    ]
+    storage = FakeStorage(records, runs_dir)
+
+    monkeypatch.setattr(viewer, "_DATA_DIR_OVERRIDE", None)
+    monkeypatch.setattr(viewer, "_CSV_MODE", False)
+    monkeypatch.setattr(viewer, "get_storage_backend", lambda: storage)
+
+    assert viewer.discover_dataset_paths() == [inside]
 
 
 def test_make_file_listing_stats_each_file_once(tmp_path: Path, monkeypatch):
@@ -480,6 +567,17 @@ def test_build_ticker_summary_marks_estimated_marketdata_earnings_dates():
     assert summary["next_earnings_date"] == "2026-04-30"
     assert summary["next_earnings_date_is_estimated"] is True
     assert summary["event_risk_score"] == 60.0
+
+
+def test_build_ticker_summary_handles_missing_identity_columns():
+    """Summary cards should not crash on partial or malformed retained datasets."""
+    frame = pd.DataFrame([{"underlying_price": 100.0}])
+
+    summary = viewer.build_ticker_summary("TSLA", frame)
+
+    assert summary["call_count"] == 0
+    assert summary["put_count"] == 0
+    assert summary["expiration_count"] == 0
 
 
 def test_pick_profitable_opportunity_prefers_higher_final_score_when_rom_matches():

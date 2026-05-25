@@ -2,12 +2,14 @@
 
 import ast
 import csv
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import time
 
 import pandas as pd
 
+from opx_chain.storage.models import DatasetRecord
 from opx_chain.check_positions import (
     _format_filter_value,  # pylint: disable=protected-access
     _format_iso_timestamp,  # pylint: disable=protected-access
@@ -101,6 +103,22 @@ def test_check_positions_missing(tmp_path):
          "passes_primary_screen": True},
     ])
     found, missing = check_positions(pos_path, out_path)
+    assert not found
+    assert len(missing) == 1
+    assert missing[0].ticker == "AAPL"
+
+
+def test_check_positions_missing_identity_columns_reports_missing(tmp_path):
+    """Malformed outputs without option identity columns should not crash coverage checks."""
+    pos_path = _write_positions(tmp_path, [
+        {"Symbol": " -AAPL260620C200", "Description": "AAPL JUN 20 2026 $200 CALL"},
+    ])
+    out_path = _write_output(tmp_path, "options_engine_output_test.csv", [
+        {"bid": 5.0, "ask": 5.5},
+    ])
+
+    found, missing = check_positions(pos_path, out_path)
+
     assert not found
     assert len(missing) == 1
     assert missing[0].ticker == "AAPL"
@@ -230,6 +248,95 @@ def test_main_ignores_pytest_argv_when_called_without_args(monkeypatch, tmp_path
     assert main() == 0
 
 
+def test_main_storage_default_skips_retained_dataset_outside_runs_root(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    """Storage-backed default output selection should ignore retained outside paths."""
+
+    class FakeStorage:  # pylint: disable=too-few-public-methods
+        """Storage stub exposing retained dataset records and a runs root."""
+
+        def __init__(self, records, runs_dir):
+            self.records = records
+            self._runs_dir = runs_dir
+
+        def list_datasets(self, limit=100):
+            """Return retained dataset records."""
+            return self.records[:limit]
+
+    pos_path = _write_positions(tmp_path, [
+        {"Symbol": " -AAPL260620C200"},
+    ])
+    runs_dir = tmp_path / "runs"
+    inside_dir = runs_dir / "run-1" / "output"
+    inside_dir.mkdir(parents=True)
+    inside = _write_output(inside_dir, "options_engine_output_test.csv", [
+        {
+            "underlying_symbol": "AAPL",
+            "expiration_date": "2026-06-20",
+            "option_type": "call",
+            "strike": 200.0,
+            "bid": 5.0,
+            "ask": 5.5,
+            "passes_primary_screen": True,
+        },
+    ])
+    outside = _write_output(tmp_path, "outside.csv", [
+        {
+            "underlying_symbol": "MSFT",
+            "expiration_date": "2026-06-20",
+            "option_type": "call",
+            "strike": 200.0,
+            "bid": 1.0,
+            "ask": 1.5,
+            "passes_primary_screen": True,
+        },
+    ])
+
+    def retained_record(dataset_id, run_id, created_at, path):
+        return DatasetRecord(
+            dataset_id=dataset_id,
+            run_id=run_id,
+            created_at=created_at,
+            provider="yfinance",
+            schema_version=1,
+            row_count=1,
+            format="csv",
+            location=str(path),
+            content_hash=f"{dataset_id}-hash",
+        )
+
+    records = [
+        retained_record(
+            "outside",
+            "run-outside",
+            datetime(2026, 1, 2, 12, 1, tzinfo=timezone.utc),
+            outside,
+        ),
+        retained_record(
+            "inside",
+            "run-inside",
+            datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc),
+            inside,
+        ),
+    ]
+
+    monkeypatch.setattr(
+        "opx_chain.check_positions.get_storage_backend",
+        lambda: FakeStorage(records, runs_dir),
+    )
+    monkeypatch.setattr("opx_chain.check_positions.find_latest_output", lambda: None)
+
+    result = main(["--positions", str(pos_path)])
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert f"Output:    {inside}" in captured.out
+    assert str(outside) not in captured.out
+
+
 def test_main_exits_1_some_missing(tmp_path):
     """main() returns 1 when any position is missing from the output."""
     pos_path = _write_positions(tmp_path, [
@@ -338,6 +445,28 @@ def test_main_formats_quotes_to_two_decimals_and_wraps_failed_filters(tmp_path, 
     assert "\n             - filters_max_spread_pct_of_mid(0.3000>0.2500)" in captured.out
     assert "\n             - filters_min_open_interest(40.0000<100.0000)" in captured.out
     assert "\n             - filters_min_volume(5.0000<10.0000)" in captured.out
+
+
+def test_main_found_position_missing_bid_ask_renders_missing_quotes(tmp_path, capsys):
+    """Found rows without bid/ask columns should render missing quotes instead of crashing."""
+    pos_path = _write_positions(tmp_path, [
+        {"Symbol": " -AAPL260620C200"},
+    ])
+    out_path = _write_output(tmp_path, "options_engine_output_test.csv", [
+        {
+            "underlying_symbol": "AAPL",
+            "expiration_date": "2026-06-20",
+            "option_type": "call",
+            "strike": 200.0,
+            "passes_primary_screen": True,
+        },
+    ])
+
+    result = main(["--positions", str(pos_path), "--output", str(out_path)])
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert "bid=     —  ask=     —" in captured.out
 
 
 def test_format_freshness_summary_lines_recomputes_current_age_from_saved_timestamps(tmp_path):
