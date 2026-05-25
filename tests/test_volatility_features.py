@@ -280,6 +280,34 @@ def test_volatility_features_validate_ticker_identity(bad_ticker) -> None:
         build_ticker_volatility_features(ticker=bad_ticker, chain=_chain())
 
 
+@pytest.mark.parametrize("bad_ticker", ["BAD/TICKER", "...", "TSLA1", "ABCDEFGHIJK"])
+def test_volatility_features_validate_ticker_syntax(bad_ticker) -> None:
+    with pytest.raises(ValueError, match="valid stock ticker"):
+        build_price_volatility_features(_history(), ticker=bad_ticker)
+    with pytest.raises(ValueError, match="valid stock ticker"):
+        build_iv_features(_chain(), ticker=bad_ticker)
+    with pytest.raises(ValueError, match="valid stock ticker"):
+        build_ticker_volatility_features(ticker=bad_ticker, chain=_chain())
+
+
+def test_volatility_features_allow_lowercase_and_dotted_tickers() -> None:
+    chain = _chain().assign(underlying_symbol="BRK.B")
+    history = _history().assign(ticker="BRK.B", provider="marketdata")
+
+    price_features = build_price_volatility_features(
+        history,
+        ticker="brk.b",
+        provider="marketdata",
+        as_of=date(2026, 5, 22),
+    )
+    iv_features = build_iv_features(chain, ticker="brk.b", as_of=date(2026, 5, 22))
+
+    assert price_features["ticker"] == "BRK.B"
+    assert price_features["source_status"] == SOURCE_READY
+    assert iv_features["ticker"] == "BRK.B"
+    assert iv_features["source_status"] == SOURCE_PARTIAL
+
+
 @pytest.mark.parametrize("bad_provider", [None, False, 123, "", "   "])
 def test_store_backed_volatility_features_validate_provider_identity(
     tmp_path,
@@ -347,6 +375,46 @@ def test_build_iv_features_uses_optional_history_percentiles() -> None:
     assert features["iv_percentile_1y"] is not None
     assert features["dte_buckets"]["8_14"]["history_observation_count"] == 24
     assert features["dte_buckets"]["8_14"]["iv_percentile"] is not None
+
+
+def test_build_iv_features_counts_distinct_history_dates_for_readiness() -> None:
+    duplicate_date_history = pd.DataFrame(
+        {
+            "ticker": ["TSLA"] * 25,
+            "representative_iv": [0.20 + index * 0.002 for index in range(25)],
+            "dte_bucket": ["8_14"] * 25,
+            "observation_date": ["2026-05-20"] * 25,
+        }
+    )
+
+    duplicate_features = build_iv_features(
+        _chain(),
+        ticker="TSLA",
+        as_of=date(2026, 5, 22),
+        iv_history=duplicate_date_history,
+    )
+
+    assert duplicate_features["source_status"] == SOURCE_PARTIAL
+    assert duplicate_features["unknown_reason"] == "insufficient_iv_history"
+    assert duplicate_features["iv_history_observation_count"] == 1
+    assert duplicate_features["dte_buckets"]["8_14"]["history_observation_count"] == 1
+    assert duplicate_features["dte_buckets"]["8_14"]["iv_percentile"] is None
+
+    distinct_date_history = duplicate_date_history.assign(
+        observation_date=[f"2026-04-{index:02d}" for index in range(1, 26)]
+    )
+    distinct_features = build_iv_features(
+        _chain(),
+        ticker="TSLA",
+        as_of=date(2026, 5, 22),
+        iv_history=distinct_date_history,
+    )
+
+    assert distinct_features["source_status"] == SOURCE_READY
+    assert distinct_features["unknown_reason"] is None
+    assert distinct_features["iv_history_observation_count"] == 25
+    assert distinct_features["dte_buckets"]["8_14"]["history_observation_count"] == 25
+    assert distinct_features["dte_buckets"]["8_14"]["iv_percentile"] is not None
 
 
 def test_build_iv_features_ignores_unscoped_iv_history() -> None:

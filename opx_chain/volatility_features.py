@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from math import sqrt
+import re
 from typing import Any
 
 import numpy as np
@@ -20,6 +21,7 @@ VOLATILITY_FEATURE_METHOD = "vrp_lite_features_v1"
 PRICE_VOL_METHOD = "close_to_close_rv_v1"
 IV_FEATURE_METHOD = "current_chain_with_optional_history_v1"
 MIN_IV_HISTORY_OBSERVATIONS = 20
+_VALID_TICKER_RE = re.compile(r"^[A-Z](?:[A-Z.]{0,9})$")
 
 SOURCE_READY = "READY"
 SOURCE_PARTIAL = "PARTIAL"
@@ -77,6 +79,8 @@ def _normalize_ticker_arg(value: Any, *, name: str = "ticker") -> str:
     text = value.strip().upper()
     if not text:
         raise ValueError(f"{name} must be a non-empty string")
+    if not _VALID_TICKER_RE.fullmatch(text):
+        raise ValueError(f"{name} must be a valid stock ticker symbol")
     return text
 
 
@@ -266,6 +270,40 @@ def _ticker_wide_iv_history(history: pd.DataFrame) -> pd.DataFrame:
     return wide_rows if not wide_rows.empty else history
 
 
+def _iv_history_series_and_depth(history: pd.DataFrame) -> tuple[pd.Series, int]:
+    """Return IV values and readiness depth for optional history rows."""
+    if not isinstance(history, pd.DataFrame) or history.empty:
+        return pd.Series(dtype=float), 0
+    values = pd.to_numeric(
+        history.get("representative_iv", pd.Series(dtype=float)),
+        errors="coerce",
+    ).replace([np.inf, -np.inf], np.nan)
+    frame = history.loc[values.dropna().index].copy()
+    if frame.empty:
+        return pd.Series(dtype=float), 0
+    frame["representative_iv"] = values.loc[frame.index]
+    date_column = next(
+        (column for column in ("observation_date", "date") if column in frame.columns),
+        None,
+    )
+    if date_column is None:
+        clean = frame["representative_iv"].dropna()
+        return clean, int(len(clean))
+
+    observation_dates = pd.to_datetime(
+        frame[date_column],
+        utc=True,
+        errors="coerce",
+    ).dt.date
+    valid_dates = pd.notna(observation_dates)
+    frame = frame.loc[valid_dates].copy()
+    if frame.empty:
+        return pd.Series(dtype=float), 0
+    frame["_observation_date"] = observation_dates.loc[frame.index]
+    daily_values = frame.groupby("_observation_date", sort=True)["representative_iv"].median()
+    return daily_values, int(len(daily_values))
+
+
 def build_iv_features(  # pylint: disable=too-many-arguments,too-many-locals
     chain: pd.DataFrame,
     *,
@@ -359,8 +397,7 @@ def build_iv_features(  # pylint: disable=too-many-arguments,too-many-locals
         else pd.DataFrame()
     )
     wide_history = _ticker_wide_iv_history(history)
-    history_iv = wide_history.get("representative_iv", pd.Series(dtype=float))
-    history_observation_count = int(len(history_iv.dropna()))
+    history_iv, history_observation_count = _iv_history_series_and_depth(wide_history)
     iv_percentile = _percentile_rank(history_iv, representative_iv)
 
     if "days_to_expiration" in ticker_frame.columns:
@@ -382,8 +419,7 @@ def build_iv_features(  # pylint: disable=too-many-arguments,too-many-locals
             if "dte_bucket" in history.columns
             else pd.DataFrame()
         )
-        history_values = history_rows.get("representative_iv", pd.Series(dtype=float))
-        history_observations = int(len(history_values.dropna()))
+        history_values, history_observations = _iv_history_series_and_depth(history_rows)
         dte_buckets[bucket] = {
             "current_observation_count": int(len(current_iv)),
             "history_observation_count": history_observations,
