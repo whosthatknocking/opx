@@ -821,7 +821,7 @@ wheels = [
 
 [[package]]
 name = "opx-chain"
-version = "0.3.2"
+version = "0.3.12"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -841,6 +841,7 @@ dependencies = [
 dev = [
     { name = "coverage", extra = ["toml"] },
     { name = "playwright" },
+    { name = "pyarrow" },
     { name = "pylint" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -858,6 +859,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.24" },
     { name = "pandas", specifier = ">=2.0" },
     { name = "playwright", marker = "extra == 'dev'", specifier = ">=1.53" },
+    { name = "pyarrow", marker = "extra == 'dev'", specifier = ">=14.0" },
     { name = "pyarrow", marker = "extra == 'parquet'", specifier = ">=14.0" },
     { name = "pylint", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },

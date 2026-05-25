@@ -141,8 +141,8 @@ subdirectory under `runs/`:
 
 ```text
 ~/.local/share/opx-chain/runs/<run-id>/run.json           # run metadata
-~/.local/share/opx-chain/runs/<run-id>/output/<uuid>.parquet   # dataset_format = "parquet" (default)
-~/.local/share/opx-chain/runs/<run-id>/output/<uuid>.csv       # dataset_format = "csv"
+~/.local/share/opx-chain/runs/<run-id>/output/<uuid>.csv       # dataset_format = "csv" (default)
+~/.local/share/opx-chain/runs/<run-id>/output/<uuid>.parquet   # dataset_format = "parquet"
 ```
 
 When `also_write_csv = true` (the default), a timestamped CSV is also written

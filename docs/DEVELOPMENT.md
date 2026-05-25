@@ -36,6 +36,9 @@ Load-bearing runtime modules:
 - `opx_chain/fetch.py`: provider fetch/normalization flow
 - `opx_chain/positions.py`: Fidelity positions parsing and fingerprinting
 - `opx_chain/price_context.py`: daily-OHLCV price-context artifact
+- `opx_chain/price_history.py`: durable daily-OHLCV history store
+- `opx_chain/iv_history.py`: durable aggregate implied-volatility history store
+- `opx_chain/volatility_features.py`: downstream volatility feature builders
 - `opx_chain/storage/`: storage backends, atomic writes, and artifact models
 - `opx_chain/viewer.py`: local browser UI and HTTP API
 

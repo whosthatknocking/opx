@@ -11,6 +11,8 @@ This file gives project-specific guidance to AI agents working in this repositor
   - `opx-fetch` for data collection and CSV export
   - `opx-view` for the local HTTP viewer
   - `opx-check` for validating positions against the latest exported dataset
+  - `opx-price-history-backfill` for refreshing provider-scoped daily OHLCV history
+  - `opx-iv-history-backfill` for replaying or seeding durable IV history
 - Packaging:
   - install with `python -m pip install -e .`
   - dev install with `python -m pip install -e ".[dev]"`
@@ -61,6 +63,12 @@ Keep those files aligned with the implementation. If you change canonical fields
   - enrichment handoff into pricing and freshness metrics
 - `opx_chain/metrics.py` and `opx_chain/greeks.py`
   - derived analytics, scoring, and options math
+- `opx_chain/price_history.py` and `opx_chain/price_history_backfill.py`
+  - durable daily OHLCV history storage and provider-scoped backfill CLI
+- `opx_chain/iv_history.py` and `opx_chain/iv_history_backfill.py`
+  - durable aggregate implied-volatility history and retained/historical backfill CLI
+- `opx_chain/volatility_features.py`
+  - public volatility feature builders for downstream advisory consumers
 - `opx_chain/export.py`
   - canonical export column handling and CSV writing
 - `opx_chain/validate.py`

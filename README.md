@@ -33,6 +33,10 @@ an option-chain run with `[price_context].enable = true` or
 `opx-fetch --enable-price-context`, or reconcile only that slower-moving signal
 with `opx-fetch --price-context-only`.
 
+Use `opx-price-history-backfill` to refresh the durable daily-OHLCV history
+store without writing option-chain output, and `opx-iv-history-backfill` to
+replay retained datasets or explicitly seed MarketData historical IV aggregates.
+
 After a fetch run, `opx-check` verifies that every option contract in the default positions file appears in the latest output CSV and reports coverage gaps:
 
 ```
@@ -66,6 +70,7 @@ The local viewer is organized around four primary tabs: `Dataset`, `Overview`, `
 - Limits strikes to a configurable band around spot
 - Computes Greeks, delta-safety, expected move, ROM-style metrics, configurable option scoring, and volatility context
 - Optionally writes a standalone daily-OHLCV price-context artifact with support/resistance context, moving averages, VWAP, a volume-node proxy, and gap-fill levels
+- Maintains provider-scoped daily price history and aggregate IV history for downstream volatility features
 - Writes a timestamped CSV plus an append-only run log
 - Includes a local browser for exploring the output interactively, including dataset inspection, lightweight positions counts/fingerprint/coverage metadata for the selected run snapshot, per-ticker overview cards, `Most Profitable`, `Moderate Risk`, `High Conviction Call`, and `High Conviction Put` highlights, plus chain visualizations with chart tooltips and click-through row details
 - Produces normalized option-chain output for inspection, comparison, and archival
@@ -76,6 +81,7 @@ Generated datasets and data artifacts are written under `$XDG_DATA_HOME/opx-chai
 - `$XDG_DATA_HOME/opx-chain/debug/` for default raw provider payload dumps
 - `$XDG_DATA_HOME/opx-chain/positions.csv` for the default positions import file
 - `$XDG_DATA_HOME/opx-chain/price-history.db` for the incremental daily-OHLCV history store
+- `$XDG_DATA_HOME/opx-chain/iv-history.db` for aggregate implied-volatility history
 
 Run logs are written under `$XDG_STATE_HOME/opx-chain/logs/` (default `~/.local/state/opx-chain/logs/`).
 

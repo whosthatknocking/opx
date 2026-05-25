@@ -55,9 +55,14 @@ enable = false
 # Optional base data directory override. Relative values resolve under $XDG_DATA_HOME/opx-chain/.
 # dir = "data"
 backend = "filesystem"   # "filesystem" | "sqlite" (when enable = true)
+dataset_format = "csv"   # "csv" (default) | "parquet"
+also_write_csv = true    # also write timestamped CSV side outputs when storage is enabled
 max_runs_retained = 0  # 0 = keep all datasets; positive integer = keep last N
 cache_backend = "none"  # "none" | "filesystem"
 cache_dir = "cache"     # resolved under $XDG_CACHE_HOME/opx-chain/
+snapshot_ttl = 300       # underlying snapshot cache TTL in seconds
+chain_ttl = 300          # option-chain cache TTL in seconds
+events_ttl = 86400       # ticker-events cache TTL in seconds
 # Daily OHLCV bars are stored durably; this TTL controls reconciliation retries.
 price_context_ttl = 86400
 

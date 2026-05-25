@@ -206,9 +206,16 @@ def test_agents_architecture_map_lists_load_bearing_modules():
     agents_doc = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     required_entries = (
         "`opx-check`",
+        "`opx-price-history-backfill`",
+        "`opx-iv-history-backfill`",
         "`opx_chain/check_positions.py`",
         "`opx_chain/paths.py`",
         "`opx_chain/positions.py`",
+        "`opx_chain/price_history.py`",
+        "`opx_chain/price_history_backfill.py`",
+        "`opx_chain/iv_history.py`",
+        "`opx_chain/iv_history_backfill.py`",
+        "`opx_chain/volatility_features.py`",
         "`opx_chain/runlog.py`",
         "`opx_chain/schema.py`",
         "`opx_chain/storage/`",
@@ -261,6 +268,9 @@ def test_development_structure_lists_load_bearing_docs_and_modules():
         "docs/METADATA_SPEC.md",
         "opx_chain/positions.py",
         "opx_chain/price_context.py",
+        "opx_chain/price_history.py",
+        "opx_chain/iv_history.py",
+        "opx_chain/volatility_features.py",
         "opx_chain/storage/",
         "scripts/run_local_quality_checks.sh",
     )
@@ -320,3 +330,17 @@ def test_user_guide_documents_valid_max_expiration_disable_value():
     assert "set it to `0` to disable the max-expiration cutoff entirely" in guide
     assert "set to `null`" not in guide
     assert "TOML has no null literal" in guide
+
+
+def test_storage_dataset_format_default_is_documented_consistently():
+    """User-facing docs and examples should agree that CSV is the default."""
+    docs = (
+        ROOT / "docs" / "USER_GUIDE.md",
+        ROOT / "opx_chain" / "docs" / "USER_GUIDE.md",
+        ROOT / "config" / "example.toml",
+    )
+
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        assert 'dataset_format = "csv"' in text, path.name
+        assert 'dataset_format = "parquet" (default)' not in text, path.name
