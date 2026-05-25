@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from opx_chain.config import get_runtime_config
+from opx_chain.error_summary import compact_exception_summary
 from opx_chain.json_utils import dumps_strict_json, loads_strict_json, to_python_scalar
 from opx_chain.metrics import (
     add_expected_move_by_expiration,
@@ -72,8 +73,7 @@ def _with_fetch_status(
 
 def _exception_summary(exc: Exception) -> str:
     """Return a compact exception summary for ticker-level storage metadata."""
-    message = f"{type(exc).__name__}: {exc}"
-    return message[:240]
+    return compact_exception_summary(exc, include_type=True)
 
 
 def _cache_get_json(cache, key: str) -> dict | None:

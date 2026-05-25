@@ -50,6 +50,23 @@ class EmptyHistoryProvider(HistoryProvider):  # pylint: disable=too-few-public-m
         return pd.DataFrame()
 
 
+class BlankProviderError(Exception):
+    """Provider error whose string representation is blank."""
+
+    def __str__(self) -> str:
+        """Return a deliberately blank message."""
+        return ""
+
+
+class BlankFailingHistoryProvider(HistoryProvider):  # pylint: disable=too-few-public-methods
+    """Provider stub that raises a blank-message exception."""
+
+    def load_price_history(self, ticker, *, lookback_days):  # pylint: disable=unused-argument
+        """Raise a blank-message provider error."""
+        self.lookback_calls.append(lookback_days)
+        raise BlankProviderError()
+
+
 class FailingConnection:
     """Connection stub that verifies failed write transactions roll back."""
 
@@ -405,6 +422,31 @@ def test_reconcile_price_history_empty_provider_response_records_retryable_error
     assert sync is not None
     assert sync.status == "error"
     assert provider.lookback_calls == [30]
+
+
+def test_reconcile_price_history_blank_provider_error_records_summary(tmp_path):
+    """Blank provider errors should become retryable error sync metadata."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+    provider = BlankFailingHistoryProvider()
+    config = make_runtime_config(
+        today=date(2026, 3, 20),
+        price_context_lookback_days=30,
+        provider_price_context_ttl=86400,
+    )
+
+    result = reconcile_price_history(
+        ticker="AAA",
+        provider=provider,
+        config=config,
+        store=store,
+    )
+    sync = store.get_sync(provider="stub", ticker="AAA", lookback_days=30)
+
+    assert result.fetched is False
+    assert result.error_summary == "BlankProviderError"
+    assert sync is not None
+    assert sync.status == "error"
+    assert sync.error_summary == "BlankProviderError"
 
 
 @pytest.mark.parametrize("bad_ttl", [None, "86400", True, 1.5, -1])

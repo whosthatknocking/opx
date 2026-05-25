@@ -98,6 +98,28 @@ class WrongHistoricalProvider(HistoricalProvider):
     name = "yfinance"
 
 
+class BlankHistoricalError(Exception):
+    """Historical provider error whose string representation is blank."""
+
+    def __str__(self) -> str:
+        """Return a deliberately blank message."""
+        return ""
+
+
+class BlankFailingHistoricalProvider(HistoricalProvider):
+    """Historical provider stub that raises a blank-message exception."""
+
+    def load_historical_option_chain_frame(
+        self,
+        ticker: str,
+        *,
+        observation_date: date,
+    ) -> pd.DataFrame:
+        """Raise a blank-message provider error after recording the request."""
+        self.calls.append((ticker, observation_date))
+        raise BlankHistoricalError()
+
+
 def _record(path, *, dataset_id: str = "dataset-1") -> DatasetRecord:
     return DatasetRecord(
         dataset_id=dataset_id,
@@ -636,6 +658,34 @@ def test_iv_history_historical_fetch_rejects_wrong_ticker_only_response(tmp_path
     assert "requested ticker TSLA" in (result.rows[0].error_summary or "")
     assert store.stats(provider="marketdata", ticker="TSLA").row_count == 0
     assert store.stats(provider="marketdata", ticker="NVDA").row_count == 0
+
+
+def test_iv_history_historical_fetch_blank_provider_error_records_summary(tmp_path):
+    """Blank historical provider errors should produce stable ERROR rows."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    provider = BlankFailingHistoricalProvider()
+    config = make_runtime_config(
+        data_provider="marketdata",
+        tickers=("TSLA",),
+        today=date(2026, 5, 22),
+    )
+
+    result = run_iv_history_backfill(
+        providers=("marketdata",),
+        tickers=("TSLA",),
+        fetch_historical=True,
+        sessions=1,
+        config=config,
+        store=store,
+        provider_factory=lambda _provider_name: provider,
+    )
+
+    assert result.rows[0].status == "ERROR"
+    assert result.rows[0].error_summary == "BlankHistoricalError"
+    sync = store.get_sync(dataset_id=result.rows[0].dataset_id)
+    assert sync is not None
+    assert sync.status == "ERROR"
+    assert sync.error_summary == "BlankHistoricalError"
 
 
 def test_iv_history_historical_fetch_skips_existing_date_without_refresh(tmp_path):

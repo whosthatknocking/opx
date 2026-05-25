@@ -271,6 +271,43 @@ def test_fetcher_keeps_run_complete_when_iv_history_ingest_fails(
     assert "iv store unavailable" in stdout
 
 
+def test_fetcher_iv_history_ingest_blank_error_has_summary(
+    tmp_path: Path,
+    capsys,
+):
+    """Blank advisory IV-ingest errors should not crash fetch completion."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    class BlankIngestError(Exception):
+        """Ingest error whose string representation is blank."""
+
+        def __str__(self) -> str:
+            """Return a deliberately blank message."""
+            return ""
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True)
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        for patcher in patches:
+            stack.enter_context(patcher)
+        stack.enter_context(
+            patch.object(
+                fetcher,
+                "run_iv_history_backfill",
+                side_effect=BlankIngestError(),
+            )
+        )
+        result = fetcher.main([])
+
+    stdout = capsys.readouterr().out
+    assert result == 0
+    assert backend.list_datasets()[0].run_id in backend._runs  # pylint: disable=protected-access
+    assert "IV history: skipped" in stdout
+    assert "BlankIngestError" in stdout
+
+
 def test_fetcher_snapshots_positions_only_after_success(tmp_path: Path):
     """Successful storage-backed runs must persist positions.csv as a sidecar."""
     from opx_chain import fetcher  # pylint: disable=import-outside-toplevel

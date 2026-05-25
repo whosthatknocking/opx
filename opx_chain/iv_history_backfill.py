@@ -20,6 +20,7 @@ from opx_chain.config import (
     get_runtime_config_override,
     set_runtime_config_override,
 )
+from opx_chain.error_summary import compact_exception_summary
 from opx_chain.iv_history import (
     IVHistoryStore,
     build_iv_observation_frame,
@@ -452,7 +453,7 @@ def _historical_fetch_rows(  # pylint: disable=too-many-arguments,too-many-local
                             )
                         )
                     except Exception as exc:  # pylint: disable=broad-exception-caught
-                        error_summary = str(exc).splitlines()[0]
+                        error_summary = compact_exception_summary(exc)
                         iv_store.record_sync(
                             dataset_id=dataset_id,
                             provider=provider_name,
@@ -656,7 +657,7 @@ def run_iv_history_backfill(
                     )
                 )
             except Exception as exc:  # pylint: disable=broad-exception-caught
-                error_summary = str(exc).splitlines()[0]
+                error_summary = compact_exception_summary(exc)
                 if not resolved_dry_run:
                     iv_store.record_sync(
                         dataset_id=record.dataset_id,

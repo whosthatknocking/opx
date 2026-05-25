@@ -16,6 +16,7 @@ import weakref
 
 import pandas as pd
 
+from opx_chain.error_summary import compact_exception_summary
 from opx_chain.paths import get_data_dir
 from opx_chain.price_context import normalize_price_history_frame
 from opx_chain.timestamps import parse_iso_datetime, utc_now
@@ -748,7 +749,7 @@ def reconcile_price_history(  # pylint: disable=too-many-locals
             stored_rows=stored_rows,
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        message = str(exc).splitlines()[0]
+        message = compact_exception_summary(exc)
         history = store.load_recent_bars(
             provider=provider_name,
             ticker=ticker,

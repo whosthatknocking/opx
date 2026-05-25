@@ -21,6 +21,7 @@ from opx_chain.config import (
     set_runtime_config_override,
 )
 from opx_chain.config_coercion import ConfigError
+from opx_chain.error_summary import compact_exception_summary
 from opx_chain.export import prepare_export_frame, write_options_csv
 from opx_chain.fetch import fetch_ticker_option_chain, fetch_ticker_price_context
 from opx_chain.iv_history_backfill import run_iv_history_backfill
@@ -483,7 +484,7 @@ def _ingest_iv_history_for_dataset(dataset_record, frame, config, storage, logge
             )
         return summary
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        error_summary = str(exc).splitlines()[0]
+        error_summary = compact_exception_summary(exc)
         if logger:
             logger.warning(
                 "iv_history_ingest_failed dataset_id=%s error=%s",
