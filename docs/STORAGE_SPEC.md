@@ -469,6 +469,13 @@ class ProviderCache(Protocol):
     def invalidate(self, key: str) -> None: ...
 ```
 
+Provider-cache implementations validate public method inputs consistently even
+when caching is disabled: keys must be nonblank strings, payloads must be
+`bytes`, and TTLs must be positive non-boolean integers. Direct
+`get_provider_cache(config=...)` callers receive the same config boundary as
+loaded config for `cache_backend` and `cache_dir`; relative cache directories
+resolve under `$XDG_CACHE_HOME/opx-chain/`.
+
 `FilesystemCache` deletes expired entries when they are read and prunes expired
 or unreadable metadata once per cache directory per process. This keeps TTL
 semantics from becoming append-only disk growth across normal fetch runs without
@@ -779,6 +786,11 @@ All seven steps are complete and shipped.
 - Market Data cache keys include the configured `[providers.marketdata].mode`
   (`live`, `cached`, `delayed`, or provider default) so changing mode does not
   reuse responses from a different recency mode
+- provider-cache methods validate keys, payload bytes, and positive integer
+  TTLs before disabled-cache or filesystem behavior; malformed direct cache
+  calls fail consistently instead of being ignored by `NullCache`
+- cached JSON payloads must restore to JSON objects; malformed reserved pandas
+  timestamp markers and malformed chain pickle bytes are invalidated on read
 - filesystem cache prunes expired/corrupt entries on startup and deletes an
   expired entry on read
 - config keys: `cache_backend`, `cache_dir`, `snapshot_ttl`, `chain_ttl`,

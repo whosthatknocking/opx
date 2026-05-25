@@ -82,8 +82,15 @@ def _cache_get_json(cache, key: str) -> dict | None:
     if data is None:
         return None
     try:
-        return _restore_cached_json_value(loads_strict_json(data.decode()))
-    except (UnicodeDecodeError, ValueError):
+        restored = _restore_cached_json_value(loads_strict_json(data.decode()))
+        if not isinstance(restored, dict):
+            raise ValueError("cached JSON payload must be an object")
+        return restored
+    except (TypeError, UnicodeDecodeError, ValueError):
+        try:
+            cache.invalidate(key)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
         return None
 
 
@@ -125,9 +132,17 @@ def _restore_cached_json_value(value):
     """Restore pandas scalar values from their JSON-safe cache representation."""
     if isinstance(value, dict):
         if set(value) == {_JSON_NAT_KEY}:
+            if value[_JSON_NAT_KEY] is not True:
+                raise ValueError("invalid cached pandas NaT marker")
             return pd.NaT
         if set(value) == {_JSON_TIMESTAMP_KEY}:
-            return pd.Timestamp(value[_JSON_TIMESTAMP_KEY])
+            timestamp_value = value[_JSON_TIMESTAMP_KEY]
+            if not isinstance(timestamp_value, str):
+                raise ValueError("invalid cached pandas timestamp marker")
+            timestamp = pd.Timestamp(timestamp_value)
+            if pd.isna(timestamp):
+                raise ValueError("invalid cached pandas timestamp marker")
+            return timestamp
         return {key: _restore_cached_json_value(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_restore_cached_json_value(item) for item in value]
@@ -142,6 +157,10 @@ def _cache_get_chain(cache, key: str) -> OptionChainFrames | None:
     try:
         value = pickle.loads(data)  # nosec pickle — local filesystem cache only
     except Exception:  # pylint: disable=broad-exception-caught
+        try:
+            cache.invalidate(key)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
         return None
     if not isinstance(value, OptionChainFrames):
         try:

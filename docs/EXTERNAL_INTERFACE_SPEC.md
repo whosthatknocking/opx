@@ -804,7 +804,22 @@ storage-managed artifact is written. Downstream orchestrators that read the
 timestamped filename pattern must either keep `also_write_csv = true` or switch to
 reading through `get_storage_backend().list_datasets()`.
 
-### 7.6 `opx-view --data-dir` and `--csv`
+### 7.6 Provider cache public boundary
+
+Implemented. `opx_chain.storage.cache.get_provider_cache()` returns `NullCache`
+for `cache_backend = "none"` and `FilesystemCache` for
+`cache_backend = "filesystem"`. Direct `config=` callers are validated against
+the same cache backend and cache directory contract as loaded runtime config.
+Relative cache directories resolve under `$XDG_CACHE_HOME/opx-chain/`.
+
+Provider-cache method calls also share a stable boundary across disabled and
+filesystem-backed cache implementations: keys must be nonblank strings, payloads
+must be `bytes`, and TTLs must be positive non-boolean integers. Fetch
+orchestration treats malformed cached JSON objects, malformed reserved pandas
+timestamp markers, wrong-typed chain pickle payloads, and unpicklable chain
+payloads as corrupt cache entries and invalidates them before refetching.
+
+### 7.7 `opx-view --data-dir` and `--csv`
 
 `opx-view` accepts a `--data-dir DIR` argument that overrides all dataset
 discovery — it scans `DIR` for `.csv` and `.parquet` files ordered by

@@ -2,11 +2,16 @@
 
 import hashlib
 import json
+import pickle
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from conftest import make_runtime_config
+from opx_chain import fetch
+from opx_chain.config_coercion import ConfigError
 from opx_chain.storage.cache import FilesystemCache, NullCache, get_provider_cache
 
 
@@ -29,6 +34,42 @@ def test_null_cache_get_always_returns_none():
 def test_null_cache_invalidate_is_no_op():
     """NullCache.invalidate must not raise."""
     NullCache().invalidate("k")
+
+
+def _cache_instances(tmp_path: Path):
+    """Return cache implementations with the same public input boundary."""
+    return (NullCache(), FilesystemCache(tmp_path / "cache"))
+
+
+@pytest.mark.parametrize("bad_key", ["", "   ", True, 7, [], {}])
+def test_provider_caches_reject_malformed_keys(tmp_path: Path, bad_key):
+    """Provider cache keys must have the same boundary when disabled or enabled."""
+    for cache in _cache_instances(tmp_path):
+        with pytest.raises(ValueError, match="cache key"):
+            cache.get(bad_key)
+        with pytest.raises(ValueError, match="cache key"):
+            cache.invalidate(bad_key)
+        with pytest.raises(ValueError, match="cache key"):
+            cache.put(bad_key, b"value", ttl_seconds=60)
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [bytearray(b"value"), memoryview(b"value"), "value", True, 1, [], {}],
+)
+def test_provider_caches_reject_malformed_payloads(tmp_path: Path, bad_value):
+    """Provider cache values must be bytes, not byte-like or arbitrary objects."""
+    for cache in _cache_instances(tmp_path):
+        with pytest.raises(ValueError, match="cache value"):
+            cache.put("key", bad_value, ttl_seconds=60)
+
+
+@pytest.mark.parametrize("bad_ttl", [0, -1, True, 1.5, "60", [], {}])
+def test_provider_caches_reject_malformed_ttl_seconds(tmp_path: Path, bad_ttl):
+    """Provider cache TTLs must be positive non-boolean integers."""
+    for cache in _cache_instances(tmp_path):
+        with pytest.raises(ValueError, match="ttl_seconds"):
+            cache.put("key", b"value", ttl_seconds=bad_ttl)
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +226,56 @@ def test_filesystem_cache_rejects_non_standard_json_metadata(tmp_path: Path):
     assert not meta_path.exists()
 
 
+@pytest.mark.parametrize("payload", [b"[]", b'"not-a-dict"', b"123"])
+def test_fetch_json_cache_rejects_non_object_payloads(tmp_path: Path, payload):
+    """Provider JSON cache reads should only restore dict-shaped payloads."""
+    cache = FilesystemCache(tmp_path)
+    cache.put("snapshot:stub:BAD", payload, ttl_seconds=300)
+
+    assert fetch._cache_get_json(cache, "snapshot:stub:BAD") is None  # pylint: disable=protected-access
+    assert cache.get("snapshot:stub:BAD") is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"ts":{"__opx_pd_timestamp__":true}}',
+        b'{"ts":{"__opx_pd_timestamp__":{}}}',
+        b'{"ts":{"__opx_pd_nat__":false}}',
+    ],
+)
+def test_fetch_json_cache_rejects_malformed_timestamp_markers(
+    tmp_path: Path,
+    payload,
+):
+    """Reserved pandas timestamp markers should be validated before restore."""
+    cache = FilesystemCache(tmp_path)
+    cache.put("snapshot:stub:BAD", payload, ttl_seconds=300)
+
+    assert fetch._cache_get_json(cache, "snapshot:stub:BAD") is None  # pylint: disable=protected-access
+    assert cache.get("snapshot:stub:BAD") is None
+
+
+def test_fetch_chain_cache_rejects_wrong_typed_pickle(tmp_path: Path):
+    """Wrong-typed pickle payloads are corrupt cache entries, not chains."""
+    cache = FilesystemCache(tmp_path)
+    key = "chain:stub:TSLA:2026-04-17"
+    cache.put(key, pickle.dumps({"calls": [], "puts": []}), ttl_seconds=300)
+
+    assert fetch._cache_get_chain(cache, key) is None  # pylint: disable=protected-access
+    assert cache.get(key) is None
+
+
+def test_fetch_chain_cache_invalidates_unpicklable_payload(tmp_path: Path):
+    """Unpicklable chain cache bytes should be removed after the first miss."""
+    cache = FilesystemCache(tmp_path)
+    key = "chain:stub:TSLA:2026-04-17"
+    cache.put(key, b"not a pickle", ttl_seconds=300)
+
+    assert fetch._cache_get_chain(cache, key) is None  # pylint: disable=protected-access
+    assert cache.get(key) is None
+
+
 def test_filesystem_cache_prunes_each_directory_once_per_process(tmp_path: Path, monkeypatch):
     """Repeated cache construction must not rescan the same directory per ticker."""
     prune_calls = []
@@ -257,3 +348,41 @@ def test_factory_returns_filesystem_cache_when_enabled(tmp_path: Path):
         provider_cache_dir=tmp_path / "cache",
     )
     assert isinstance(get_provider_cache(config), FilesystemCache)
+
+
+@pytest.mark.parametrize("backend", ["", "bad", "FILESYSTEM", False, 0, [], {}])
+def test_factory_rejects_malformed_provider_cache_backend(tmp_path: Path, backend):
+    """Direct cache backend selectors should not silently disable caching."""
+    config = make_runtime_config(
+        provider_cache_backend=backend,
+        provider_cache_dir=tmp_path / "cache",
+    )
+
+    with pytest.raises(ConfigError, match="storage.cache_backend"):
+        get_provider_cache(config)
+
+
+@pytest.mark.parametrize("cache_dir", ["", "   ", False, 0, [], {}])
+def test_factory_rejects_malformed_provider_cache_dir(cache_dir):
+    """Direct filesystem cache directories should share the config path boundary."""
+    config = make_runtime_config(
+        provider_cache_backend="filesystem",
+        provider_cache_dir=cache_dir,
+    )
+
+    with pytest.raises(ConfigError, match="storage.cache_dir"):
+        get_provider_cache(config)
+
+
+def test_factory_anchors_relative_provider_cache_dir(tmp_path: Path, monkeypatch):
+    """Direct relative cache directories should resolve under the XDG cache root."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
+    config = make_runtime_config(
+        provider_cache_backend="filesystem",
+        provider_cache_dir="provider-cache",
+    )
+
+    cache = get_provider_cache(config)
+
+    assert isinstance(cache, FilesystemCache)
+    assert cache._dir == tmp_path / "xdg-cache" / "opx-chain" / "provider-cache"  # pylint: disable=protected-access

@@ -1,7 +1,6 @@
 """Fetch-path tests covering raw provider row-count logging."""
 
 import logging
-import pickle
 from datetime import date
 
 import numpy as np
@@ -262,16 +261,6 @@ def test_chain_cache_logs_write_failures(caplog):
 
     assert "cache put skipped for key=chain:stub:TSLA:2026-04-17" in caplog.text
     assert "disk full" in caplog.text
-
-
-def test_chain_cache_rejects_wrong_typed_pickle(tmp_path):
-    """Wrong-typed pickle payloads are corrupt cache entries, not chains."""
-    cache = FilesystemCache(tmp_path)
-    key = "chain:stub:TSLA:2026-04-17"
-    cache.put(key, pickle.dumps({"calls": [], "puts": []}), ttl_seconds=300)
-
-    assert fetch._cache_get_chain(cache, key) is None  # pylint: disable=protected-access
-    assert cache.get(key) is None
 
 
 def test_fetch_ticker_option_chain_logs_raw_provider_row_counts(monkeypatch, caplog):
