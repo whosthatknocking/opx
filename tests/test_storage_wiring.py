@@ -394,6 +394,33 @@ def test_fetcher_fails_run_on_no_data(tmp_path: Path):
     assert runs[0].status == "failed"
 
 
+def test_fetcher_fails_run_when_pre_chain_price_context_fails(tmp_path: Path):
+    """Full-run price-context failures must still leave a failed run record."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True, price_context_enable=True)
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(patcher) for patcher in patches]
+        stack.enter_context(
+            patch.object(
+                fetcher,
+                "_run_price_context_fetch",
+                side_effect=RuntimeError("price context exploded"),
+            )
+        )
+        result = fetcher.main([])
+
+    assert result == 1
+    runs = list(backend._runs.values())  # pylint: disable=protected-access
+    assert len(runs) == 1
+    assert runs[0].status == "failed"
+    assert runs[0].error_summary == "price context exploded"
+    mocks[9].assert_not_called()
+
+
 def test_fetcher_does_not_snapshot_positions_when_run_fails(tmp_path: Path):
     """Failed runs must not leave behind a positions sidecar artifact."""
     from opx_chain import fetcher  # pylint: disable=import-outside-toplevel

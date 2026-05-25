@@ -628,10 +628,6 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
             print(f"Saved price context: {output_path}")
             return
 
-        price_context_path = None
-        if config.price_context_enable:
-            price_context_path = _run_price_context_fetch(config, effective_tickers, logger)
-
         if storage is not None:
             run_id = storage.create_run(RunContext(
                 provider=config.data_provider,
@@ -663,6 +659,10 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
             len(position_set.option_keys),
             len(extra_tickers),
         )
+
+        price_context_path = None
+        if config.price_context_enable:
+            price_context_path = _run_price_context_fetch(config, effective_tickers, logger)
 
         ticker_frames = []
         validation_findings = []
