@@ -909,6 +909,27 @@ def test_run_fetch_data_provider_override_replaces_config_provider(tmp_path: Pat
     assert set_call[0][0].data_provider == "marketdata"
 
 
+def test_run_fetch_data_provider_override_accepts_massive_credentials(tmp_path: Path):
+    """Paid-provider overrides should work when their credentials are present."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(
+        storage_enabled=True,
+        data_provider="yfinance",
+        massive_api_key="secret",
+    )
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in patches]
+        fetcher.run_fetch(data_provider="massive")
+
+    mock_set_config = mocks[6]
+    set_call = mock_set_config.call_args_list[0]
+    assert set_call[0][0].data_provider == "massive"
+
+
 def test_run_fetch_data_provider_override_rejects_unknown_provider(tmp_path: Path):
     """Provider overrides should fail before opening a fetcher run."""
     from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
