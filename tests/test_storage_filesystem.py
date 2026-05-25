@@ -617,6 +617,42 @@ def test_list_datasets_empty_when_no_runs_dir(tmp_path: Path):
     assert not backend.list_datasets()
 
 
+@pytest.mark.parametrize("bad_limit", [-1, True, 1.5, "2", None, [], {}])
+def test_list_datasets_rejects_malformed_limit(tmp_path: Path, bad_limit):
+    """list_datasets must reject non-integer and negative limits consistently."""
+    backend = _make_backend(tmp_path)
+    with pytest.raises(ValueError, match="limit"):
+        backend.list_datasets(limit=bad_limit)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"provider": ""},
+        {"provider": []},
+        {"ticker": ""},
+        {"ticker": []},
+        {"since": "2026-01-01"},
+        {"until": True},
+    ],
+)
+def test_list_datasets_rejects_malformed_filters(tmp_path: Path, kwargs):
+    """list_datasets must reject malformed filter shapes at the storage boundary."""
+    backend = _make_backend(tmp_path)
+    with pytest.raises(ValueError):
+        backend.list_datasets(**kwargs)
+
+
+@pytest.mark.parametrize("ticker", ["%", "____"])
+def test_list_datasets_malformed_ticker_filter_is_no_match(tmp_path: Path, ticker):
+    """Malformed string ticker filters must not behave like wildcards."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context(tickers=("TSLA",)))
+    _write(backend, run_id)
+
+    assert not backend.list_datasets(ticker=ticker)
+
+
 def test_write_dataset_links_run(tmp_path: Path):
     """write_dataset must update the run sidecar's dataset_id field."""
     backend = _make_backend(tmp_path)
@@ -1097,6 +1133,14 @@ def test_count_runs_today_returns_zero_when_no_runs(tmp_path: Path):
     """count_runs_today must return 0 when no runs exist for that provider."""
     backend = _make_backend(tmp_path)
     assert backend.count_runs_today("marketdata") == 0
+
+
+@pytest.mark.parametrize("provider", [None, "", [], {}])
+def test_count_runs_today_rejects_malformed_provider(tmp_path: Path, provider):
+    """count_runs_today must reject malformed provider values consistently."""
+    backend = _make_backend(tmp_path)
+    with pytest.raises(ValueError, match="provider"):
+        backend.count_runs_today(provider)
 
 
 def test_count_runs_today_reuses_process_cache(tmp_path: Path, monkeypatch):

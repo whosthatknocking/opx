@@ -40,6 +40,11 @@ from opx_chain.storage._disk import (
     write_dataset_artifact,
 )
 from opx_chain.storage.serializers import get_serializer
+from opx_chain.storage.validation import (
+    INVALID_TICKER_FILTER,
+    validate_dataset_list_filters,
+    validate_required_text,
+)
 
 
 def _unlink_orphaned_file(path: Path, *, remove_empty_parent: bool = False) -> None:
@@ -578,33 +583,51 @@ class SqliteIndexedBackend:
         ticker: str | None = None,
     ) -> list[DatasetRecord]:
         """Return dataset records from SQLite, newest first."""
-        sql = "SELECT d.* FROM datasets d"
+        filters = validate_dataset_list_filters(
+            limit=limit,
+            provider=provider,
+            since=since,
+            until=until,
+            ticker=ticker,
+        )
+        if filters.limit == 0 or filters.ticker == INVALID_TICKER_FILTER:
+            return []
+
+        sql = (
+            "SELECT d.*, r.tickers AS run_tickers "
+            "FROM datasets d LEFT JOIN runs r ON r.run_id = d.run_id"
+        )
         params: list = []
         conditions: list[str] = []
-        if provider is not None:
+        if filters.provider is not None:
             conditions.append("d.provider = ?")
-            params.append(provider)
-        if since is not None:
+            params.append(filters.provider)
+        if filters.since is not None:
             conditions.append("d.created_at >= ?")
-            params.append(datetime_to_iso(since))
-        if until is not None:
+            params.append(datetime_to_iso(filters.since))
+        if filters.until is not None:
             conditions.append("d.created_at <= ?")
-            params.append(datetime_to_iso(until))
-        if ticker is not None:
-            sql += " JOIN runs r ON r.run_id = d.run_id"
-            conditions.append(
-                "(UPPER(r.tickers) LIKE UPPER(?) OR EXISTS (SELECT 1 FROM ticker_results tr "
-                "WHERE tr.run_id = d.run_id AND UPPER(tr.ticker) = UPPER(?)))"
-            )
-            params.append(f'%"{ticker}"%')
-            params.append(ticker)
+            params.append(datetime_to_iso(filters.until))
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
-        sql += " ORDER BY d.created_at DESC LIMIT ?"
-        params.append(limit)
+        sql += " ORDER BY d.created_at DESC"
         with self._open_connection() as conn:
             rows = conn.execute(sql, params).fetchall()
-        return [self._row_to_record(row) for row in rows]
+            records: list[DatasetRecord] = []
+            for row in rows:
+                if filters.ticker is not None and not self._row_has_ticker(
+                    conn,
+                    row,
+                    filters.ticker,
+                ):
+                    continue
+                try:
+                    records.append(self._row_to_record(row))
+                except ValueError:
+                    continue
+                if len(records) >= filters.limit:
+                    break
+        return records
 
     def get_dataset(self, dataset_id: str) -> DatasetHandle:
         """Return a DatasetHandle for the given dataset_id."""
@@ -614,7 +637,11 @@ class SqliteIndexedBackend:
             ).fetchone()
         if row is None:
             raise KeyError(f"dataset not found: {dataset_id}")
-        return record_to_handle(self._row_to_record(row))
+        try:
+            record = self._row_to_record(row)
+        except ValueError as exc:
+            raise ValueError(f"dataset metadata corrupt: {dataset_id}") from exc
+        return record_to_handle(record)
 
     def finalize_run(self, run_id: str, summary: RunSummary) -> None:
         """Update the run row with a completion status."""
@@ -673,16 +700,26 @@ class SqliteIndexedBackend:
     def count_runs_today(self, provider: str) -> int:
         """Return the number of complete runs started today (US/Eastern) for the provider."""
         from opx_chain.config import US_MARKET_TIMEZONE  # pylint: disable=import-outside-toplevel
+        provider = validate_required_text(provider, name="provider")
         now_et = datetime.now(tz=US_MARKET_TIMEZONE)
         midnight_et = now_et.replace(hour=0, minute=0, second=0, microsecond=0)
-        since_utc = datetime_to_iso(midnight_et.astimezone(timezone.utc))
+        since_utc = midnight_et.astimezone(timezone.utc)
+        since_utc_text = datetime_to_iso(since_utc)
         with self._open_connection() as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM runs "
+            rows = conn.execute(
+                "SELECT started_at FROM runs "
                 "WHERE provider = ? AND started_at >= ? AND status = 'complete'",
-                (provider, since_utc),
-            ).fetchone()
-        return row[0] if row else 0
+                (provider, since_utc_text),
+            ).fetchall()
+        count = 0
+        for row in rows:
+            try:
+                started_at = iso_to_datetime(row["started_at"])
+            except (TypeError, ValueError):
+                continue
+            if started_at is not None and started_at >= since_utc:
+                count += 1
+        return count
 
     def get_ticker_results(self, run_id: str) -> list[TickerRunRecord]:
         """Return per-ticker results for a run."""
@@ -724,3 +761,21 @@ class SqliteIndexedBackend:
             location=row["location"],
             content_hash=row["content_hash"],
         )
+
+    @staticmethod
+    def _row_has_ticker(
+        conn: sqlite3.Connection,
+        row: sqlite3.Row,
+        expected: str,
+    ) -> bool:
+        try:
+            run_tickers = json.loads(row["run_tickers"] or "[]")
+        except (TypeError, ValueError):
+            run_tickers = []
+        if expected in {str(symbol).upper() for symbol in run_tickers}:
+            return True
+        ticker_row = conn.execute(
+            "SELECT 1 FROM ticker_results WHERE run_id = ? AND UPPER(ticker) = ?",
+            (row["run_id"], expected),
+        ).fetchone()
+        return ticker_row is not None

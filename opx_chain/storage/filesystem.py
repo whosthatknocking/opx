@@ -35,6 +35,11 @@ from opx_chain.storage._disk import (
     write_dataset_artifact,
 )
 from opx_chain.storage.serializers import get_serializer
+from opx_chain.storage.validation import (
+    INVALID_TICKER_FILTER,
+    validate_dataset_list_filters,
+    validate_required_text,
+)
 
 _DATASET_ARTIFACT_SUFFIXES = {".csv", ".parquet"}
 
@@ -509,24 +514,36 @@ class FilesystemBackend:
         ticker: str | None = None,
     ) -> list[DatasetRecord]:
         """Return dataset records from meta files, newest first."""
+        filters = validate_dataset_list_filters(
+            limit=limit,
+            provider=provider,
+            since=since,
+            until=until,
+            ticker=ticker,
+        )
+        if filters.ticker == INVALID_TICKER_FILTER:
+            return []
         if not self._runs_dir.exists():
             return []
         results = []
         for record in self._dataset_records():
-            if provider is not None and record.provider != provider:
+            if filters.provider is not None and record.provider != filters.provider:
                 continue
-            if since is not None and record.created_at < since:
+            if filters.since is not None and record.created_at < filters.since:
                 break
-            if since is None and len(results) >= limit:
+            if filters.since is None and len(results) >= filters.limit:
                 break
-            if until is not None and record.created_at > until:
+            if filters.until is not None and record.created_at > filters.until:
                 continue
-            if ticker is not None and not self._run_has_ticker(record.run_id, ticker):
+            if filters.ticker is not None and not self._run_has_ticker(
+                record.run_id,
+                filters.ticker,
+            ):
                 continue
             results.append(record)
-            if len(results) >= limit:
+            if len(results) >= filters.limit:
                 break
-        return results[:limit]
+        return results[:filters.limit]
 
     def get_dataset(self, dataset_id: str) -> DatasetHandle:
         """Return a DatasetHandle by loading the dataset's meta file."""
@@ -600,6 +617,7 @@ class FilesystemBackend:
     def count_runs_today(self, provider: str) -> int:
         """Return the number of complete runs started today (US/Eastern) for the provider."""
         from opx_chain.config import US_MARKET_TIMEZONE  # pylint: disable=import-outside-toplevel
+        provider = validate_required_text(provider, name="provider")
         now_et = datetime.now(tz=US_MARKET_TIMEZONE)
         cache_key = (provider, now_et.date().isoformat())
         cached = self._daily_count_cache.get(cache_key)

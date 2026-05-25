@@ -21,6 +21,11 @@ from opx_chain.storage.models import (
     record_to_handle,
 )
 from opx_chain.storage.serializers import get_serializer
+from opx_chain.storage.validation import (
+    INVALID_TICKER_FILTER,
+    validate_dataset_list_filters,
+    validate_required_text,
+)
 
 
 class MemoryBackend:
@@ -152,24 +157,32 @@ class MemoryBackend:
         ticker: str | None = None,
     ) -> list[DatasetRecord]:
         """Return datasets in reverse chronological order, newest first."""
+        filters = validate_dataset_list_filters(
+            limit=limit, provider=provider, since=since, until=until, ticker=ticker
+        )
+        if filters.ticker == INVALID_TICKER_FILTER:
+            return []
         results = list(reversed(self._datasets))
-        if provider is not None:
-            results = [r for r in results if r.provider == provider]
-        if since is not None:
-            results = [r for r in results if r.created_at >= since]
-        if until is not None:
-            results = [r for r in results if r.created_at <= until]
-        if ticker is not None:
-            expected = ticker.upper()
+        if filters.provider is not None:
+            results = [r for r in results if r.provider == filters.provider]
+        if filters.since is not None:
+            results = [r for r in results if r.created_at >= filters.since]
+        if filters.until is not None:
+            results = [r for r in results if r.created_at <= filters.until]
+        if filters.ticker is not None:
+            expected = filters.ticker
             results = [
                 record for record in results
-                if expected in {symbol.upper() for symbol in self._runs[record.run_id].tickers}
+                if (
+                    (run := self._runs.get(record.run_id)) is not None
+                    and expected in {symbol.upper() for symbol in run.tickers}
+                )
                 or any(
                     row.ticker.upper() == expected
                     for row in self._ticker_results.get(record.run_id, [])
                 )
             ]
-        return results[:limit]
+        return results[:filters.limit]
 
     def get_dataset(self, dataset_id: str) -> DatasetHandle:
         """Return a DatasetHandle for the given dataset_id."""
@@ -225,6 +238,7 @@ class MemoryBackend:
     def count_runs_today(self, provider: str) -> int:
         """Return the number of complete runs started today (US/Eastern) for the provider."""
         from opx_chain.config import US_MARKET_TIMEZONE  # pylint: disable=import-outside-toplevel
+        provider = validate_required_text(provider, name="provider")
         now_et = datetime.now(tz=US_MARKET_TIMEZONE)
         midnight_et = now_et.replace(hour=0, minute=0, second=0, microsecond=0)
         since_utc = midnight_et.astimezone(timezone.utc)

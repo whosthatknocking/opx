@@ -197,7 +197,43 @@ def test_list_datasets_filter_ticker_uses_run_context_tickers():
 
 def test_list_datasets_empty():
     """list_datasets on a fresh backend must return an empty list."""
-    assert MemoryBackend().list_datasets() == []
+    assert not MemoryBackend().list_datasets()
+
+
+@pytest.mark.parametrize("bad_limit", [-1, True, 1.5, "2", None, [], {}])
+def test_list_datasets_rejects_malformed_limit(bad_limit):
+    """list_datasets must reject non-integer and negative limits consistently."""
+    backend = MemoryBackend()
+    with pytest.raises(ValueError, match="limit"):
+        backend.list_datasets(limit=bad_limit)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"provider": ""},
+        {"provider": []},
+        {"ticker": ""},
+        {"ticker": []},
+        {"since": "2026-01-01"},
+        {"until": True},
+    ],
+)
+def test_list_datasets_rejects_malformed_filters(kwargs):
+    """list_datasets must reject malformed filter shapes at the storage boundary."""
+    backend = MemoryBackend()
+    with pytest.raises(ValueError):
+        backend.list_datasets(**kwargs)
+
+
+@pytest.mark.parametrize("ticker", ["%", "____"])
+def test_list_datasets_malformed_ticker_filter_is_no_match(ticker):
+    """Malformed string ticker filters must not behave like wildcards."""
+    backend = MemoryBackend()
+    run_id = backend.create_run(_make_context(tickers=("TSLA",)))
+    _write(backend, run_id)
+
+    assert not backend.list_datasets(ticker=ticker)
 
 
 # ---------------------------------------------------------------------------
@@ -511,7 +547,7 @@ def test_list_datasets_since_excludes_older_records():
     future = record.created_at + timedelta(seconds=1)
     results = backend.list_datasets(since=future)
 
-    assert results == []
+    assert not results
 
 
 def test_list_datasets_since_includes_records_at_boundary():
@@ -535,7 +571,7 @@ def test_list_datasets_until_excludes_newer_records():
     past = record.created_at - timedelta(seconds=1)
     results = backend.list_datasets(until=past)
 
-    assert results == []
+    assert not results
 
 
 def test_list_datasets_until_includes_records_at_boundary():
@@ -577,6 +613,14 @@ def test_count_runs_today_returns_zero_when_no_runs():
     """count_runs_today must return 0 when no runs exist for that provider."""
     backend = MemoryBackend()
     assert backend.count_runs_today("marketdata") == 0
+
+
+@pytest.mark.parametrize("provider", [None, "", [], {}])
+def test_count_runs_today_rejects_malformed_provider(provider):
+    """count_runs_today must reject malformed provider values consistently."""
+    backend = MemoryBackend()
+    with pytest.raises(ValueError, match="provider"):
+        backend.count_runs_today(provider)
 
 
 def test_interrupt_stale_runs_marks_old_running_records():

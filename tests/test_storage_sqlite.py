@@ -415,7 +415,7 @@ def test_write_dataset_removes_artifact_when_index_write_fails(
 
     assert not list((tmp_path / "runs" / run_id / "output").glob("*.csv"))
     assert backend.get_run(run_id).dataset_id is None
-    assert backend.list_datasets() == []
+    assert not backend.list_datasets()
 
 
 def test_write_dataset_returns_correct_record(tmp_path: Path):
@@ -469,6 +469,25 @@ def test_get_dataset_raises_for_unknown_id(tmp_path: Path):
         backend.get_dataset("no-such-id")
 
 
+def test_get_dataset_reports_corrupt_created_at_stably(tmp_path: Path):
+    """Corrupt dataset timestamps must not leak raw parser errors."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    record = _write(backend, run_id)
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        conn.execute(
+            "UPDATE datasets SET created_at = ? WHERE dataset_id = ?",
+            ("zzzz-not-a-timestamp", record.dataset_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(ValueError, match="dataset metadata corrupt"):
+        backend.get_dataset(record.dataset_id)
+
+
 def test_list_datasets_most_recent_first(tmp_path: Path):
     """list_datasets must return records newest first."""
     backend = _make_backend(tmp_path)
@@ -480,6 +499,27 @@ def test_list_datasets_most_recent_first(tmp_path: Path):
 
     assert records[0].dataset_id == r2.dataset_id
     assert records[1].dataset_id == r1.dataset_id
+
+
+def test_list_datasets_skips_corrupt_created_at(tmp_path: Path):
+    """Corrupt retained dataset timestamps should be skipped during discovery."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    good_record = _write(backend, run_id)
+    bad_record = _write(backend, run_id)
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        conn.execute(
+            "UPDATE datasets SET created_at = ? WHERE dataset_id = ?",
+            ("zzzz-not-a-timestamp", bad_record.dataset_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    records = backend.list_datasets(limit=10)
+
+    assert [record.dataset_id for record in records] == [good_record.dataset_id]
 
 
 def test_list_datasets_limit(tmp_path: Path):
@@ -531,6 +571,42 @@ def test_list_datasets_filter_ticker_uses_run_context_tickers(tmp_path: Path):
     results = backend.list_datasets(limit=1, ticker="tsla")
 
     assert [record.dataset_id for record in results] == [tsla_record.dataset_id]
+
+
+@pytest.mark.parametrize("bad_limit", [-1, True, 1.5, "2", None, [], {}])
+def test_list_datasets_rejects_malformed_limit(tmp_path: Path, bad_limit):
+    """list_datasets must reject non-integer and negative limits consistently."""
+    backend = _make_backend(tmp_path)
+    with pytest.raises(ValueError, match="limit"):
+        backend.list_datasets(limit=bad_limit)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"provider": ""},
+        {"provider": []},
+        {"ticker": ""},
+        {"ticker": []},
+        {"since": "2026-01-01"},
+        {"until": True},
+    ],
+)
+def test_list_datasets_rejects_malformed_filters(tmp_path: Path, kwargs):
+    """list_datasets must reject malformed filter shapes at the storage boundary."""
+    backend = _make_backend(tmp_path)
+    with pytest.raises(ValueError):
+        backend.list_datasets(**kwargs)
+
+
+@pytest.mark.parametrize("ticker", ["%", "____"])
+def test_list_datasets_malformed_ticker_filter_is_no_match(tmp_path: Path, ticker):
+    """Malformed string ticker filters must not behave like SQL wildcards."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context(tickers=("TSLA",)))
+    _write(backend, run_id)
+
+    assert not backend.list_datasets(ticker=ticker)
 
 
 def test_write_dataset_links_run(tmp_path: Path):
@@ -928,7 +1004,7 @@ def test_list_datasets_since_excludes_older_records(tmp_path: Path):
     future = record.created_at + timedelta(seconds=1)
     results = backend.list_datasets(since=future)
 
-    assert results == []
+    assert not results
 
 
 def test_list_datasets_until_excludes_newer_records(tmp_path: Path):
@@ -940,7 +1016,7 @@ def test_list_datasets_until_excludes_newer_records(tmp_path: Path):
     past = record.created_at - timedelta(seconds=1)
     results = backend.list_datasets(until=past)
 
-    assert results == []
+    assert not results
 
 
 # ---------------------------------------------------------------------------
@@ -970,6 +1046,34 @@ def test_count_runs_today_returns_zero_when_no_runs(tmp_path: Path):
     """count_runs_today must return 0 when no runs exist for that provider."""
     backend = _make_backend(tmp_path)
     assert backend.count_runs_today("marketdata") == 0
+
+
+@pytest.mark.parametrize("provider", [None, "", [], {}])
+def test_count_runs_today_rejects_malformed_provider(tmp_path: Path, provider):
+    """count_runs_today must reject malformed provider values consistently."""
+    backend = _make_backend(tmp_path)
+    with pytest.raises(ValueError, match="provider"):
+        backend.count_runs_today(provider)
+
+
+def test_count_runs_today_skips_malformed_started_at(tmp_path: Path):
+    """Malformed retained run timestamps must not count as today's completed run."""
+    backend = _make_backend(tmp_path)
+    good_run = backend.create_run(_make_context(provider="marketdata"))
+    bad_run = backend.create_run(_make_context(provider="marketdata"))
+    backend.finalize_run(good_run, RunSummary(status="complete"))
+    backend.finalize_run(bad_run, RunSummary(status="complete"))
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        conn.execute(
+            "UPDATE runs SET started_at = ? WHERE run_id = ?",
+            ("zzzz-not-a-timestamp", bad_run),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert backend.count_runs_today("marketdata") == 1
 
 
 def test_count_runs_today_uses_composite_index(tmp_path: Path):
