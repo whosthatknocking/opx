@@ -80,6 +80,7 @@ def test_iv_history_store_persists_ticker_and_dte_aggregates(tmp_path):
         ("provider", "", "provider must be a non-empty string"),
         ("provider", False, "provider must be a non-empty string"),
         ("ticker", "BAD/TICKER", "ticker must be a valid stock ticker symbol"),
+        ("ticker", "A.", "ticker must be a valid stock ticker symbol"),
         ("observation_date", "not-a-date", "observation_date must be YYYY-MM-DD"),
         ("observation_count", "3", "observation_count must be a positive integer"),
         ("observation_count", True, "observation_count must be a positive integer"),
@@ -112,6 +113,7 @@ def test_iv_history_store_validates_observation_metadata(
     [
         ({"provider": "", "ticker": "TSLA"}, "provider must be a non-empty string"),
         ({"provider": "marketdata", "ticker": "TSLA1"}, "valid stock ticker"),
+        ({"provider": "marketdata", "ticker": "BRK..B"}, "valid stock ticker"),
     ],
 )
 def test_iv_history_store_query_helpers_validate_identity(

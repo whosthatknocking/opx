@@ -8,7 +8,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-import re
 import sqlite3
 import threading
 import weakref
@@ -17,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from opx_chain.paths import get_data_dir
+from opx_chain.tickers import is_valid_ticker
 from opx_chain.timestamps import parse_iso_datetime, utc_now
 from opx_chain.utils import finite_float_or_none
 from opx_chain.volatility_features import dte_bucket
@@ -28,7 +28,6 @@ IV_HISTORY_SCHEMA_MIGRATIONS: dict[int, str] = {}
 DELTA_BUCKET_ALL = "ALL"
 OPTION_TYPE_ALL = "ALL"
 DTE_BUCKET_ALL = "ALL"
-_VALID_TICKER_RE = re.compile(r"^[A-Z](?:[A-Z.]{0,9})$")
 _SYNC_STATUSES = frozenset({"INGESTED", "EMPTY", "ERROR", "SKIPPED"})
 
 _SCHEMA_SQL = """
@@ -120,7 +119,7 @@ def _normalize_ticker(value: object, *, required: bool = False) -> str | None:
         if required:
             raise ValueError("ticker must be a non-empty string")
         return None
-    if not _VALID_TICKER_RE.fullmatch(text):
+    if not is_valid_ticker(text):
         if required:
             raise ValueError("ticker must be a valid stock ticker symbol")
         return None

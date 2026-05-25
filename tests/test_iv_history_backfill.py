@@ -205,7 +205,10 @@ def test_iv_history_backfill_accepts_scalar_csv_strings(tmp_path):
     assert store.stats(provider="marketdata", ticker="TSLA").observation_dates == 1
 
 
-@pytest.mark.parametrize("bad_ticker", ["BAD/TICKER", "...", "TSLA1", "ABCDEFGHIJK"])
+@pytest.mark.parametrize(
+    "bad_ticker",
+    ["BAD/TICKER", "...", "TSLA1", "A.", "BRK..B", "ABCDEFGHIJK"],
+)
 def test_iv_history_backfill_rejects_malformed_tickers(tmp_path, bad_ticker):
     """Backfill should validate direct ticker scope before provider/store work."""
     store = IVHistoryStore(tmp_path / "iv-history.db")

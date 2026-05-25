@@ -8,7 +8,6 @@ import argparse
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-import re
 from typing import Callable, Iterable, Sequence
 
 import pandas as pd
@@ -31,6 +30,7 @@ from opx_chain.paths import get_data_dir
 from opx_chain.providers import get_data_provider
 from opx_chain.storage.factory import get_storage_backend
 from opx_chain.storage.models import DatasetHandle, DatasetRecord
+from opx_chain.tickers import is_valid_ticker
 from opx_chain.utils import read_dataset_file
 
 _IV_HISTORY_COLUMNS = (
@@ -49,7 +49,6 @@ BACKFILL_STATUS_ERROR = "ERROR"
 BACKFILL_STATUS_INGESTED = "INGESTED"
 HISTORICAL_IV_FETCH_PROVIDERS = frozenset({"marketdata"})
 HISTORICAL_STATUS_WOULD_FETCH = "WOULD_FETCH"
-_VALID_TICKER_RE = re.compile(r"^[A-Z](?:[A-Z.]{0,9})$")
 
 
 @dataclass(frozen=True)
@@ -142,7 +141,7 @@ def _normalize_ticker_value(value: object) -> str:
     text = str(value or "").strip().upper()
     if not text:
         raise ValueError("ticker must be a non-empty string")
-    if not _VALID_TICKER_RE.fullmatch(text):
+    if not is_valid_ticker(text):
         raise ValueError("ticker must be a valid stock ticker symbol")
     return text
 

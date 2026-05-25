@@ -476,6 +476,7 @@ def test_reconcile_price_history_validates_direct_ttl(tmp_path, bad_ttl) -> None
         ({"provider": False, "ticker": "AAA"}, "provider must be a non-empty string"),
         ({"provider": "stub", "ticker": "BAD/TICKER"}, "valid stock ticker"),
         ({"provider": "stub", "ticker": "AAA1"}, "valid stock ticker"),
+        ({"provider": "stub", "ticker": "A."}, "valid stock ticker"),
     ],
 )
 def test_price_history_read_helpers_validate_identity(
@@ -541,6 +542,7 @@ def test_price_history_read_helpers_validate_dates(tmp_path) -> None:
     [
         ({"provider": "", "ticker": "AAA", "fetched_at": None}, "provider"),
         ({"provider": "stub", "ticker": "BAD/TICKER", "fetched_at": None}, "valid stock ticker"),
+        ({"provider": "stub", "ticker": "A.", "fetched_at": None}, "valid stock ticker"),
         (
             {"provider": "stub", "ticker": "AAA", "fetched_at": "2026-03-20"},
             "fetched_at must be a datetime",
@@ -567,6 +569,7 @@ def test_price_history_upsert_validates_identity_and_fetch_time(
             {"provider": "stub", "ticker": "BAD/TICKER", "status": "ok"},
             "valid stock ticker",
         ),
+        ({"provider": "stub", "ticker": "A.", "status": "ok"}, "valid stock ticker"),
         ({"provider": "stub", "ticker": "AAA", "status": "empty"}, "status"),
         (
             {"provider": "stub", "ticker": "AAA", "status": "ok", "lookback_days": "30"},

@@ -210,7 +210,10 @@ def test_price_history_backfill_rejects_loose_direct_inputs(
         )
 
 
-@pytest.mark.parametrize("bad_ticker", ["BAD/TICKER", "...", "AAA1", "ABCDEFGHIJK"])
+@pytest.mark.parametrize(
+    "bad_ticker",
+    ["BAD/TICKER", "...", "AAA1", "A.", "BRK..B", "ABCDEFGHIJK"],
+)
 def test_price_history_backfill_rejects_malformed_tickers(tmp_path, bad_ticker) -> None:
     """Ticker scope should be validated before provider/store work."""
     store = PriceHistoryStore(tmp_path / "price-history.db")

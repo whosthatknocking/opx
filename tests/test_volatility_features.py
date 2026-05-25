@@ -280,7 +280,10 @@ def test_volatility_features_validate_ticker_identity(bad_ticker) -> None:
         build_ticker_volatility_features(ticker=bad_ticker, chain=_chain())
 
 
-@pytest.mark.parametrize("bad_ticker", ["BAD/TICKER", "...", "TSLA1", "ABCDEFGHIJK"])
+@pytest.mark.parametrize(
+    "bad_ticker",
+    ["BAD/TICKER", "...", "TSLA1", "A.", "BRK..B", "ABCDEFGHIJK"],
+)
 def test_volatility_features_validate_ticker_syntax(bad_ticker) -> None:
     with pytest.raises(ValueError, match="valid stock ticker"):
         build_price_volatility_features(_history(), ticker=bad_ticker)

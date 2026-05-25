@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from numbers import Integral
 from pathlib import Path
-import re
 import sqlite3
 import threading
 import weakref
@@ -19,6 +18,7 @@ import pandas as pd
 from opx_chain.error_summary import compact_exception_summary
 from opx_chain.paths import get_data_dir
 from opx_chain.price_context import normalize_price_history_frame
+from opx_chain.tickers import is_valid_ticker
 from opx_chain.timestamps import parse_iso_datetime, utc_now
 from opx_chain.utils import finite_float_or_none
 
@@ -26,7 +26,6 @@ from opx_chain.utils import finite_float_or_none
 PRICE_HISTORY_SCHEMA_VERSION = 1
 PRICE_HISTORY_SCHEMA_MIGRATIONS: dict[int, str] = {}
 PRICE_HISTORY_TAIL_REFRESH_DAYS = 7
-_VALID_TICKER_RE = re.compile(r"^[A-Z](?:[A-Z.]{0,9})$")
 _SYNC_STATUSES = frozenset({"ok", "error"})
 _EMPTY_PROVIDER_RESPONSE = "provider returned no usable price history rows"
 
@@ -107,7 +106,7 @@ def _normalize_provider(value: object) -> str:
 
 def _normalize_ticker(value: object) -> str:
     text = _non_empty_text(value, name="ticker").upper().strip()
-    if not _VALID_TICKER_RE.fullmatch(text):
+    if not is_valid_ticker(text):
         raise ValueError("ticker must be a valid stock ticker symbol")
     return text
 

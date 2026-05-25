@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from math import sqrt
-import re
 from typing import Any
 
 import numpy as np
@@ -13,6 +12,7 @@ import pandas as pd
 from opx_chain.metrics import add_iv_state_level, add_iv_state_term
 from opx_chain.price_context import normalize_price_history_frame
 from opx_chain.price_history import PriceHistoryStore
+from opx_chain.tickers import is_valid_ticker
 from opx_chain.utils import finite_float_or_none
 
 
@@ -21,7 +21,6 @@ VOLATILITY_FEATURE_METHOD = "vrp_lite_features_v1"
 PRICE_VOL_METHOD = "close_to_close_rv_v1"
 IV_FEATURE_METHOD = "current_chain_with_optional_history_v1"
 MIN_IV_HISTORY_OBSERVATIONS = 20
-_VALID_TICKER_RE = re.compile(r"^[A-Z](?:[A-Z.]{0,9})$")
 
 SOURCE_READY = "READY"
 SOURCE_PARTIAL = "PARTIAL"
@@ -79,7 +78,7 @@ def _normalize_ticker_arg(value: Any, *, name: str = "ticker") -> str:
     text = value.strip().upper()
     if not text:
         raise ValueError(f"{name} must be a non-empty string")
-    if not _VALID_TICKER_RE.fullmatch(text):
+    if not is_valid_ticker(text):
         raise ValueError(f"{name} must be a valid stock ticker symbol")
     return text
 

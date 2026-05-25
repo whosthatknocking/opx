@@ -7,7 +7,6 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass, replace
 from datetime import date
-import re
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
@@ -27,9 +26,9 @@ from opx_chain.price_history import (
     reconcile_price_history,
 )
 from opx_chain.providers import get_data_provider
+from opx_chain.tickers import is_valid_ticker
 
 PRICE_HISTORY_BACKFILL_PROVIDERS = frozenset({"marketdata", "yfinance"})
-_VALID_TICKER_RE = re.compile(r"^[A-Z](?:[A-Z.]{0,9})$")
 
 
 @dataclass(frozen=True)
@@ -127,7 +126,7 @@ def _normalize_ticker(value: object) -> str:
     text = value.upper().strip()
     if not text:
         raise ValueError("ticker must be a non-empty string")
-    if not _VALID_TICKER_RE.fullmatch(text):
+    if not is_valid_ticker(text):
         raise ValueError("ticker must be a valid stock ticker symbol")
     return text
 
