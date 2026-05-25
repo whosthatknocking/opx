@@ -788,6 +788,12 @@ storage is disabled. Enabled backends are memoized within the process by the
 storage-affecting config values, so repeated calls return the same backend
 instance until storage config changes or the cache is cleared.
 
+Direct `config=` callers are validated at the same public boundary as loaded
+runtime config for storage-affecting scalars: false-like `storage_enabled`
+values disable storage, malformed enablement raises `ConfigError`,
+`storage_backend` must be `filesystem` or `sqlite`, and
+`storage_max_runs_retained` must be a nonnegative non-boolean integer.
+
 ### 7.5 `also_write_csv` config option
 
 When `[storage] also_write_csv = false` (default `true`), `opx-fetch` skips

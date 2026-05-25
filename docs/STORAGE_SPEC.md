@@ -129,6 +129,10 @@ Behavior:
 - `get_storage_backend()` memoizes backend instances within the process, keyed
   by backend type, storage dir, debug dir, retention limit, and dataset format,
   so repeated viewer requests do not rebuild SQLite schema state on every call
+- direct `get_storage_backend(config=...)` callers receive the same storage
+  scalar boundaries as loaded config: `enable` accepts only recognized boolean
+  values, `backend` must be `filesystem` or `sqlite`, and
+  `max_runs_retained` must be a nonnegative non-boolean integer
 - `SqliteIndexedBackend` keeps one SQLite connection per backend instance,
   guarded by a re-entrant lock and opened with `check_same_thread = false`,
   so method calls amortize connection and PRAGMA setup while preserving
@@ -655,7 +659,9 @@ Behavior:
 - pruning also removes storage-managed sidecar and run-log artifacts associated
   with the pruned run
 - run records are retained independently of dataset pruning; they are small
-- malformed or negative values fall back to `0` (no pruning) with a warning
+- malformed or negative values in config files fall back to `0` (no pruning)
+  with a warning; direct public factory config objects raise a stable config
+  validation error instead of constructing a backend with malformed retention
 
 Both storage backends prune by the semantic dataset `created_at` timestamp.
 The filesystem backend reads `created_at` from each dataset metadata sidecar;
