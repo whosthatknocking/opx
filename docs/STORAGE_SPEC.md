@@ -132,7 +132,8 @@ Behavior:
 - direct `get_storage_backend(config=...)` callers receive the same storage
   scalar boundaries as loaded config: `enable` accepts only recognized boolean
   values, `backend` must be `filesystem` or `sqlite`, and
-  `max_runs_retained` must be a nonnegative non-boolean integer
+  `max_runs_retained` must be a nonnegative non-boolean integer,
+  while `storage_dataset_format` / `storage.dataset_format` must be `csv` or `parquet`
 - `SqliteIndexedBackend` keeps one SQLite connection per backend instance,
   guarded by a re-entrant lock and opened with `check_same_thread = false`,
   so method calls amortize connection and PRAGMA setup while preserving

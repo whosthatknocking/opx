@@ -788,11 +788,13 @@ storage is disabled. Enabled backends are memoized within the process by the
 storage-affecting config values, so repeated calls return the same backend
 instance until storage config changes or the cache is cleared.
 
-Direct `config=` callers are validated at the same public boundary as loaded
-runtime config for storage-affecting scalars: false-like `storage_enabled`
-values disable storage, malformed enablement raises `ConfigError`,
-`storage_backend` must be `filesystem` or `sqlite`, and
+Direct `get_storage_backend(config=...)` callers are validated at the same
+public boundary as loaded runtime config for storage-affecting scalars:
+false-like `storage_enabled` values disable storage, malformed enablement raises
+`ConfigError`, `storage_backend` must be `filesystem` or `sqlite`, and
 `storage_max_runs_retained` must be a nonnegative non-boolean integer.
+`storage_dataset_format` uses the same `storage.dataset_format` boundary as
+loaded config and must be `csv` or `parquet`.
 
 ### 7.5 `also_write_csv` config option
 

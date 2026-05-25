@@ -71,3 +71,17 @@ def test_storage_spec_documents_current_viewer_storage_discovery():
     assert "showing only the backend's small default page" in spec
     assert "It falls back to filesystem" in spec
     assert "migrating it to the storage port should happen" not in spec
+
+
+def test_storage_factory_direct_config_dataset_format_boundary_is_documented():
+    """Public docs should cover direct factory dataset-format validation."""
+    storage_spec = (ROOT / "docs" / "STORAGE_SPEC.md").read_text(encoding="utf-8")
+    interface_spec = (ROOT / "docs" / "EXTERNAL_INTERFACE_SPEC.md").read_text(
+        encoding="utf-8"
+    )
+
+    for spec in (storage_spec, interface_spec):
+        assert "get_storage_backend(config=...)" in spec
+        assert "storage_dataset_format" in spec
+        assert "storage.dataset_format" in spec
+        assert "`csv` or `parquet`" in spec
