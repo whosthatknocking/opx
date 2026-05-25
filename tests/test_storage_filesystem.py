@@ -274,7 +274,7 @@ def test_run_sidecar_rejects_non_finite_json_writes(tmp_path: Path):
     backend = _make_backend(tmp_path)
     run_id = backend.create_run(_make_context())
 
-    with pytest.raises(ValueError, match="Out of range float values"):
+    with pytest.raises(ValueError, match="nonnegative integer"):
         backend.record_validation(ValidationRecord(
             run_id=run_id,
             severity="warning",
@@ -316,7 +316,7 @@ def test_record_ticker_result_serializes_concurrent_sidecar_updates(tmp_path: Pa
         debug_dir=tmp_path / "debug",
     )
     run_id = backend.create_run(_make_context())
-    tickers = [f"TK{i:02d}" for i in range(12)]
+    tickers = [f"TK{chr(ord('A') + index)}" for index in range(12)]
 
     _run_concurrently([
         lambda ticker=ticker: _record_ticker(backend, run_id, ticker)
@@ -570,6 +570,18 @@ def test_list_datasets_scan_skips_malformed_meta_shape(tmp_path: Path):
     assert [item.dataset_id for item in records] == [record.dataset_id]
 
 
+def test_list_and_get_dataset_skip_records_with_missing_run_sidecar(tmp_path: Path):
+    """Dataset records whose owning run sidecar is gone must not remain visible."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    record = _write(backend, run_id)
+    (tmp_path / "runs" / run_id / "run.json").unlink()
+
+    assert not backend.list_datasets()
+    with pytest.raises(KeyError, match="dataset not found"):
+        backend.get_dataset(record.dataset_id)
+
+
 def test_list_datasets_filter_provider(tmp_path: Path):
     """list_datasets must filter by provider when the argument is given."""
     backend = _make_backend(tmp_path)
@@ -679,6 +691,35 @@ def test_write_artifact_creates_file(tmp_path: Path):
 
     assert Path(record.location).read_bytes() == b"payload"
     assert len(record.content_hash) == 64
+
+
+@pytest.mark.parametrize(
+    "artifact,expected_path",
+    [
+        (
+            ArtifactWrite("debug_payload", b"payload", "data.json"),
+            None,
+        ),
+        (
+            ArtifactWrite("sidecar", b"positions", "positions.csv"),
+            Path("runs/missing-run/positions.csv"),
+        ),
+    ],
+)
+def test_write_artifact_missing_run_does_not_write_payload(
+    tmp_path: Path,
+    artifact: ArtifactWrite,
+    expected_path: Path | None,
+):
+    """Missing-run artifact writes must fail before creating unmanaged files."""
+    backend = _make_backend(tmp_path)
+
+    with pytest.raises(KeyError, match="run not found"):
+        backend.write_artifact("missing-run", artifact)
+
+    if expected_path is not None:
+        assert not (tmp_path / expected_path).exists()
+    assert not (tmp_path / "debug").exists()
 
 
 def test_write_sidecar_artifact_stays_under_run_dir(tmp_path: Path):

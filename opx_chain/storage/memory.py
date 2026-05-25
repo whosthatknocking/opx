@@ -24,7 +24,16 @@ from opx_chain.storage.serializers import get_serializer
 from opx_chain.storage.validation import (
     INVALID_TICKER_FILTER,
     validate_dataset_list_filters,
+    validate_artifact_write,
+    validate_dataset_id,
+    validate_dataset_write,
     validate_required_text,
+    validate_run_context,
+    validate_run_id,
+    validate_run_summary,
+    validate_stale_run_inputs,
+    validate_ticker_fetch_result,
+    validate_validation_record,
 )
 
 
@@ -68,8 +77,16 @@ class MemoryBackend:
             if record.dataset_id not in pruned_ids
         ]
 
+    def _require_run(self, run_id: str) -> str:
+        """Return a validated run id when it exists."""
+        run_id = validate_run_id(run_id)
+        if run_id not in self._runs:
+            raise KeyError(f"run not found: {run_id}")
+        return run_id
+
     def create_run(self, context: RunContext) -> str:
         """Open a new run record and return its run_id."""
+        context = validate_run_context(context)
         run_id = str(uuid.uuid4())
         self._runs[run_id] = RunRecord(
             run_id=run_id,
@@ -88,6 +105,8 @@ class MemoryBackend:
 
     def record_ticker_result(self, run_id: str, result: TickerFetchResult) -> None:
         """Append a per-ticker fetch result to the run."""
+        run_id = self._require_run(run_id)
+        result = validate_ticker_fetch_result(result)
         record = TickerRunRecord(
             run_id=run_id,
             ticker=result.ticker,
@@ -103,10 +122,14 @@ class MemoryBackend:
 
     def record_validation(self, record: ValidationRecord) -> None:
         """Append a validation summary record under its run_id."""
+        record = validate_validation_record(record)
+        self._require_run(record.run_id)
         self._validations.setdefault(record.run_id, []).append(record)
 
     def write_dataset(self, run_id: str, dataset: DatasetWrite) -> DatasetRecord:
         """Serialize the DataFrame in memory and record the dataset."""
+        run_id = self._require_run(run_id)
+        dataset = validate_dataset_write(dataset)
         dataset_id = str(uuid.uuid4())
         serializer = get_serializer(dataset.format)
         content = serializer.serialize_bytes(dataset.data)
@@ -132,6 +155,8 @@ class MemoryBackend:
 
     def write_artifact(self, run_id: str, artifact: ArtifactWrite) -> ArtifactRecord:
         """Store artifact bytes in memory and return an ArtifactRecord."""
+        run_id = self._require_run(run_id)
+        artifact = validate_artifact_write(artifact)
         artifact_id = str(uuid.uuid4())
         content_hash = content_hash_for_bytes(artifact.content)
         record = ArtifactRecord(
@@ -146,6 +171,7 @@ class MemoryBackend:
 
     def delete_run_artifacts(self, run_id: str) -> None:
         """Delete artifacts associated with a run."""
+        run_id = validate_run_id(run_id)
         self._artifacts.pop(run_id, None)
 
     def list_datasets(  # pylint: disable=too-many-arguments,too-many-positional-arguments
@@ -186,6 +212,7 @@ class MemoryBackend:
 
     def get_dataset(self, dataset_id: str) -> DatasetHandle:
         """Return a DatasetHandle for the given dataset_id."""
+        dataset_id = validate_dataset_id(dataset_id)
         for record in self._datasets:
             if record.dataset_id == dataset_id:
                 return record_to_handle(record)
@@ -193,38 +220,39 @@ class MemoryBackend:
 
     def get_run(self, run_id: str) -> RunRecord:
         """Return the RunRecord for the given run_id."""
-        if run_id not in self._runs:
-            raise KeyError(f"run not found: {run_id}")
+        run_id = self._require_run(run_id)
         return self._runs[run_id]
 
     def get_ticker_results(self, run_id: str) -> list[TickerRunRecord]:
         """Return per-ticker results stored for a run."""
-        if run_id not in self._runs:
-            raise KeyError(f"run not found: {run_id}")
+        run_id = self._require_run(run_id)
         return list(self._ticker_results.get(run_id, []))
 
     def finalize_run(self, run_id: str, summary: RunSummary) -> None:
         """Mark run as complete or interrupted with the given summary."""
-        if run_id in self._runs:
-            run = self._runs[run_id]
-            if run.status != "running":
-                return
-            run.status = summary.status
-            run.finished_at = datetime.now(tz=timezone.utc)
-            run.error_summary = summary.error_summary
+        run_id = self._require_run(run_id)
+        summary = validate_run_summary(summary)
+        run = self._runs[run_id]
+        if run.status != "running":
+            return
+        run.status = summary.status
+        run.finished_at = datetime.now(tz=timezone.utc)
+        run.error_summary = summary.error_summary
 
     def fail_run(self, run_id: str, error: str) -> None:
         """Mark run as failed with the given error message."""
-        if run_id in self._runs:
-            run = self._runs[run_id]
-            if run.status != "running":
-                return
-            run.status = "failed"
-            run.finished_at = datetime.now(tz=timezone.utc)
-            run.error_summary = error
+        run_id = self._require_run(run_id)
+        error = validate_required_text(error, name="error")
+        run = self._runs[run_id]
+        if run.status != "running":
+            return
+        run.status = "failed"
+        run.finished_at = datetime.now(tz=timezone.utc)
+        run.error_summary = error
 
     def interrupt_stale_runs(self, cutoff: datetime, error_summary: str) -> int:
         """Mark running runs older than cutoff as interrupted."""
+        cutoff, error_summary = validate_stale_run_inputs(cutoff, error_summary)
         interrupted = 0
         for run in self._runs.values():
             if run.status != "running" or run.started_at >= cutoff:

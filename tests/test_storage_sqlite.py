@@ -658,7 +658,7 @@ def test_write_artifact_removes_debug_file_when_index_write_fails(tmp_path: Path
         artifact_type="debug_payload", content=b"payload", filename="data.json"
     )
 
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(KeyError, match="run not found"):
         backend.write_artifact("missing-run", payload)
 
     debug_dir = tmp_path / "debug"
@@ -672,7 +672,7 @@ def test_write_artifact_removes_sidecar_when_index_write_fails(tmp_path: Path):
         artifact_type="sidecar", content=b"positions", filename="positions.csv"
     )
 
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(KeyError, match="run not found"):
         backend.write_artifact("missing-run", payload)
 
     assert not (tmp_path / "runs" / "missing-run" / "positions.csv").exists()
@@ -690,6 +690,24 @@ def test_write_sidecar_artifact_stays_under_run_dir(tmp_path: Path):
 
     assert Path(record.location) == (tmp_path / "runs" / run_id / "positions.csv").resolve()
     assert Path(record.location).read_bytes() == b"positions"
+
+
+def test_write_sidecar_artifact_duplicate_does_not_overwrite_file(tmp_path: Path):
+    """Duplicate stable sidecar IDs must fail before replacing retained bytes."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    first = backend.write_artifact(
+        run_id,
+        ArtifactWrite("sidecar", b"original", "positions.csv"),
+    )
+
+    with pytest.raises(ValueError, match="artifact already exists"):
+        backend.write_artifact(
+            run_id,
+            ArtifactWrite("sidecar", b"replacement", "positions.csv"),
+        )
+
+    assert Path(first.location).read_bytes() == b"original"
 
 
 def test_delete_run_artifacts_preserves_run_and_removes_payloads(tmp_path: Path):

@@ -42,8 +42,17 @@ from opx_chain.storage._disk import (
 from opx_chain.storage.serializers import get_serializer
 from opx_chain.storage.validation import (
     INVALID_TICKER_FILTER,
+    validate_artifact_write,
     validate_dataset_list_filters,
+    validate_dataset_id,
+    validate_dataset_write,
     validate_required_text,
+    validate_run_context,
+    validate_run_id,
+    validate_run_summary,
+    validate_stale_run_inputs,
+    validate_ticker_fetch_result,
+    validate_validation_record,
 )
 
 
@@ -375,8 +384,17 @@ class SqliteIndexedBackend:
         pending.extend(self._stage_sidecar_file_deletes(run_id))
         return pending
 
+    def _require_run_id(self, conn: sqlite3.Connection, run_id: str) -> str:
+        """Return a validated run id when the SQLite run row exists."""
+        run_id = validate_run_id(run_id)
+        row = conn.execute("SELECT 1 FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"run not found: {run_id}")
+        return run_id
+
     def delete_run_artifacts(self, run_id: str) -> None:
         """Delete storage-managed artifacts for a run while preserving run metadata."""
+        run_id = validate_run_id(run_id)
         pending: list[_DeferredDelete]
         with self._open_connection() as conn:
             pending = self._stage_run_artifact_deletes(conn, run_id)
@@ -419,6 +437,7 @@ class SqliteIndexedBackend:
 
     def create_run(self, context: RunContext) -> str:
         """Insert a new run row and return its run_id."""
+        context = validate_run_context(context)
         run_id = str(uuid.uuid4())
         with self._open_connection() as conn:
             conn.execute(
@@ -441,7 +460,9 @@ class SqliteIndexedBackend:
 
     def record_ticker_result(self, run_id: str, result: TickerFetchResult) -> None:
         """Insert or replace a per-ticker result row."""
+        result = validate_ticker_fetch_result(result)
         with self._open_connection() as conn:
+            run_id = self._require_run_id(conn, run_id)
             conn.execute(
                 """INSERT OR REPLACE INTO ticker_results
                    (run_id, ticker, raw_row_count, normalized_row_count,
@@ -464,7 +485,9 @@ class SqliteIndexedBackend:
 
     def record_validation(self, record: ValidationRecord) -> None:
         """Insert a validation summary record for a run."""
+        record = validate_validation_record(record)
         with self._open_connection() as conn:
+            self._require_run_id(conn, record.run_id)
             conn.execute(
                 """INSERT INTO validations
                    (run_id, severity, code, count, sample)
@@ -481,6 +504,9 @@ class SqliteIndexedBackend:
 
     def write_dataset(self, run_id: str, dataset: DatasetWrite) -> DatasetRecord:
         """Serialize the DataFrame, store metadata in SQLite, and return a DatasetRecord."""
+        dataset = validate_dataset_write(dataset)
+        with self._open_connection() as conn:
+            run_id = self._require_run_id(conn, run_id)
         output_dir = resolve_child_path(self._runs_dir, run_id) / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
         serializer = get_serializer(dataset.format)
@@ -534,11 +560,21 @@ class SqliteIndexedBackend:
 
     def write_artifact(self, run_id: str, artifact: ArtifactWrite) -> ArtifactRecord:
         """Write artifact bytes to disk and record metadata in SQLite."""
+        artifact = validate_artifact_write(artifact)
+        with self._open_connection() as conn:
+            run_id = self._require_run_id(conn, run_id)
         if artifact.artifact_type == "sidecar":
             dest = self._sidecar_path(run_id, artifact.filename)
             existed_before_write = dest.exists()
-            atomic_write_bytes(dest, artifact.content)
             artifact_id = f"{run_id}:{artifact.filename}"
+            with self._open_connection() as conn:
+                existing = conn.execute(
+                    "SELECT 1 FROM artifacts WHERE artifact_id = ?",
+                    (artifact_id,),
+                ).fetchone()
+            if existing is not None:
+                raise ValueError(f"artifact already exists: {artifact_id}")
+            atomic_write_bytes(dest, artifact.content)
             content_hash = content_hash_for_bytes(artifact.content)
             remove_empty_parent = False
         else:
@@ -631,6 +667,7 @@ class SqliteIndexedBackend:
 
     def get_dataset(self, dataset_id: str) -> DatasetHandle:
         """Return a DatasetHandle for the given dataset_id."""
+        dataset_id = validate_dataset_id(dataset_id)
         with self._open_connection() as conn:
             row = conn.execute(
                 "SELECT * FROM datasets WHERE dataset_id = ?", (dataset_id,)
@@ -645,7 +682,9 @@ class SqliteIndexedBackend:
 
     def finalize_run(self, run_id: str, summary: RunSummary) -> None:
         """Update the run row with a completion status."""
+        summary = validate_run_summary(summary)
         with self._open_connection() as conn:
+            run_id = self._require_run_id(conn, run_id)
             conn.execute(
                 "UPDATE runs SET status = ?, finished_at = ?, error_summary = ? "
                 "WHERE run_id = ? AND status = 'running'",
@@ -655,7 +694,9 @@ class SqliteIndexedBackend:
 
     def fail_run(self, run_id: str, error: str) -> None:
         """Update the run row with a failed status and error message."""
+        error = validate_required_text(error, name="error")
         with self._open_connection() as conn:
+            run_id = self._require_run_id(conn, run_id)
             conn.execute(
                 "UPDATE runs SET status = 'failed', finished_at = ?, error_summary = ? "
                 "WHERE run_id = ? AND status = 'running'",
@@ -665,6 +706,7 @@ class SqliteIndexedBackend:
 
     def interrupt_stale_runs(self, cutoff: datetime, error_summary: str) -> int:
         """Mark running runs older than cutoff as interrupted."""
+        cutoff, error_summary = validate_stale_run_inputs(cutoff, error_summary)
         with self._open_connection() as conn:
             cursor = conn.execute(
                 "UPDATE runs "
@@ -677,6 +719,7 @@ class SqliteIndexedBackend:
 
     def get_run(self, run_id: str) -> RunRecord:
         """Return a RunRecord for the given run_id."""
+        run_id = validate_run_id(run_id)
         with self._open_connection() as conn:
             row = conn.execute(
                 "SELECT * FROM runs WHERE run_id = ?", (run_id,)
@@ -723,6 +766,7 @@ class SqliteIndexedBackend:
 
     def get_ticker_results(self, run_id: str) -> list[TickerRunRecord]:
         """Return per-ticker results for a run."""
+        run_id = validate_run_id(run_id)
         with self._open_connection() as conn:
             run_exists = conn.execute(
                 "SELECT 1 FROM runs WHERE run_id = ?", (run_id,)

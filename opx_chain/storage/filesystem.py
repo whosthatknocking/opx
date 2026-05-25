@@ -37,8 +37,17 @@ from opx_chain.storage._disk import (
 from opx_chain.storage.serializers import get_serializer
 from opx_chain.storage.validation import (
     INVALID_TICKER_FILTER,
+    validate_artifact_write,
     validate_dataset_list_filters,
+    validate_dataset_id,
+    validate_dataset_write,
     validate_required_text,
+    validate_run_context,
+    validate_run_id,
+    validate_run_summary,
+    validate_stale_run_inputs,
+    validate_ticker_fetch_result,
+    validate_validation_record,
 )
 
 _DATASET_ARTIFACT_SUFFIXES = {".csv", ".parquet"}
@@ -166,12 +175,27 @@ class FilesystemBackend:
 
     def delete_run_artifacts(self, run_id: str) -> None:
         """Delete storage-managed artifacts for a run while preserving run metadata."""
+        run_id = validate_run_id(run_id)
         self._delete_run_artifacts(run_id)
         self._delete_run_payloads(run_id)
 
     def _read_run(self, run_id: str) -> dict:
         path = self._run_path(run_id)
         return loads_strict_json(path.read_text(encoding="utf-8"))
+
+    def _run_sidecar_exists(self, run_id: str) -> bool:
+        try:
+            return self._run_path(run_id).is_file()
+        except ValueError:
+            return False
+
+    def _require_run(self, run_id: str) -> tuple[str, dict]:
+        """Return validated run metadata when the run sidecar exists."""
+        run_id = validate_run_id(run_id)
+        try:
+            return run_id, self._read_run(run_id)
+        except FileNotFoundError as exc:
+            raise KeyError(f"run not found: {run_id}") from exc
 
     def _run_has_ticker(self, run_id: str, ticker: str) -> bool:
         try:
@@ -202,11 +226,14 @@ class FilesystemBackend:
     def _find_dataset_record(self, dataset_id: str) -> DatasetRecord:
         """Return a dataset record by id, preferring the dataset index."""
         for record in self._dataset_records():
-            if record.dataset_id == dataset_id:
+            if record.dataset_id == dataset_id and self._run_sidecar_exists(record.run_id):
                 return record
         meta_path = self._find_meta_path(dataset_id)
         data = loads_strict_json(meta_path.read_text(encoding="utf-8"))
-        return self._meta_to_record(data)
+        record = self._meta_to_record(data)
+        if not self._run_sidecar_exists(record.run_id):
+            raise KeyError(f"dataset not found: {dataset_id}")
+        return record
 
     def _write_meta(self, record: DatasetRecord) -> None:
         path = self._meta_path(record.dataset_id, record.run_id)
@@ -402,6 +429,7 @@ class FilesystemBackend:
 
     def create_run(self, context: RunContext) -> str:
         """Create a run sidecar JSON and return its run_id."""
+        context = validate_run_context(context)
         run_id = str(uuid.uuid4())
         data = {
             "run_id": run_id,
@@ -423,8 +451,9 @@ class FilesystemBackend:
 
     def record_ticker_result(self, run_id: str, result: TickerFetchResult) -> None:
         """Append a per-ticker result to the run sidecar."""
+        result = validate_ticker_fetch_result(result)
         with self._run_sidecar_lock:
-            data = self._read_run(run_id)
+            run_id, data = self._require_run(run_id)
             data["ticker_results"].append({
                 "ticker": result.ticker,
                 "raw_row_count": result.raw_row_count,
@@ -439,8 +468,9 @@ class FilesystemBackend:
 
     def record_validation(self, record: ValidationRecord) -> None:
         """Append a validation summary record to the run sidecar."""
+        record = validate_validation_record(record)
         with self._run_sidecar_lock:
-            data = self._read_run(record.run_id)
+            _, data = self._require_run(record.run_id)
             data.setdefault("validations", []).append({
                 "severity": record.severity,
                 "code": record.code,
@@ -451,6 +481,8 @@ class FilesystemBackend:
 
     def write_dataset(self, run_id: str, dataset: DatasetWrite) -> DatasetRecord:
         """Serialize the DataFrame, compute its hash, and write metadata."""
+        run_id, _ = self._require_run(run_id)
+        dataset = validate_dataset_write(dataset)
         output_dir = self._run_output_dir(run_id)
         output_dir.mkdir(parents=True, exist_ok=True)
         serializer = get_serializer(dataset.format)
@@ -486,6 +518,8 @@ class FilesystemBackend:
 
     def write_artifact(self, run_id: str, artifact: ArtifactWrite) -> ArtifactRecord:
         """Write artifact bytes to disk and return an ArtifactRecord."""
+        run_id, _ = self._require_run(run_id)
+        artifact = validate_artifact_write(artifact)
         if artifact.artifact_type == "sidecar":
             dest = self._sidecar_path(run_id, artifact.filename)
             atomic_write_bytes(dest, artifact.content)
@@ -527,6 +561,8 @@ class FilesystemBackend:
             return []
         results = []
         for record in self._dataset_records():
+            if not self._run_sidecar_exists(record.run_id):
+                continue
             if filters.provider is not None and record.provider != filters.provider:
                 continue
             if filters.since is not None and record.created_at < filters.since:
@@ -547,12 +583,14 @@ class FilesystemBackend:
 
     def get_dataset(self, dataset_id: str) -> DatasetHandle:
         """Return a DatasetHandle by loading the dataset's meta file."""
+        dataset_id = validate_dataset_id(dataset_id)
         return record_to_handle(self._find_dataset_record(dataset_id))
 
     def finalize_run(self, run_id: str, summary: RunSummary) -> None:
         """Update the run sidecar with a completion status."""
+        summary = validate_run_summary(summary)
         with self._run_sidecar_lock:
-            data = self._read_run(run_id)
+            run_id, data = self._require_run(run_id)
             if data.get("status") != "running":
                 return
             data["status"] = summary.status
@@ -562,8 +600,9 @@ class FilesystemBackend:
 
     def fail_run(self, run_id: str, error: str) -> None:
         """Update the run sidecar with a failed status and error message."""
+        error = validate_required_text(error, name="error")
         with self._run_sidecar_lock:
-            data = self._read_run(run_id)
+            run_id, data = self._require_run(run_id)
             if data.get("status") != "running":
                 return
             data["status"] = "failed"
@@ -573,6 +612,7 @@ class FilesystemBackend:
 
     def interrupt_stale_runs(self, cutoff: datetime, error_summary: str) -> int:
         """Mark running runs older than cutoff as interrupted."""
+        cutoff, error_summary = validate_stale_run_inputs(cutoff, error_summary)
         interrupted = 0
         if not self._runs_dir.exists():
             return interrupted
@@ -596,10 +636,7 @@ class FilesystemBackend:
 
     def get_run(self, run_id: str) -> RunRecord:
         """Return a RunRecord by loading the run sidecar."""
-        try:
-            data = self._read_run(run_id)
-        except FileNotFoundError as exc:
-            raise KeyError(f"run not found: {run_id}") from exc
+        run_id, data = self._require_run(run_id)
         return RunRecord(
             run_id=data["run_id"],
             started_at=iso_to_datetime(data["started_at"]),
@@ -646,10 +683,7 @@ class FilesystemBackend:
 
     def get_ticker_results(self, run_id: str) -> list[TickerRunRecord]:
         """Return per-ticker results stored in the run sidecar."""
-        try:
-            data = self._read_run(run_id)
-        except FileNotFoundError as exc:
-            raise KeyError(f"run not found: {run_id}") from exc
+        run_id, data = self._require_run(run_id)
         return [
             TickerRunRecord(
                 run_id=run_id,
