@@ -100,6 +100,27 @@ def test_load_positions_normalizes_option_symbols(tmp_path):
     ) in result.option_keys
 
 
+@pytest.mark.parametrize(
+    "symbol",
+    [
+        "-...260821P100",
+        "-.BAD260821P100",
+        "-BAD.260821P100",
+    ],
+)
+def test_load_positions_rejects_invalid_option_underlyings(tmp_path, symbol):
+    """Malformed option-underlying symbols should not enter the fetch universe."""
+    path = write_positions_csv(tmp_path, f"""\
+        Account Number,Account Name,Symbol,Description,Quantity,Last Price,Last Price Change,Current Value,Today's Gain/Loss Dollar,Today's Gain/Loss Percent,Total Gain/Loss Dollar,Total Gain/Loss Percent,Percent Of Account,Cost Basis Total,Average Cost Basis,Type
+        Z1,INDIVIDUAL, {symbol},INVALID OPTION,-1,$1.00,$0.00,-$100.00,,,,,,,,,Margin,
+    """)
+
+    result = load_positions(path)
+
+    assert result.option_keys == frozenset()
+    assert result.tickers == frozenset()
+
+
 def test_load_positions_rejects_occ_padded_option_symbols(tmp_path):
     """Full OCC symbols should not be misread as Fidelity shorthand strikes."""
     path = write_positions_csv(tmp_path, """\

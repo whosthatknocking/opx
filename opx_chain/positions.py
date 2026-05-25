@@ -14,13 +14,13 @@ from pathlib import Path
 from opx_chain.json_utils import dumps_strict_json
 from opx_chain.option_types import OPTION_TYPE_CALL, OPTION_TYPE_PUT
 from opx_chain.paths import get_default_positions_path
+from opx_chain.tickers import is_valid_ticker
 
 
 DEFAULT_POSITIONS_PATH = get_default_positions_path()
 STRIKE_MATCH_TOLERANCE = 0.01  # max abs difference when matching strikes across data sources
 
 _OPTION_RE = re.compile(r"^-?([A-Z.]+)(\d{2})(\d{2})(\d{2})([CP])(\d+\.?\d*)$")
-_VALID_TICKER_RE = re.compile(r"^[A-Z](?:[A-Z.]{0,9})$")
 _SKIP_SYMBOLS = {"SPAXX**"}
 _SKIP_PREFIXES = ("Pending",)
 
@@ -100,7 +100,8 @@ def _parse_option_symbol(raw: str) -> OptionPositionKey | None:
     if not m:
         return None
     ticker, yy, mm, dd, cp, strike_str = m.groups()
-    if strike_str.isdigit() and len(strike_str) == 8:
+    is_occ_padded_strike = strike_str.isdigit() and len(strike_str) == 8
+    if is_occ_padded_strike or not is_valid_ticker(ticker):
         # Fidelity exports use a plain decimal strike; OCC uses an 8-digit
         # strike scaled by 1000, which this parser intentionally does not decode.
         return None
@@ -125,7 +126,7 @@ def _parse_option_symbol(raw: str) -> OptionPositionKey | None:
 def _parse_stock_ticker(raw: str) -> str | None:
     """Normalize and validate a stock ticker from a positions row."""
     ticker = raw.strip().upper()
-    if _VALID_TICKER_RE.match(ticker):
+    if is_valid_ticker(ticker):
         return ticker
     return None
 

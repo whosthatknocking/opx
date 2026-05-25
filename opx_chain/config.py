@@ -30,6 +30,7 @@ from opx_chain.paths import (
     get_default_provider_cache_dir,
     resolve_relative_path,
 )
+from opx_chain.tickers import is_valid_ticker
 from opx_chain.version import __version__
 
 SUPPORTED_PROVIDERS = frozenset({"yfinance", "massive", "marketdata"})
@@ -297,6 +298,11 @@ def _clamp_massive_snapshot_page_limit(value: int, warnings: list[str]) -> int:
     return value
 
 
+def _valid_ticker_sequence(values: tuple[str, ...]) -> bool:
+    """Return True when every configured ticker has valid symbol syntax."""
+    return all(is_valid_ticker(value) for value in values)
+
+
 def load_runtime_config(  # pylint: disable=too-many-locals
     config_path: Path | None = None, *, today: date | None = None
 ) -> RuntimeConfig:
@@ -406,6 +412,8 @@ def load_runtime_config(  # pylint: disable=too-many-locals
             default=DEFAULT_TICKERS,
             coercer=_coerce_list,
             warnings=warnings,
+            validator=_valid_ticker_sequence,
+            constraint="must contain valid ticker symbols",
         ),
         min_bid=_resolve_config_value(
             settings.get("filters_min_bid"),
@@ -513,6 +521,8 @@ def load_runtime_config(  # pylint: disable=too-many-locals
             default=DEFAULT_STALE_QUOTE_SECONDS,
             coercer=_coerce_int,
             warnings=warnings,
+            validator=lambda value: value >= 0,
+            constraint="must be >= 0",
         ),
         enable_filters=_resolve_config_value(
             settings.get("filters_enable"),

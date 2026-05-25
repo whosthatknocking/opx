@@ -1,4 +1,5 @@
 """Config-loader and provider-selection tests for Milestone 1."""
+# pylint: disable=too-many-lines
 
 import subprocess
 import sys
@@ -236,6 +237,62 @@ max_age_days = 5
     assert config.massive_backoff_seconds == 2.5
     assert not any("providers.massive" in warning for warning in config.config_warnings)
     assert not any("providers.marketdata" in warning for warning in config.config_warnings)
+
+
+@pytest.mark.parametrize(
+    "ticker",
+    [
+        "...",
+        "bad/ticker",
+        "123ABC",
+        "TOO-LONG-TICKER",
+        ".BAD",
+        "BAD.",
+    ],
+)
+def test_load_runtime_config_defaults_invalid_ticker_symbols(
+    tmp_path: Path,
+    ticker: str,
+):
+    """Malformed configured tickers should not enter the fetch universe."""
+    config_path = tmp_path / "invalid-tickers.toml"
+    config_path.write_text(
+        f"""
+[settings]
+tickers = ["TSLA", "{ticker}"]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_runtime_config(config_path)
+
+    assert config.tickers == ("TSLA", "NVDA", "UBER", "MSFT", "GOOGL", "ORCL", "PLTR")
+    warning = next(
+        warning for warning in config.config_warnings if "settings.tickers" in warning
+    )
+    assert "must contain valid ticker symbols" in warning
+
+
+def test_load_runtime_config_defaults_negative_stale_quote_seconds(tmp_path: Path):
+    """Negative quote-staleness thresholds should fall back to the documented default."""
+    config_path = tmp_path / "negative-stale.toml"
+    config_path.write_text(
+        """
+[settings]
+stale_quote_seconds = -1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_runtime_config(config_path)
+
+    assert config.stale_quote_seconds == 10800
+    warning = next(
+        warning
+        for warning in config.config_warnings
+        if "settings.stale_quote_seconds" in warning
+    )
+    assert "must be >= 0" in warning
 
 
 def test_load_runtime_config_requires_massive_key_only_when_selected(tmp_path: Path):
