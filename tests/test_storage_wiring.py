@@ -8,7 +8,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 from conftest import make_runtime_config
+from opx_chain.config_coercion import ConfigError
 from opx_chain.fetcher import acquire_fetcher_lock, release_fetcher_lock
 from opx_chain.providers.base import ProviderQuotaError
 from opx_chain.runlog import logger_name
@@ -869,12 +871,33 @@ def test_run_fetch_tickers_override_replaces_config_tickers(tmp_path: Path):
     assert set_call[0][0].tickers == ("AAPL",)
 
 
+@pytest.mark.parametrize("bad_tickers", ["MSFT", b"MSFT", (), ("",), ("MSFT", 1)])
+def test_run_fetch_tickers_override_rejects_malformed_shapes(tmp_path: Path, bad_tickers):
+    """run_fetch(tickers=...) should reject scalar and malformed overrides."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True, tickers=("NVDA", "MSFT"))
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in patches]
+        with pytest.raises(ConfigError, match="run_fetch.tickers"):
+            fetcher.run_fetch(tickers=bad_tickers)
+
+    mocks[3].assert_not_called()  # acquire_fetcher_lock
+
+
 def test_run_fetch_data_provider_override_replaces_config_provider(tmp_path: Path):
     """run_fetch(data_provider=...) must use the supplied provider for this run."""
     from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
 
     backend = MemoryBackend()
-    config = make_runtime_config(storage_enabled=True, data_provider="yfinance")
+    config = make_runtime_config(
+        storage_enabled=True,
+        data_provider="yfinance",
+        marketdata_api_token="secret",
+    )
     patches = _fetcher_patches(tmp_path, config, backend)
 
     with ExitStack() as stack:
@@ -898,10 +921,37 @@ def test_run_fetch_data_provider_override_rejects_unknown_provider(tmp_path: Pat
         mocks = [stack.enter_context(p) for p in patches]
         try:
             fetcher.run_fetch(data_provider="bad-provider")
-        except ValueError as exc:
+        except ConfigError as exc:
             assert "unsupported data provider" in str(exc)
         else:  # pragma: no cover - defensive assertion branch
-            raise AssertionError("expected invalid data provider to raise ValueError")
+            raise AssertionError("expected invalid data provider to raise ConfigError")
+
+    mocks[3].assert_not_called()  # acquire_fetcher_lock
+
+
+@pytest.mark.parametrize(
+    ("provider_name", "expected_field"),
+    [
+        ("marketdata", "providers.marketdata.api_token"),
+        ("massive", "providers.massive.api_key"),
+    ],
+)
+def test_run_fetch_data_provider_override_requires_credentials(
+    tmp_path: Path,
+    provider_name,
+    expected_field,
+):
+    """Paid-provider overrides should fail with config errors before provider lookup."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True, data_provider="yfinance")
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in patches]
+        with pytest.raises(ConfigError, match=expected_field):
+            fetcher.run_fetch(data_provider=provider_name)
 
     mocks[3].assert_not_called()  # acquire_fetcher_lock
 
@@ -950,6 +1000,67 @@ def test_run_fetch_max_expiration_override_can_disable_filter(tmp_path: Path):
     active_config = set_call[0][0]
     assert active_config.max_expiration_weeks == 0
     assert active_config.max_expiration is None
+
+
+@pytest.mark.parametrize("bad_weeks", [True, 1.5, "4", -1])
+def test_run_fetch_max_expiration_override_rejects_malformed_values(tmp_path: Path, bad_weeks):
+    """Direct expiration overrides should use config-loader integer/range rules."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True)
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in patches]
+        with pytest.raises(ConfigError, match="run_fetch.max_expiration_weeks"):
+            fetcher.run_fetch(max_expiration_weeks=bad_weeks)
+
+    mocks[3].assert_not_called()  # acquire_fetcher_lock
+
+
+@pytest.mark.parametrize("bad_seconds", [False, 1.5, "3600", -1])
+def test_run_fetch_stale_quote_seconds_rejects_malformed_values(tmp_path: Path, bad_seconds):
+    """Direct staleness overrides should reject bool, fractional, string, and negative values."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True)
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in patches]
+        with pytest.raises(ConfigError, match="run_fetch.stale_quote_seconds"):
+            fetcher.run_fetch(stale_quote_seconds=bad_seconds)
+
+    mocks[3].assert_not_called()  # acquire_fetcher_lock
+
+
+@pytest.mark.parametrize(
+    ("override_name", "kwargs"),
+    [
+        ("run_fetch.dry_run", {"dry_run": "false"}),
+        ("run_fetch.price_context_only", {"price_context_only": "false"}),
+    ],
+)
+def test_run_fetch_boolean_overrides_reject_false_like_strings(
+    tmp_path: Path,
+    override_name,
+    kwargs,
+):
+    """String booleans should not select run_fetch modes by raw truthiness."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True)
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in patches]
+        with pytest.raises(ConfigError, match=override_name):
+            fetcher.run_fetch(**kwargs)
+
+    mocks[3].assert_not_called()  # acquire_fetcher_lock
 
 
 def test_run_fetch_dry_run_makes_no_api_calls_and_no_writes(tmp_path: Path):

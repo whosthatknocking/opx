@@ -20,6 +20,7 @@ from opx_chain.config import (
     get_runtime_config_override,
     set_runtime_config_override,
 )
+from opx_chain.config_coercion import ConfigError
 from opx_chain.export import prepare_export_frame, write_options_csv
 from opx_chain.fetch import fetch_ticker_option_chain, fetch_ticker_price_context
 from opx_chain.iv_history_backfill import run_iv_history_backfill
@@ -142,8 +143,45 @@ def apply_cli_overrides(config, args):
     return config, ", ".join(override_labels) if override_labels else None
 
 
+def _coerce_run_fetch_bool(value, *, field_name: str) -> bool:
+    """Validate boolean run_fetch overrides at the public API boundary."""
+    if not isinstance(value, bool):
+        raise ConfigError(f"Config field '{field_name}' must be true or false.")
+    return value
+
+
+def _coerce_run_fetch_non_negative_int(value, *, field_name: str) -> int:
+    """Validate nonnegative integer run_fetch overrides."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"Config field '{field_name}' must be an integer.")
+    if value < 0:
+        raise ConfigError(f"Config field '{field_name}' must be >= 0.")
+    return value
+
+
+def _coerce_run_fetch_tickers(tickers) -> tuple[str, ...]:
+    """Validate and normalize programmatic ticker overrides."""
+    if isinstance(tickers, (str, bytes)) or not isinstance(tickers, (list, tuple)):
+        raise ConfigError("Config field 'run_fetch.tickers' must be a sequence of strings.")
+    normalized = []
+    for ticker in tickers:
+        if not isinstance(ticker, str):
+            raise ConfigError("Config field 'run_fetch.tickers' must be a sequence of strings.")
+        symbol = ticker.strip().upper()
+        if not symbol:
+            raise ConfigError("Config field 'run_fetch.tickers' must not contain blank values.")
+        normalized.append(symbol)
+    if not normalized:
+        raise ConfigError("Config field 'run_fetch.tickers' must not be empty.")
+    return tuple(normalized)
+
+
 def _with_max_expiration_weeks(config, max_expiration_weeks: int):
     """Return config with the expiration-window source and derived date in sync."""
+    max_expiration_weeks = _coerce_run_fetch_non_negative_int(
+        max_expiration_weeks,
+        field_name="run_fetch.max_expiration_weeks",
+    )
     max_expiration = (
         None
         if max_expiration_weeks == 0
@@ -158,11 +196,23 @@ def _with_max_expiration_weeks(config, max_expiration_weeks: int):
 
 def _with_data_provider(config, data_provider: str):
     """Return config with a validated provider override for this run only."""
+    if not isinstance(data_provider, str):
+        raise ConfigError("Config field 'run_fetch.data_provider' must be a string.")
     provider = str(data_provider or "").strip().lower()
     if provider not in SUPPORTED_PROVIDERS:
         supported = ", ".join(sorted(SUPPORTED_PROVIDERS))
-        raise ValueError(
+        raise ConfigError(
             f"unsupported data provider {data_provider!r}; expected one of: {supported}"
+        )
+    if provider == "marketdata" and not config.marketdata_api_token:
+        raise ConfigError(
+            "Config field 'providers.marketdata.api_token' is required when "
+            "run_fetch.data_provider='marketdata'."
+        )
+    if provider == "massive" and not config.massive_api_key:
+        raise ConfigError(
+            "Config field 'providers.massive.api_key' is required when "
+            "run_fetch.data_provider='massive'."
         )
     return replace(config, data_provider=provider)
 
@@ -808,12 +858,23 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     Propagates any provider-level exception on fatal failure.
     """
     config = get_runtime_config()
+    dry_run = _coerce_run_fetch_bool(dry_run, field_name="run_fetch.dry_run")
+    price_context_only = _coerce_run_fetch_bool(
+        price_context_only,
+        field_name="run_fetch.price_context_only",
+    )
     if tickers is not None:
-        config = replace(config, tickers=tuple(tickers))
+        config = replace(config, tickers=_coerce_run_fetch_tickers(tickers))
     if max_expiration_weeks is not None:
         config = _with_max_expiration_weeks(config, max_expiration_weeks)
     if stale_quote_seconds is not None:
-        config = replace(config, stale_quote_seconds=stale_quote_seconds)
+        config = replace(
+            config,
+            stale_quote_seconds=_coerce_run_fetch_non_negative_int(
+                stale_quote_seconds,
+                field_name="run_fetch.stale_quote_seconds",
+            ),
+        )
     if data_provider is not None:
         config = _with_data_provider(config, data_provider)
     if price_context_only:
