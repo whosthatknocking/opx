@@ -949,6 +949,18 @@ def test_append_underlying_snapshot_fields_is_stale_underlying_price_stays_nulla
     assert fresh.loc[0, "is_stale_underlying_price"] is False
     assert fresh.loc[1, "is_stale_underlying_price"] is False
 
+    future_snapshot = {
+        "underlying_price_time": pd.Timestamp("2026-03-20T16:05:00Z"),
+        "underlying_day_change_pct": 0.0,
+        "historical_volatility": 0.25,
+    }
+    future = fetch.append_underlying_snapshot_fields(
+        df.copy(), future_snapshot, fetched_at, stale_quote_seconds=3600
+    )
+    assert future["is_stale_underlying_price"].dtype == object
+    assert future.loc[0, "is_stale_underlying_price"] is True
+    assert future.loc[1, "is_stale_underlying_price"] is True
+
     missing_snapshot = {
         "underlying_price_time": pd.NaT,
         "underlying_day_change_pct": 0.0,

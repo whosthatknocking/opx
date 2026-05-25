@@ -410,6 +410,36 @@ def test_format_freshness_summary_lines_handles_missing_timestamp_columns(tmp_pa
     )
 
 
+def test_format_freshness_summary_lines_treats_future_timestamps_as_stale(tmp_path):
+    """Future quote timestamps are suspect and should not pass freshness checks."""
+    out_path = _write_output(tmp_path, "options_engine_output_test.csv", [
+        {
+            "underlying_symbol": "GOOGL",
+            "option_quote_time": "2026-04-21T14:05:56Z",
+            "underlying_price_time": "2026-04-21T14:10:56Z",
+            "is_stale_quote": False,
+            "is_stale_underlying_price": False,
+        },
+    ])
+
+    lines = format_freshness_summary_lines(
+        out_path,
+        now=pd.Timestamp("2026-04-21T13:50:56Z"),
+    )
+    rendered = "\n".join(lines)
+
+    assert (
+        "option_quotes_now: rows_with_timestamp=1  stale_now_rows=1  stale_at_fetch_rows=0"
+        in rendered
+    )
+    assert (
+        "underlying_quotes_now: rows_with_timestamp=1  stale_now_rows=1  "
+        "stale_at_fetch_rows=0" in rendered
+    )
+    assert "stale_underlyings_now:" in rendered
+    assert "GOOGL" in rendered
+
+
 def test_format_iso_timestamp_formats_naive_timestamps_as_utc():
     """Naive timestamp values should be treated as UTC instead of crashing."""
     assert (

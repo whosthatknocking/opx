@@ -244,7 +244,7 @@ def _summarize_quote_freshness(
         stale_at_fetch_rows = int(sum(_is_true_like(value) for value in stored_flags[valid_mask]))
     return {
         "rows_with_timestamp": rows_with_timestamp,
-        "stale_now_rows": int((age_seconds > stale_seconds).sum()),
+        "stale_now_rows": int(((age_seconds < 0) | (age_seconds > stale_seconds)).sum()),
         "stale_at_fetch_rows": stale_at_fetch_rows,
         "newest_timestamp": valid_timestamps.max(),
         "oldest_timestamp": valid_timestamps.min(),
@@ -276,7 +276,7 @@ def _summarize_underlying_freshness_now(
         newest_timestamp = group["underlying_price_time"].max()
         oldest_timestamp = group["underlying_price_time"].min()
         newest_age_seconds = (now - newest_timestamp).total_seconds()
-        if newest_age_seconds <= stale_seconds:
+        if 0 <= newest_age_seconds <= stale_seconds:
             continue
         rows.append({
             "symbol": str(symbol),

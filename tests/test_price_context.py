@@ -81,6 +81,22 @@ def test_compute_price_context_blanks_stale_numeric_fields():
     assert all(context[field] is None for field in PRICE_CONTEXT_FIELDS)
 
 
+def test_compute_price_context_blanks_future_daily_history():
+    """Future-dated history should be suspect instead of exported as fresh context."""
+    context = compute_price_context(
+        _history(start="2026-05-06", periods=3),
+        source="unit",
+        today=date(2026, 5, 5),
+        max_age_days=7,
+    )
+
+    assert context["price_context_staleness_status"] == PriceContextStatus.ERROR.value
+    assert context["price_context_as_of"] == "2026-05-08"
+    assert context["price_context_age_days"] == -3
+    assert context["price_context_lookback_trading_days"] == 3
+    assert all(context[field] is None for field in PRICE_CONTEXT_FIELDS)
+
+
 def test_compute_price_context_returns_blank_payload_for_missing_history():
     """Missing or malformed history should not raise."""
     context = compute_price_context(

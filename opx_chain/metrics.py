@@ -475,7 +475,8 @@ def add_screening_and_freshness_flags(df, fetched_at):
     df["quote_age_seconds"] = (fetched_at - df["option_quote_time"]).dt.total_seconds()
     df["is_stale_quote"] = np.where(
         df["quote_age_seconds"].notna(),
-        df["quote_age_seconds"] > config.stale_quote_seconds,
+        (df["quote_age_seconds"] < 0)
+        | (df["quote_age_seconds"] > config.stale_quote_seconds),
         None,
     )
     df["days_bucket"] = _compute_days_bucket(df["days_to_expiration"])

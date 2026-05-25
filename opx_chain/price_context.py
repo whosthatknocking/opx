@@ -243,7 +243,7 @@ def _latest_unfilled_gap(history: pd.DataFrame, window: int = 60) -> float | Non
 def _age_days(as_of: pd.Timestamp, today: date) -> int | None:
     if pd.isna(as_of):
         return None
-    return max((today - as_of.date()).days, 0)
+    return (today - as_of.date()).days
 
 
 def compute_price_context(  # pylint: disable=too-many-locals
@@ -267,6 +267,16 @@ def compute_price_context(  # pylint: disable=too-many-locals
     age_days = _age_days(as_of, today)
     if age_days is None:
         return blank_price_context(source=source)
+    if age_days < 0:
+        context = blank_price_context(source=source, status=PriceContextStatus.ERROR)
+        context.update(
+            {
+                "price_context_as_of": as_of.date().isoformat(),
+                "price_context_age_days": age_days,
+                "price_context_lookback_trading_days": int(len(normalized)),
+            }
+        )
+        return context
     if age_days > max_age_days:
         context = blank_price_context(source=source, status=PriceContextStatus.STALE)
         context.update(
