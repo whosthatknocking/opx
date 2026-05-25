@@ -94,6 +94,50 @@ def _compute_is_in_the_money(result: Any, option_type: str | None) -> bool | Non
         return bool(underlying_price < strike_price)
     return None
 
+
+def _underlying_price(result: Any) -> float:
+    """Return the finite underlying price candidate from one snapshot row."""
+    return coerce_float(
+        _coalesce(
+            _get_field(result, "underlying_asset", "price"),
+            _get_field(result, "underlying_asset", "value"),
+        )
+    )
+
+
+def _underlying_timestamp(result: Any):
+    """Return the best available underlying-state timestamp from one snapshot row."""
+    return normalize_timestamp(
+        _coalesce(
+            _get_field(result, "underlying_asset", "last_updated"),
+            _get_field(result, "day", "last_updated"),
+            _get_field(result, "last_trade", "sip_timestamp"),
+            _get_field(result, "last_quote", "last_updated"),
+            _get_field(result, "last_quote", "sip_timestamp"),
+        )
+    )
+
+
+def _select_underlying_snapshot_result(results: tuple[Any, ...]) -> Any:
+    """Choose the snapshot row with the strongest paired underlying state."""
+    fallback = None
+    best = None
+    best_timestamp = pd.NaT
+    for result in results:
+        price = _underlying_price(result)
+        if pd.isna(price):
+            continue
+        timestamp = _underlying_timestamp(result)
+        if pd.isna(timestamp):
+            if fallback is None:
+                fallback = result
+            continue
+        if best is None or timestamp > best_timestamp:
+            best = result
+            best_timestamp = timestamp
+    return best or fallback or results[0]
+
+
 class MassiveProvider(DataProvider):  # pylint: disable=too-many-instance-attributes
     """Market-data provider backed by the official Massive/Polygon REST client."""
 
@@ -271,23 +315,10 @@ class MassiveProvider(DataProvider):  # pylint: disable=too-many-instance-attrib
         if not results:
             return empty_underlying_snapshot()
 
-        first = results[0]
-        underlying_price = coerce_float(
-            _coalesce(
-                _get_field(first, "underlying_asset", "price"),
-                _get_field(first, "underlying_asset", "value"),
-            )
-        )
-        underlying_price_time = normalize_timestamp(
-            _coalesce(
-                _get_field(first, "underlying_asset", "last_updated"),
-                _get_field(first, "day", "last_updated"),
-                _get_field(first, "last_trade", "sip_timestamp"),
-                _get_field(first, "last_quote", "last_updated"),
-                _get_field(first, "last_quote", "sip_timestamp"),
-            )
-        )
-        previous_close = coerce_float(_get_field(first, "day", "previous_close"))
+        snapshot_row = _select_underlying_snapshot_result(results)
+        underlying_price = _underlying_price(snapshot_row)
+        underlying_price_time = _underlying_timestamp(snapshot_row)
+        previous_close = coerce_float(_get_field(snapshot_row, "day", "previous_close"))
         if pd.notna(underlying_price) and pd.notna(previous_close) and previous_close > 0:
             underlying_day_change_pct = (underlying_price - previous_close) / previous_close
         else:

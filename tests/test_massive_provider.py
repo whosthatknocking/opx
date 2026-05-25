@@ -1,5 +1,6 @@
 """Massive provider tests covering snapshot parsing and retry behavior."""
 
+import copy
 import json
 from datetime import date, timedelta
 from pathlib import Path
@@ -270,6 +271,34 @@ def test_massive_provider_underlying_price_falls_back_to_value(monkeypatch):
     snapshot = provider.load_underlying_snapshot("TSLA")
 
     assert snapshot["underlying_price"] == 101.25
+
+
+def test_massive_provider_selects_later_valid_underlying_snapshot(monkeypatch):
+    """Malformed first rows should not hide later usable underlying snapshots."""
+    payload = list(copy.deepcopy(make_snapshot_results()))
+    payload[0]["underlying_asset"]["price"] = None
+    payload[0]["underlying_asset"]["value"] = None
+    payload[0]["underlying_asset"]["last_updated"] = None
+    payload[0]["day"]["last_updated"] = None
+    payload[0]["last_trade"]["sip_timestamp"] = None
+    payload[0]["last_quote"]["last_updated"] = None
+    payload[0]["last_quote"]["sip_timestamp"] = None
+    payload[0]["day"]["previous_close"] = None
+    payload[1]["underlying_asset"]["price"] = 105.0
+    payload[1]["underlying_asset"]["last_updated"] = "2026-03-20T13:45:00Z"
+    payload[1]["day"]["previous_close"] = 100.0
+    monkeypatch.setattr(
+        MassiveProvider,
+        "_snapshot_results",
+        lambda self, ticker: tuple(payload),
+    )
+    provider = MassiveProvider()
+
+    snapshot = provider.load_underlying_snapshot("TSLA")
+
+    assert snapshot["underlying_price"] == 105.0
+    assert snapshot["underlying_day_change_pct"] == 0.05
+    assert str(snapshot["underlying_price_time"]) == "2026-03-20 13:45:00+00:00"
 
 
 def test_massive_provider_does_not_use_option_day_change_as_underlying_day_change(monkeypatch):
