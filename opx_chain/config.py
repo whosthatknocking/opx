@@ -852,6 +852,11 @@ def set_runtime_config_override(config: RuntimeConfig | None) -> None:
     _load_runtime_config_for_market_day.cache_clear()
 
 
+def get_runtime_config_override() -> RuntimeConfig | None:
+    """Return the active process runtime config override, if any."""
+    return _RUNTIME_CONFIG_OVERRIDE
+
+
 def reset_runtime_config() -> None:
     """Clear the cached runtime config, primarily for tests."""
     set_runtime_config_override(None)

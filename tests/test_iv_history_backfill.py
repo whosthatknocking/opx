@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from conftest import make_runtime_config
+from opx_chain.config import get_runtime_config, set_runtime_config_override
 from opx_chain.iv_history import IVHistoryStore
 from opx_chain.iv_history_backfill import (
     format_backfill_result,
@@ -534,6 +535,31 @@ def test_iv_history_historical_fetch_ingests_marketdata_snapshots(tmp_path):
     stats = store.stats(provider="marketdata", ticker="TSLA")
     assert stats.observation_dates == 2
     assert stats.latest_date == date(2026, 5, 22)
+
+
+def test_iv_history_historical_fetch_restores_existing_runtime_override(tmp_path):
+    """Historical provider overrides should not clear an embedding caller override."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    provider = HistoricalProvider()
+    outer_config = make_runtime_config(data_provider="yfinance", tickers=("OUTER",))
+    config = make_runtime_config(
+        data_provider="marketdata",
+        tickers=("TSLA",),
+        today=date(2026, 5, 22),
+    )
+    set_runtime_config_override(outer_config)
+
+    run_iv_history_backfill(
+        providers=("marketdata",),
+        tickers=("TSLA",),
+        fetch_historical=True,
+        sessions=1,
+        config=config,
+        store=store,
+        provider_factory=lambda _provider_name: provider,
+    )
+
+    assert get_runtime_config() is outer_config
 
 
 def test_iv_history_historical_fetch_rejects_provider_identity_mismatch(tmp_path):

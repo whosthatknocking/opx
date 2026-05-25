@@ -17,6 +17,7 @@ from opx_chain.config import (
     SUPPORTED_PROVIDERS,
     describe_runtime_config,
     get_runtime_config,
+    get_runtime_config_override,
     set_runtime_config_override,
 )
 from opx_chain.export import prepare_export_frame, write_options_csv
@@ -817,6 +818,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
         config = _with_data_provider(config, data_provider)
     if price_context_only:
         config = replace(config, price_context_enable=True)
+    previous_override = get_runtime_config_override()
     if dry_run:
         try:
             set_runtime_config_override(config)
@@ -829,7 +831,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
                     price_context_only=price_context_only,
                 )
         finally:
-            set_runtime_config_override(None)
+            set_runtime_config_override(previous_override)
         return
 
     lock_path = _fetcher_lock_path(config)
@@ -847,7 +849,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
                 price_context_only=price_context_only,
             )
     finally:
-        set_runtime_config_override(None)
+        set_runtime_config_override(previous_override)
         release_fetcher_lock(lock_handle, lock_path)
 
 
@@ -859,6 +861,7 @@ def _run_dry_run(
     price_context_only: bool = False,
 ) -> int:
     """Run dry-run validation without acquiring the cross-process fetcher lock."""
+    previous_override = get_runtime_config_override()
     try:
         set_runtime_config_override(config)
         with _SigtermAsKeyboardInterrupt():
@@ -875,7 +878,7 @@ def _run_dry_run(
     except Exception:  # pylint: disable=broad-exception-caught
         return 1
     finally:
-        set_runtime_config_override(None)
+        set_runtime_config_override(previous_override)
 
 
 def main(argv=None):
@@ -895,6 +898,7 @@ def main(argv=None):
     if lock_handle is None:
         print(f"Another fetcher run is already active: {lock_path}")
         return 1
+    previous_override = get_runtime_config_override()
     try:
         set_runtime_config_override(config)
         with _SigtermAsKeyboardInterrupt():
@@ -911,7 +915,7 @@ def main(argv=None):
     except Exception:  # pylint: disable=broad-exception-caught
         return 1
     finally:
-        set_runtime_config_override(None)
+        set_runtime_config_override(previous_override)
         release_fetcher_lock(lock_handle, lock_path)
 
 

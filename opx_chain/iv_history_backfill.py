@@ -17,6 +17,7 @@ from opx_chain.config import (
     SUPPORTED_PROVIDERS,
     RuntimeConfig,
     get_runtime_config,
+    get_runtime_config_override,
     set_runtime_config_override,
 )
 from opx_chain.iv_history import (
@@ -361,6 +362,7 @@ def _historical_fetch_rows(  # pylint: disable=too-many-arguments,too-many-local
         return rows
 
     provider_factory = provider_factory or (lambda _provider_name: get_data_provider())
+    previous_override = get_runtime_config_override()
     try:
         for provider_name in providers:
             set_runtime_config_override(
@@ -475,7 +477,7 @@ def _historical_fetch_rows(  # pylint: disable=too-many-arguments,too-many-local
                             )
                         )
     finally:
-        set_runtime_config_override(None)
+        set_runtime_config_override(previous_override)
     return rows
 
 

@@ -27,6 +27,7 @@ PRICE_HISTORY_SCHEMA_MIGRATIONS: dict[int, str] = {}
 PRICE_HISTORY_TAIL_REFRESH_DAYS = 7
 _VALID_TICKER_RE = re.compile(r"^[A-Z](?:[A-Z.]{0,9})$")
 _SYNC_STATUSES = frozenset({"ok", "error"})
+_EMPTY_PROVIDER_RESPONSE = "provider returned no usable price history rows"
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS _schema_meta (
@@ -570,7 +571,20 @@ def get_price_history_store(config=None) -> PriceHistoryStore:
 def _sync_recent(sync: PriceHistorySync | None, *, ttl_seconds: int, now: datetime) -> bool:
     if sync is None:
         return False
+    if sync.status != "ok":
+        return False
+    if sync.checked_at > now:
+        return False
     return (now - sync.checked_at).total_seconds() < ttl_seconds
+
+
+def _latest_history_date(history: pd.DataFrame) -> date | None:
+    if history.empty or "date" not in history.columns:
+        return None
+    dates = pd.to_datetime(history["date"], utc=True, errors="coerce").dropna()
+    if dates.empty:
+        return None
+    return dates.max().date()
 
 
 def _fetch_days_for_reason(
@@ -588,18 +602,42 @@ def _fetch_days_for_reason(
 
 def _reconciliation_reason(
     *,
-    stats: PriceHistoryStats,
     history: pd.DataFrame,
     lookback_days: int,
     today: date,
 ) -> str | None:
-    if history.empty or stats.row_count == 0:
+    if history.empty:
         return "missing"
-    if stats.row_count < lookback_days:
+    if len(history) < lookback_days:
         return "backfill"
-    if stats.latest_date is None or stats.latest_date < today:
+    latest_date = _latest_history_date(history)
+    if latest_date is None or latest_date < today:
         return "tail"
     return None
+
+
+def _load_sync_for_reconcile(
+    *,
+    store: PriceHistoryStore,
+    provider: str,
+    ticker: str,
+    lookback_days: int,
+    logger=None,
+) -> PriceHistorySync | None:
+    try:
+        return store.get_sync(
+            provider=provider,
+            ticker=ticker,
+            lookback_days=lookback_days,
+        )
+    except (TypeError, ValueError) as exc:
+        if logger:
+            logger.warning(
+                "%s: ignoring malformed price_history sync metadata: %s",
+                ticker,
+                exc,
+            )
+        return None
 
 
 def reconcile_price_history(  # pylint: disable=too-many-locals
@@ -615,6 +653,10 @@ def reconcile_price_history(  # pylint: disable=too-many-locals
     provider_name = provider.name
     today = config.today
     lookback_days = config.price_context_lookback_days
+    ttl_seconds = _non_negative_int(
+        config.provider_price_context_ttl,
+        name="provider_price_context_ttl",
+    )
     now = utc_now()
     history = store.load_recent_bars(
         provider=provider_name,
@@ -622,21 +664,21 @@ def reconcile_price_history(  # pylint: disable=too-many-locals
         lookback_days=lookback_days,
         end_date=today,
     )
-    stats = store.stats(provider=provider_name, ticker=ticker)
     reason = _reconciliation_reason(
-        stats=stats,
         history=history,
         lookback_days=lookback_days,
         today=today,
     )
-    sync = store.get_sync(
+    sync = _load_sync_for_reconcile(
+        store=store,
         provider=provider_name,
         ticker=ticker,
         lookback_days=lookback_days,
+        logger=logger,
     )
     if reason is None or _sync_recent(
         sync,
-        ttl_seconds=config.provider_price_context_ttl,
+        ttl_seconds=ttl_seconds,
         now=now,
     ):
         return PriceHistoryReconcileResult(history=history, fetched=False)
@@ -644,7 +686,7 @@ def reconcile_price_history(  # pylint: disable=too-many-locals
     requested_lookback_days = _fetch_days_for_reason(
         reason=reason,
         lookback_days=lookback_days,
-        latest_date=stats.latest_date,
+        latest_date=_latest_history_date(history),
         today=today,
     )
     try:
@@ -659,23 +701,44 @@ def reconcile_price_history(  # pylint: disable=too-many-locals
             history=raw_history,
             fetched_at=now,
         )
-        stats = store.stats(provider=provider_name, ticker=ticker)
+        history = store.load_recent_bars(
+            provider=provider_name,
+            ticker=ticker,
+            lookback_days=lookback_days,
+            end_date=today,
+        )
+        latest_history_date = _latest_history_date(history)
+        if fetched_rows == 0 or stored_rows == 0:
+            store.record_sync(
+                provider=provider_name,
+                ticker=ticker,
+                lookback_days=lookback_days,
+                status="error",
+                requested_lookback_days=requested_lookback_days,
+                latest_trading_date=latest_history_date,
+                fetched_rows=fetched_rows,
+                stored_rows=stored_rows,
+                error_summary=_EMPTY_PROVIDER_RESPONSE,
+                checked_at=now,
+            )
+            return PriceHistoryReconcileResult(
+                history=history,
+                fetched=False,
+                requested_lookback_days=requested_lookback_days,
+                fetched_rows=fetched_rows,
+                stored_rows=stored_rows,
+                error_summary=_EMPTY_PROVIDER_RESPONSE,
+            )
         store.record_sync(
             provider=provider_name,
             ticker=ticker,
             lookback_days=lookback_days,
             status="ok",
             requested_lookback_days=requested_lookback_days,
-            latest_trading_date=stats.latest_date,
+            latest_trading_date=latest_history_date,
             fetched_rows=fetched_rows,
             stored_rows=stored_rows,
             checked_at=now,
-        )
-        history = store.load_recent_bars(
-            provider=provider_name,
-            ticker=ticker,
-            lookback_days=lookback_days,
-            end_date=today,
         )
         return PriceHistoryReconcileResult(
             history=history,
@@ -686,14 +749,19 @@ def reconcile_price_history(  # pylint: disable=too-many-locals
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught
         message = str(exc).splitlines()[0]
-        stats = store.stats(provider=provider_name, ticker=ticker)
+        history = store.load_recent_bars(
+            provider=provider_name,
+            ticker=ticker,
+            lookback_days=lookback_days,
+            end_date=today,
+        )
         store.record_sync(
             provider=provider_name,
             ticker=ticker,
             lookback_days=lookback_days,
             status="error",
             requested_lookback_days=requested_lookback_days,
-            latest_trading_date=stats.latest_date,
+            latest_trading_date=_latest_history_date(history),
             fetched_rows=0,
             stored_rows=0,
             error_summary=message,

@@ -1,12 +1,13 @@
 """Provider-scoped daily price-history backfill command."""
 
-# pylint: disable=too-many-instance-attributes
+# pylint: disable=too-many-instance-attributes,duplicate-code
 
 from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, replace
 from datetime import date
+import re
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
@@ -14,6 +15,7 @@ from opx_chain.config import (
     SUPPORTED_PROVIDERS,
     RuntimeConfig,
     get_runtime_config,
+    get_runtime_config_override,
     set_runtime_config_override,
 )
 from opx_chain.locks import acquire_nonblocking_file_lock, release_file_lock
@@ -27,6 +29,7 @@ from opx_chain.price_history import (
 from opx_chain.providers import get_data_provider
 
 PRICE_HISTORY_BACKFILL_PROVIDERS = frozenset({"marketdata", "yfinance"})
+_VALID_TICKER_RE = re.compile(r"^[A-Z](?:[A-Z.]{0,9})$")
 
 
 @dataclass(frozen=True)
@@ -57,12 +60,16 @@ class PriceHistoryBackfillResult:
     rows: tuple[PriceHistoryBackfillRow, ...]
 
 
-def _normalize_csv_values(values: Iterable[str] | None) -> tuple[str, ...]:
+def _normalize_csv_values(values: Iterable[str] | str | None, *, name: str) -> tuple[str, ...]:
     if values is None:
         return ()
+    if isinstance(values, str):
+        values = (values,)
     normalized: list[str] = []
     for raw_value in values:
-        for item in str(raw_value).split(","):
+        if not isinstance(raw_value, str):
+            raise ValueError(f"{name} must be a string or iterable of strings")
+        for item in raw_value.split(","):
             value = item.strip()
             if value:
                 normalized.append(value)
@@ -70,10 +77,13 @@ def _normalize_csv_values(values: Iterable[str] | None) -> tuple[str, ...]:
 
 
 def _normalize_providers(
-    values: Iterable[str] | None,
+    values: Iterable[str] | str | None,
     default_provider: str,
 ) -> tuple[str, ...]:
-    providers = tuple(provider.lower() for provider in _normalize_csv_values(values))
+    providers = tuple(
+        provider.lower()
+        for provider in _normalize_csv_values(values, name="providers")
+    )
     if not providers:
         providers = (default_provider.lower(),)
     unsupported = sorted(set(providers) - SUPPORTED_PROVIDERS)
@@ -93,19 +103,47 @@ def _normalize_providers(
 
 
 def _normalize_tickers(
-    values: Iterable[str] | None,
+    values: Iterable[str] | str | None,
     default_tickers: Sequence[str],
 ) -> tuple[str, ...]:
-    tickers = tuple(ticker.upper() for ticker in _normalize_csv_values(values))
+    tickers = tuple(
+        _normalize_ticker(ticker)
+        for ticker in _normalize_csv_values(values, name="tickers")
+    )
     if not tickers:
         tickers = tuple(
-            str(ticker).upper().strip()
+            _normalize_ticker(ticker)
             for ticker in default_tickers
             if str(ticker).strip()
         )
     if not tickers:
         raise ValueError("at least one ticker is required")
     return tickers
+
+
+def _normalize_ticker(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("ticker must be a non-empty string")
+    text = value.upper().strip()
+    if not text:
+        raise ValueError("ticker must be a non-empty string")
+    if not _VALID_TICKER_RE.fullmatch(text):
+        raise ValueError("ticker must be a valid stock ticker symbol")
+    return text
+
+
+def _strict_bool(value: bool, *, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{name} must be a boolean")
+    return value
+
+
+def _positive_int(value: int, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be a positive integer")
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
 
 
 def _lock_path(config: RuntimeConfig) -> Path:
@@ -139,8 +177,8 @@ def _status_for_result(result: PriceHistoryReconcileResult) -> str:
 
 def run_price_history_backfill(  # pylint: disable=too-many-arguments,too-many-locals
     *,
-    providers: Iterable[str] | None = None,
-    tickers: Iterable[str] | None = None,
+    providers: Iterable[str] | str | None = None,
+    tickers: Iterable[str] | str | None = None,
     lookback_days: int | None = None,
     refresh: bool = False,
     dry_run: bool = False,
@@ -152,14 +190,18 @@ def run_price_history_backfill(  # pylint: disable=too-many-arguments,too-many-l
     base_config = config or get_runtime_config()
     resolved_providers = _normalize_providers(providers, base_config.data_provider)
     resolved_tickers = _normalize_tickers(tickers, base_config.tickers)
-    resolved_lookback = int(lookback_days or base_config.price_context_lookback_days)
-    if resolved_lookback <= 0:
-        raise ValueError("lookback_days must be positive")
+    resolved_lookback = _positive_int(
+        base_config.price_context_lookback_days if lookback_days is None else lookback_days,
+        name="lookback_days",
+    )
+    resolved_refresh = _strict_bool(refresh, name="refresh")
+    resolved_dry_run = _strict_bool(dry_run, name="dry_run")
 
     owns_store = store is None
     history_store = store or get_price_history_store(base_config)
     provider_factory = provider_factory or (lambda _provider_name: get_data_provider())
     rows: list[PriceHistoryBackfillRow] = []
+    previous_override = get_runtime_config_override()
 
     try:
         for provider_name in resolved_providers:
@@ -167,12 +209,21 @@ def run_price_history_backfill(  # pylint: disable=too-many-arguments,too-many-l
                 base_config,
                 provider=provider_name,
                 lookback_days=resolved_lookback,
-                refresh=refresh,
+                refresh=resolved_refresh,
             )
-            set_runtime_config_override(provider_config)
-            provider = provider_factory(provider_name)
+            provider = None
+            if not resolved_dry_run:
+                set_runtime_config_override(provider_config)
+                provider = provider_factory(provider_name)
+                actual_provider_name = str(getattr(provider, "name", "") or "").lower()
+                if actual_provider_name != provider_name:
+                    raise ValueError(
+                        "provider_factory returned provider "
+                        f"{actual_provider_name or '<missing>'!r} for requested "
+                        f"provider {provider_name!r}"
+                    )
             for ticker in resolved_tickers:
-                if dry_run:
+                if resolved_dry_run:
                     stats = history_store.stats(provider=provider_name, ticker=ticker)
                     rows.append(
                         PriceHistoryBackfillRow(
@@ -188,8 +239,10 @@ def run_price_history_backfill(  # pylint: disable=too-many-arguments,too-many-l
                         )
                     )
                     continue
+                if provider is None:
+                    raise RuntimeError("price-history provider was not initialized")
                 prepare_ticker_fetch = getattr(provider, "prepare_ticker_fetch", None)
-                if callable(prepare_ticker_fetch):
+                if prepare_ticker_fetch is not None:
                     prepare_ticker_fetch(ticker)
                 result = reconcile_price_history(
                     ticker=ticker,
@@ -213,7 +266,7 @@ def run_price_history_backfill(  # pylint: disable=too-many-arguments,too-many-l
                     )
                 )
     finally:
-        set_runtime_config_override(None)
+        set_runtime_config_override(previous_override)
         if owns_store:
             history_store.close()
 
@@ -221,8 +274,8 @@ def run_price_history_backfill(  # pylint: disable=too-many-arguments,too-many-l
         providers=resolved_providers,
         tickers=resolved_tickers,
         lookback_days=resolved_lookback,
-        refresh=refresh,
-        dry_run=dry_run,
+        refresh=resolved_refresh,
+        dry_run=resolved_dry_run,
         rows=tuple(rows),
     )
 

@@ -1007,6 +1007,32 @@ def test_run_fetch_dry_run_checks_parquet_dependency_before_api_calls(tmp_path: 
     mock_fetch.assert_not_called()
 
 
+def test_run_fetch_restores_existing_runtime_override(tmp_path: Path):
+    """Programmatic one-off fetches should not clear an embedding caller override."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+    from opx_chain.config import (  # pylint: disable=import-outside-toplevel
+        get_runtime_config,
+        set_runtime_config_override,
+    )
+
+    backend = MemoryBackend()
+    outer_config = make_runtime_config(storage_enabled=True, tickers=("OUTER",))
+    config = make_runtime_config(storage_enabled=True, tickers=("AAA",))
+    patches = [
+        patcher
+        for patcher in _fetcher_patches(tmp_path, config, backend)
+        if getattr(patcher, "attribute", None) != "set_runtime_config_override"
+    ]
+    set_runtime_config_override(outer_config)
+
+    with ExitStack() as stack:
+        for patcher in patches:
+            stack.enter_context(patcher)
+        fetcher.run_fetch(tickers=("AAPL",))
+
+    assert get_runtime_config() is outer_config
+
+
 def test_check_positions_falls_back_to_scan_when_disabled(tmp_path: Path):
     """opx-check must fall back to directory scanning when storage is disabled."""
     from opx_chain import check_positions as cp  # pylint: disable=import-outside-toplevel
