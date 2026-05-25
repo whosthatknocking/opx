@@ -14,6 +14,7 @@ _BackendCacheKey = tuple[str, Path, Path, int, str]
 _BACKEND_CACHE: dict[_BackendCacheKey, object] = {}
 _BACKEND_LOCK = threading.Lock()
 _SUPPORTED_STORAGE_BACKENDS = frozenset({"filesystem", "sqlite"})
+_SUPPORTED_DATASET_FORMATS = frozenset({"csv", "parquet"})
 
 
 def get_data_dir() -> Path:
@@ -43,7 +44,7 @@ def _cache_key(config) -> _BackendCacheKey:
         Path(base),
         Path(config.debug_dump_dir),
         _validate_storage_max_runs_retained(config.storage_max_runs_retained),
-        config.storage_dataset_format,
+        _validate_storage_dataset_format(config.storage_dataset_format),
     )
 
 
@@ -68,6 +69,16 @@ def _validate_storage_max_runs_retained(value) -> int:
     if resolved < 0:
         raise ConfigError("Config field 'storage.max_runs_retained' must be >= 0.")
     return resolved
+
+
+def _validate_storage_dataset_format(value) -> str:
+    """Validate direct dataset serializer selectors before cache lookup."""
+    dataset_format = coerce_str(value, field_name="storage.dataset_format")
+    if dataset_format not in _SUPPORTED_DATASET_FORMATS:
+        raise ConfigError(
+            "Config field 'storage.dataset_format' must be one of ['csv', 'parquet']."
+        )
+    return dataset_format
 
 
 def get_storage_backend(config=None):

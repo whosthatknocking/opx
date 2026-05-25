@@ -113,3 +113,41 @@ def test_factory_rejects_malformed_storage_retention_limit(
 
     with pytest.raises(ConfigError, match="storage.max_runs_retained"):
         factory_mod.get_storage_backend(config)
+
+
+@pytest.mark.parametrize("dataset_format", ["csv", "parquet"])
+def test_factory_accepts_supported_dataset_formats(tmp_path: Path, dataset_format):
+    """Direct dataset format selectors should match the config-loader enum."""
+    factory_mod.clear_storage_backend_cache()
+    config = make_runtime_config(
+        storage_enabled=True,
+        storage_backend="filesystem",
+        storage_dataset_format=dataset_format,
+        storage_dir=tmp_path,
+        debug_dump_dir=tmp_path / "debug",
+    )
+
+    backend = factory_mod.get_storage_backend(config)
+
+    assert isinstance(backend, FilesystemBackend)
+
+
+@pytest.mark.parametrize(
+    "dataset_format",
+    ["", "json", "CSV", True, False, 1, 1.5, None, [], {}],
+)
+def test_factory_rejects_malformed_dataset_format(
+    tmp_path: Path,
+    dataset_format,
+):
+    """Malformed direct dataset formats should fail before cache lookup."""
+    config = make_runtime_config(
+        storage_enabled=True,
+        storage_backend="filesystem",
+        storage_dataset_format=dataset_format,
+        storage_dir=tmp_path,
+        debug_dump_dir=tmp_path / "debug",
+    )
+
+    with pytest.raises(ConfigError, match="storage.dataset_format"):
+        factory_mod.get_storage_backend(config)
