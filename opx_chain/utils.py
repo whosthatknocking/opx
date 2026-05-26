@@ -1,5 +1,6 @@
 """Small scalar conversion helpers shared across fetch and normalization code."""
 
+from os import PathLike
 from pathlib import Path
 from typing import Iterable
 
@@ -62,23 +63,26 @@ def _parquet_columns(path: Path, columns: list[str] | None) -> list[str] | None:
 
 
 def read_dataset_file(
-    path: Path,
+    path: str | PathLike[str],
     *,
     columns: Iterable[str] | None = None,
 ) -> pd.DataFrame:
     """Read a dataset artifact from disk and normalize format-sensitive dtypes."""
+    resolved_path = Path(path)
     requested_columns = _requested_columns(columns)
-    if path.suffix.lower() == ".parquet":
-        parquet_columns = _parquet_columns(path, requested_columns)
+    if resolved_path.suffix.lower() == ".parquet":
+        parquet_columns = _parquet_columns(resolved_path, requested_columns)
         if requested_columns is not None and not parquet_columns:
             return _normalize_dataset_dtypes(pd.DataFrame())
-        return _normalize_dataset_dtypes(pd.read_parquet(path, columns=parquet_columns))
+        return _normalize_dataset_dtypes(
+            pd.read_parquet(resolved_path, columns=parquet_columns)
+        )
     if requested_columns is None:
-        return _normalize_dataset_dtypes(pd.read_csv(path, low_memory=False))
+        return _normalize_dataset_dtypes(pd.read_csv(resolved_path, low_memory=False))
     requested_set = set(requested_columns)
     return _normalize_dataset_dtypes(
         pd.read_csv(
-            path,
+            resolved_path,
             low_memory=False,
             usecols=lambda column: column in requested_set,
         )

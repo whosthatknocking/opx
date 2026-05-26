@@ -165,6 +165,28 @@ def test_read_dataset_file_projects_columns_for_csv_and_parquet(tmp_path):
     assert str(parquet_result["is_stale_quote"].dtype) == "boolean"
 
 
+def test_read_dataset_file_accepts_documented_string_locations(tmp_path):
+    """DatasetHandle.location string reads should match Path-based dispatch."""
+    frame = pd.DataFrame({
+        "underlying_symbol": ["TSLA", "NVDA"],
+        "is_stale_quote": pd.Series([False, True], dtype="boolean"),
+        "unused_column": [1, 2],
+    })
+    csv_path = tmp_path / "dataset.csv"
+    parquet_path = tmp_path / "dataset.parquet"
+    get_serializer("csv").serialize(frame, str(csv_path))
+    get_serializer("parquet").serialize(frame, str(parquet_path))
+
+    columns = ["is_stale_quote", "missing_column"]
+    csv_result = read_dataset_file(str(csv_path), columns=columns)
+    parquet_result = read_dataset_file(str(parquet_path), columns=columns)
+
+    assert csv_result.columns.tolist() == ["is_stale_quote"]
+    assert parquet_result.columns.tolist() == ["is_stale_quote"]
+    assert str(csv_result["is_stale_quote"].dtype) == "boolean"
+    assert str(parquet_result["is_stale_quote"].dtype) == "boolean"
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
