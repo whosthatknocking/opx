@@ -302,6 +302,20 @@ def fetch_ticker_price_context(  # pylint: disable=too-many-arguments
     return context
 
 
+def _require_requested_ticker_identity(frame: pd.DataFrame, ticker: str) -> None:
+    """Reject provider-normalized option rows for an unexpected underlying."""
+    if frame.empty or "underlying_symbol" not in frame.columns:
+        return
+    requested = str(ticker).strip().upper()
+    symbols = frame["underlying_symbol"].dropna().astype(str).str.strip().str.upper()
+    mismatches = sorted(symbol for symbol in set(symbols) if symbol and symbol != requested)
+    if mismatches:
+        sample = ", ".join(mismatches[:3])
+        raise ValueError(
+            f"provider returned underlying_symbol {sample} for requested ticker {requested}"
+        )
+
+
 def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements,broad-exception-caught
     ticker,
     logger=None,
@@ -450,6 +464,7 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
                     option_type=option_type,
                     ticker=ticker,
                 )
+                _require_requested_ticker_identity(vendor_normalized, ticker)
                 vendor_normalized = append_ticker_event_fields(
                     vendor_normalized, events, config.today
                 )

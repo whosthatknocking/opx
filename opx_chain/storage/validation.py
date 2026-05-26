@@ -210,24 +210,41 @@ def validate_ticker_fetch_result(result: TickerFetchResult) -> TickerFetchResult
     status = validate_required_text(result.status, name="TickerFetchResult.status")
     if status not in TICKER_FETCH_STATUSES:
         raise ValueError(f"TickerFetchResult.status must be one of {sorted(TICKER_FETCH_STATUSES)}")
+    raw_row_count = validate_nonnegative_int(
+        result.raw_row_count,
+        name="TickerFetchResult.raw_row_count",
+    )
+    normalized_row_count = validate_nonnegative_int(
+        result.normalized_row_count,
+        name="TickerFetchResult.normalized_row_count",
+    )
+    kept_row_count = validate_nonnegative_int(
+        result.kept_row_count,
+        name="TickerFetchResult.kept_row_count",
+    )
+    filtered_row_count = validate_nonnegative_int(
+        result.filtered_row_count,
+        name="TickerFetchResult.filtered_row_count",
+    )
+    if normalized_row_count > raw_row_count:
+        raise ValueError(
+            "TickerFetchResult.normalized_row_count must be <= raw_row_count"
+        )
+    if kept_row_count > normalized_row_count:
+        raise ValueError(
+            "TickerFetchResult.kept_row_count must be <= normalized_row_count"
+        )
+    if filtered_row_count != normalized_row_count - kept_row_count:
+        raise ValueError(
+            "TickerFetchResult.filtered_row_count must equal "
+            "normalized_row_count - kept_row_count"
+        )
     return TickerFetchResult(
         ticker=ticker,
-        raw_row_count=validate_nonnegative_int(
-            result.raw_row_count,
-            name="TickerFetchResult.raw_row_count",
-        ),
-        normalized_row_count=validate_nonnegative_int(
-            result.normalized_row_count,
-            name="TickerFetchResult.normalized_row_count",
-        ),
-        kept_row_count=validate_nonnegative_int(
-            result.kept_row_count,
-            name="TickerFetchResult.kept_row_count",
-        ),
-        filtered_row_count=validate_nonnegative_int(
-            result.filtered_row_count,
-            name="TickerFetchResult.filtered_row_count",
-        ),
+        raw_row_count=raw_row_count,
+        normalized_row_count=normalized_row_count,
+        kept_row_count=kept_row_count,
+        filtered_row_count=filtered_row_count,
         expiration_count=validate_nonnegative_int(
             result.expiration_count,
             name="TickerFetchResult.expiration_count",

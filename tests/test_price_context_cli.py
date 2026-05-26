@@ -105,6 +105,11 @@ def test_price_context_only_writes_json_without_option_export(tmp_path: Path, ca
             return_value=(MagicMock(), tmp_path / "run.log"),
         ),
         patch.object(fetcher, "get_storage_backend", return_value=backend),
+        patch.object(
+            backend,
+            "interrupt_stale_runs",
+            wraps=backend.interrupt_stale_runs,
+        ) as mock_interrupt_stale,
         patch.object(fetcher, "load_positions", return_value=EMPTY_POSITION_SET),
         patch.object(fetcher, "get_data_provider", return_value=provider),
         patch.object(fetcher, "fetch_ticker_option_chain") as mock_option_chain,
@@ -122,6 +127,7 @@ def test_price_context_only_writes_json_without_option_export(tmp_path: Path, ca
     assert provider.history_calls == [("AAA", 260), ("BBB", 260)]
     mock_option_chain.assert_not_called()
     mock_write_csv.assert_not_called()
+    mock_interrupt_stale.assert_not_called()
     assert not backend.list_datasets()
     assert (storage_dir / "price-history.db").exists()
 

@@ -575,7 +575,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
         if cli_override:
             print(f"CLI override: {cli_override}")
         recovered_runs = 0
-        if storage is not None and not dry_run:
+        if storage is not None and not dry_run and not price_context_only:
             recovered_runs = _interrupt_stale_running_runs(storage)
             if recovered_runs:
                 logger.warning(

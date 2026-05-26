@@ -712,6 +712,35 @@ def test_fetch_ticker_option_chain_validates_rows_before_filtering(monkeypatch):
     )
 
 
+def test_fetch_ticker_option_chain_rejects_provider_ticker_identity_mismatch(monkeypatch):
+    """Provider-normalized rows for another underlying must not be returned as ok rows."""
+    class WrongTickerProvider(StubProvider):
+        """Provider variant that labels normalized rows with another underlying."""
+
+        def normalize_option_frame(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+            self,
+            df,
+            underlying_price,
+            expiration_date,
+            option_type,
+            ticker,
+        ):
+            frame = super().normalize_option_frame(
+                df, underlying_price, expiration_date, option_type, ticker
+            )
+            frame["underlying_symbol"] = "OTHER"
+            return frame
+
+    monkeypatch.setattr(fetch, "get_data_provider", WrongTickerProvider)
+    monkeypatch.setattr(fetch, "get_runtime_config", make_runtime_config)
+
+    result = fetch.fetch_ticker_option_chain("TEST")
+
+    assert result.empty
+    assert result.attrs["fetch_status"] == "error"
+    assert "requested ticker TEST" in result.attrs["fetch_error_summary"]
+
+
 def test_fetch_ticker_option_chain_can_disable_validation(monkeypatch):
     """Disabling validation should skip row-level findings entirely."""
     class InvalidBeforeFilterProvider(StubProvider):

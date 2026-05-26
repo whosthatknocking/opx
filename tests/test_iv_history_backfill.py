@@ -39,8 +39,9 @@ def _dataset(path, *, ticker: str = "TSLA", quote_time: str | None = None) -> No
 class FakeStorage:
     """Storage stub that exposes retained option-chain datasets."""
 
-    def __init__(self, records):
+    def __init__(self, records, *, runs_dir=None):
         self.records = list(records)
+        self._runs_dir = runs_dir
 
     def list_datasets(self, **kwargs):  # pylint: disable=unused-argument
         """Return configured records."""
@@ -360,6 +361,61 @@ def test_iv_history_backfill_skips_already_ingested_dataset(tmp_path):
 
     assert first.rows[0].status == "INGESTED"
     assert second.rows[0].status == "SKIPPED"
+
+
+def test_iv_history_backfill_rejects_outside_dataset_location(tmp_path):
+    """Retained replay should not ingest artifacts outside the storage runs root."""
+    outside_path = tmp_path / "outside.csv"
+    _dataset(outside_path)
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    record = _record(outside_path)
+    storage = FakeStorage([record], runs_dir=tmp_path / "runs")
+    config = make_runtime_config(data_provider="marketdata", tickers=("TSLA",))
+
+    result = run_iv_history_backfill(
+        providers=("marketdata",),
+        config=config,
+        store=store,
+        storage=storage,
+    )
+
+    assert result.rows[0].status == "ERROR"
+    assert "outside managed storage roots" in (result.rows[0].error_summary or "")
+    assert store.stats(provider="marketdata", ticker="TSLA").row_count == 0
+
+
+def test_iv_history_backfill_preserves_ingested_sync_when_artifact_missing(tmp_path):
+    """Missing retained artifacts must not downgrade a successful durable sync row."""
+    runs_dir = tmp_path / "runs"
+    path = runs_dir / "run-1" / "output" / "chain.csv"
+    path.parent.mkdir(parents=True)
+    _dataset(path, quote_time="2026-05-22T20:00:00Z")
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    record = _record(path)
+    storage = FakeStorage([record], runs_dir=runs_dir)
+    config = make_runtime_config(data_provider="marketdata", tickers=("TSLA",))
+
+    first = run_iv_history_backfill(
+        providers=("marketdata",),
+        config=config,
+        store=store,
+        storage=storage,
+    )
+    path.unlink()
+    second = run_iv_history_backfill(
+        providers=("marketdata",),
+        config=config,
+        store=store,
+        storage=storage,
+    )
+    sync = store.get_sync(dataset_id=record.dataset_id)
+
+    assert first.rows[0].status == "INGESTED"
+    assert second.rows[0].status == "SKIPPED"
+    assert second.rows[0].error_summary
+    assert sync is not None
+    assert sync.status == "INGESTED"
+    assert sync.stored_rows == first.rows[0].stored_rows
 
 
 def test_iv_history_backfill_ticker_filtered_empty_does_not_downgrade_sync(tmp_path):

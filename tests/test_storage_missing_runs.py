@@ -188,6 +188,9 @@ def test_create_run_rejects_malformed_ticker_metadata(
         _ticker_result(raw_row_count=-1),
         _ticker_result(kept_row_count=True),
         _ticker_result(status="maybe"),
+        _ticker_result(raw_row_count=4, normalized_row_count=5),
+        _ticker_result(normalized_row_count=48, kept_row_count=49),
+        _ticker_result(normalized_row_count=48, kept_row_count=40, filtered_row_count=7),
     ],
 )
 def test_record_ticker_result_rejects_malformed_metadata(

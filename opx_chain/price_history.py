@@ -676,10 +676,13 @@ def reconcile_price_history(  # pylint: disable=too-many-locals
         lookback_days=lookback_days,
         logger=logger,
     )
-    if reason is None or _sync_recent(
-        sync,
-        ttl_seconds=ttl_seconds,
-        now=now,
+    if reason is None or (
+        not history.empty
+        and _sync_recent(
+            sync,
+            ttl_seconds=ttl_seconds,
+            now=now,
+        )
     ):
         return PriceHistoryReconcileResult(history=history, fetched=False)
 

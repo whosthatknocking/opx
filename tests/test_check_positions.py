@@ -92,6 +92,55 @@ def test_check_positions_found(tmp_path):
     assert key.strike == 200.0
 
 
+def test_check_positions_direct_uses_storage_latest_dataset(tmp_path, monkeypatch):
+    """Direct callers should resolve the same storage-backed latest dataset as the CLI."""
+    runs_dir = tmp_path / "runs"
+    artifact = runs_dir / "run-1" / "output" / "ds.csv"
+    artifact.parent.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {
+                "underlying_symbol": "AAPL",
+                "expiration_date": "2026-06-20",
+                "option_type": "call",
+                "strike": 200.0,
+            }
+        ]
+    ).to_csv(artifact, index=False)
+    record = DatasetRecord(
+        dataset_id="ds-id",
+        run_id="run-1",
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        provider="yfinance",
+        schema_version=1,
+        row_count=1,
+        format="csv",
+        location=str(artifact),
+        content_hash="a" * 64,
+    )
+
+    class Storage:  # pylint: disable=too-few-public-methods
+        """Storage stub exposing a retained dataset."""
+
+        _runs_dir = runs_dir
+
+        def list_datasets(self, *, limit):
+            """Return retained dataset records."""
+            assert limit == 100
+            return [record]
+
+    pos_path = _write_positions(
+        tmp_path,
+        [{"Symbol": " -AAPL260620C200", "Description": "AAPL JUN 20 2026 $200 CALL"}],
+    )
+    monkeypatch.setattr("opx_chain.check_positions.get_storage_backend", Storage)
+
+    found, missing = check_positions(pos_path)
+
+    assert len(found) == 1
+    assert not missing
+
+
 def test_check_positions_missing(tmp_path):
     """A position absent from the output CSV appears in the missing list."""
     pos_path = _write_positions(tmp_path, [

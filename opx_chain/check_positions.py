@@ -57,6 +57,18 @@ def _format_file_mtime_utc(path: Path) -> str:
     return format_utc_z_seconds(modified_at)
 
 
+def _resolve_output_path(output_path: Path | None = None) -> Path | None:
+    """Resolve explicit, storage-backed, or legacy latest dataset paths."""
+    if output_path is not None:
+        return output_path
+    storage = get_storage_backend()
+    if storage is not None:
+        storage_output = _pick_storage_record(storage)
+        if storage_output is not None:
+            return storage_output
+    return find_latest_output()
+
+
 def check_positions(positions_path: Path | None = None, output_path: Path | None = None):
     """Check every option position against the given (or latest) output CSV.
 
@@ -71,7 +83,7 @@ def check_positions(positions_path: Path | None = None, output_path: Path | None
     if position_set.empty:
         return [], []
 
-    resolved_output = output_path or find_latest_output()
+    resolved_output = _resolve_output_path(output_path)
     if resolved_output is None or not resolved_output.exists():
         return [], list(position_set.option_keys)
 
