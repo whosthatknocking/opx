@@ -132,7 +132,24 @@ def test_external_interface_notes_are_present_tense():
     assert "Add `get_run(" not in section
     assert "### 7.6" in section
     assert "### 7.7" in section
+    assert "### 7.8" in section
     assert section.index("### 7.6") < section.index("### 7.7")
+    assert section.index("### 7.7") < section.index("### 7.8")
+    headings = [line for line in section.splitlines() if line.startswith("### ")]
+    assert len(headings) == len(set(headings))
+
+
+def test_project_spec_numeric_headings_are_unique():
+    """Specification section numbers should not be duplicated."""
+    spec = (ROOT / "docs" / "PROJECT_SPEC.md").read_text(encoding="utf-8")
+    headings = [
+        line
+        for line in spec.splitlines()
+        if line.startswith("### ") and line[4:7].replace(".", "").isdigit()
+    ]
+
+    heading_numbers = [heading.split(maxsplit=2)[1] for heading in headings]
+    assert len(heading_numbers) == len(set(heading_numbers))
 
 
 def test_run_fetch_public_params_are_documented():
@@ -363,3 +380,23 @@ def test_user_guide_storage_format_examples_match_dataset_contract():
         assert "--output /path/to/artifact.csv" in quick_check, path
         assert "file selector for available dataset exports" in text, path
         assert "file selector for available CSV exports" not in text, path
+        assert "sortable table for the selected dataset artifact" in text, path
+        assert "sortable table for the exported CSV" not in text, path
+
+
+def test_project_docs_use_dataset_neutral_viewer_language():
+    """Viewer/check-position docs should not describe dataset artifacts as CSV-only."""
+    project_spec = (ROOT / "docs" / "PROJECT_SPEC.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    check_positions_source = (ROOT / "opx_chain" / "check_positions.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "local viewer for exported dataset artifacts" in project_spec
+    assert "selected dataset rows" in project_spec
+    assert "local viewer for exported CSV files" not in project_spec
+    assert "exported CSV rows" not in project_spec
+    assert "latest output dataset" in readme
+    assert "latest output CSV" not in readme
+    assert "latest output dataset" in check_positions_source
+    assert "No output dataset found" in check_positions_source

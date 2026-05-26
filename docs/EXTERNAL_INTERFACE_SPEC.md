@@ -830,7 +830,7 @@ timestamped CSV exports directly from the output directory. The default
 behavior queries the storage backend first, falling back to the timestamped
 CSV glob when no storage records exist.
 
-### 7.7 `get_run()` on `StorageBackend`
+### 7.8 `get_run()` on `StorageBackend`
 
 `StorageBackend.get_run(run_id: str) -> RunRecord` is part of the formal storage
 protocol and is implemented by the filesystem, SQLite, and memory backends.

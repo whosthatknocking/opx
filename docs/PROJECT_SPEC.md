@@ -35,7 +35,7 @@ The project currently supports:
 - provider-backed fetches through `marketdata`
 - canonical CSV export with shared derived metrics
 - provider-aware field reference documentation
-- a local viewer for exported CSV files (`opx-view`); `--data-dir DIR` scans
+- a local viewer for exported dataset artifacts (`opx-view`); `--data-dir DIR` scans
   an arbitrary directory for `.csv` and `.parquet` files
 - provider debug payload dumps for raw-response inspection
 - opt-in storage layer (`[storage] enable = true`) with filesystem and SQLite
@@ -420,7 +420,7 @@ Requirements:
 - row-level score validation produces `score_validation`, `score_adjustment`, and `final_score`
 - current viewer summary heuristics rank only rows passing `passes_primary_screen` when that field exists and prefer `final_score` as the score-aware tie-breaker
 
-### 6.3 Exit Status
+### 6.4 Exit Status
 
 Current CLI exit behavior:
 
@@ -546,7 +546,7 @@ Current viewer behavior includes:
 - active provider surfaced through dataset metadata when constant across the file
 - lightweight positions counts, parsed-position fingerprint, and chain coverage metadata on the `Dataset` tab when the selected dataset has a run-level `positions.csv` sidecar
 - a `Reference` tab backed by the field-reference document
-- a `Chain View` tab that derives per-ticker/per-expiration visualizations directly from the exported CSV rows
+- a `Chain View` tab that derives per-ticker/per-expiration visualizations directly from the selected dataset rows
 - sortable/filterable table view
 - summary highlights restricted to primary-screen rows when available
 - opportunity cards for `Most Profitable`, `Moderate Risk`, `High Conviction Call`, and `High Conviction Put` that surface `final_score`, `option_score`, `risk_level`, `spread_score`, `dte_score`, and `theta_efficiency`

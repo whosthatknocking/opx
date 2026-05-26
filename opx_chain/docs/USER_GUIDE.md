@@ -115,7 +115,7 @@ The viewer binds to `settings.viewer_host` and `settings.viewer_port` from `$XDG
 
 The viewer includes:
 
-- a sortable table for the exported CSV
+- a sortable table for the selected dataset artifact
 - lightweight positions counts, parsed-position fingerprint, and chain coverage metadata on the `Dataset` tab when the selected dataset has a run-level positions snapshot
 - shareable tab URLs using `?tab=table`, `?tab=summary`, `?tab=chain`, or `?tab=readme`
 - hover descriptions on column headers pulled from this guide

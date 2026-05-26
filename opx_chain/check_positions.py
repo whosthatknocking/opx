@@ -417,7 +417,7 @@ def _pick_storage_record(storage) -> Path | None:
 
 
 def main(argv=None):
-    """Print a position coverage report for the latest output CSV."""
+    """Print a position coverage report for the latest output dataset."""
     import argparse  # pylint: disable=import-outside-toplevel
 
     argv = _coerce_argv_for_pytest(argv)
@@ -425,7 +425,7 @@ def main(argv=None):
         prog="opx-check",
         description=(
             "Check that every option position in the portfolio positions CSV "
-            "appears in the latest output."
+            "appears in the latest output dataset."
         ),
     )
     parser.add_argument("--positions", type=Path, default=None, help="Path to positions CSV.")
@@ -433,7 +433,7 @@ def main(argv=None):
         "--output",
         type=Path,
         default=None,
-        help="Path to output CSV (default: latest).",
+        help="Path to an output dataset artifact (default: latest).",
     )
     parser.add_argument(
         "--freshness",
@@ -461,7 +461,7 @@ def main(argv=None):
         else:
             resolved_output = find_latest_output()
     if resolved_output is None:
-        print(f"No output CSV found in {_runtime_runs_dir()}/")
+        print(f"No output dataset found in {_runtime_runs_dir()}/")
         return 1
 
     print(f"Positions: {positions_path}")
