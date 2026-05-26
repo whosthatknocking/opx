@@ -137,7 +137,7 @@ def _validate_historical_providers(providers: tuple[str, ...]) -> None:
 
 def _normalize_tickers(
     values: Iterable[str] | str | None,
-    default_tickers: Sequence[str],
+    default_tickers: Sequence[object],
 ) -> tuple[str, ...]:
     tickers = tuple(
         _normalize_ticker_value(ticker)
@@ -145,15 +145,18 @@ def _normalize_tickers(
     )
     if tickers:
         return tickers
-    return tuple(
-        _normalize_ticker_value(ticker)
-        for ticker in default_tickers
-        if str(ticker).strip()
-    )
+    normalized_defaults = []
+    for ticker in default_tickers:
+        if isinstance(ticker, str) and not ticker.strip():
+            continue
+        normalized_defaults.append(_normalize_ticker_value(ticker))
+    return tuple(normalized_defaults)
 
 
 def _normalize_ticker_value(value: object) -> str:
-    text = str(value or "").strip().upper()
+    if not isinstance(value, str):
+        raise ValueError("ticker must be a non-empty string")
+    text = value.strip().upper()
     if not text:
         raise ValueError("ticker must be a non-empty string")
     if not is_valid_ticker(text):

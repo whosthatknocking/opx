@@ -241,6 +241,28 @@ def test_iv_history_backfill_rejects_non_string_ticker_scope(tmp_path, bad_ticke
         )
 
 
+@pytest.mark.parametrize("bad_ticker", [True, None, False, float("nan")])
+def test_iv_history_backfill_rejects_non_string_default_config_tickers(
+    tmp_path,
+    bad_ticker,
+):
+    """Default config ticker members should not be stringified into symbols."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    config = make_runtime_config(data_provider="marketdata", tickers=(bad_ticker,))
+
+    with pytest.raises(ValueError, match="ticker must be a non-empty string"):
+        run_iv_history_backfill(
+            providers=("marketdata",),
+            tickers=None,
+            fetch_historical=True,
+            dry_run=True,
+            sessions=1,
+            config=config,
+            store=store,
+            storage=FakeStorage([]),
+        )
+
+
 def test_iv_history_backfill_rejects_malformed_default_provider(tmp_path) -> None:
     """Direct config provider values should fail at a stable backfill boundary."""
     store = IVHistoryStore(tmp_path / "iv-history.db")
