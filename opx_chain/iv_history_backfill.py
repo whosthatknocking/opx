@@ -83,14 +83,20 @@ class IVHistoryBackfillResult:
     estimated_requests: int = 0
 
 
-def _normalize_csv_values(values: Iterable[str] | str | None) -> tuple[str, ...]:
+def _normalize_csv_values(
+    values: Iterable[str] | str | None,
+    *,
+    name: str,
+) -> tuple[str, ...]:
     if values is None:
         return ()
     if isinstance(values, str):
         values = (values,)
     normalized: list[str] = []
     for raw_value in values:
-        for item in str(raw_value).split(","):
+        if not isinstance(raw_value, str):
+            raise ValueError(f"{name} must be a string or iterable of strings")
+        for item in raw_value.split(","):
             value = item.strip()
             if value:
                 normalized.append(value)
@@ -98,12 +104,17 @@ def _normalize_csv_values(values: Iterable[str] | str | None) -> tuple[str, ...]
 
 
 def _normalize_providers(
-    values: Iterable[str] | None,
+    values: Iterable[str] | str | None,
     default_provider: str,
 ) -> tuple[str, ...]:
-    providers = tuple(provider.lower() for provider in _normalize_csv_values(values))
+    providers = tuple(
+        provider.lower()
+        for provider in _normalize_csv_values(values, name="providers")
+    )
     if not providers:
-        providers = (default_provider.lower(),)
+        if not isinstance(default_provider, str) or not default_provider.strip():
+            raise ValueError("data_provider must be a non-empty string")
+        providers = (default_provider.strip().lower(),)
     unsupported = sorted(set(providers) - SUPPORTED_PROVIDERS)
     if unsupported:
         supported = ", ".join(sorted(SUPPORTED_PROVIDERS))
@@ -124,10 +135,13 @@ def _validate_historical_providers(providers: tuple[str, ...]) -> None:
 
 
 def _normalize_tickers(
-    values: Iterable[str] | None,
+    values: Iterable[str] | str | None,
     default_tickers: Sequence[str],
 ) -> tuple[str, ...]:
-    tickers = tuple(_normalize_ticker_value(ticker) for ticker in _normalize_csv_values(values))
+    tickers = tuple(
+        _normalize_ticker_value(ticker)
+        for ticker in _normalize_csv_values(values, name="tickers")
+    )
     if tickers:
         return tickers
     return tuple(
@@ -503,7 +517,7 @@ def run_iv_history_backfill(
     base_config = config or get_runtime_config()
     resolved_providers = _normalize_providers(providers, base_config.data_provider)
     resolved_tickers = _normalize_tickers(tickers, base_config.tickers)
-    resolved_dataset_ids = _normalize_csv_values(dataset_ids)
+    resolved_dataset_ids = _normalize_csv_values(dataset_ids, name="dataset_ids")
     resolved_refresh = _strict_bool(refresh, name="refresh")
     resolved_dry_run = _strict_bool(dry_run, name="dry_run")
     resolved_fetch_historical = _strict_bool(fetch_historical, name="fetch_historical")

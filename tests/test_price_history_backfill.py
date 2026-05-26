@@ -182,6 +182,19 @@ def test_price_history_backfill_rejects_provider_identity_mismatch(tmp_path):
     assert store.stats(provider="yfinance", ticker="AAA").row_count == 0
 
 
+def test_price_history_backfill_rejects_malformed_default_provider(tmp_path) -> None:
+    """Direct config provider values should fail at a stable backfill boundary."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+    config = make_runtime_config(data_provider=True, tickers=("AAA",))
+
+    with pytest.raises(ValueError, match="data_provider must be a non-empty string"):
+        run_price_history_backfill(
+            config=config,
+            store=store,
+            dry_run=True,
+        )
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [

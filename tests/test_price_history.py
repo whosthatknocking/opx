@@ -537,6 +537,41 @@ def test_price_history_read_helpers_validate_dates(tmp_path) -> None:
         )
 
 
+def test_price_history_store_normalizes_provider_case(tmp_path) -> None:
+    """Provider-scoped writes should remain visible through normalized provider keys."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+
+    store.upsert_bars(provider="MarketData", ticker="AAA", history=_history(periods=3))
+    store.record_sync(
+        provider="MarketData",
+        ticker="AAA",
+        lookback_days=30,
+        status="ok",
+        requested_lookback_days=30,
+        latest_trading_date=date(2026, 3, 20),
+        fetched_rows=3,
+        stored_rows=3,
+    )
+
+    assert store.stats(provider="marketdata", ticker="AAA").row_count == 3
+    assert (
+        store.load_recent_bars(
+            provider="marketdata",
+            ticker="AAA",
+            lookback_days=30,
+            end_date=date(2026, 3, 20),
+        ).shape[0]
+        == 3
+    )
+    sync = store.get_sync(
+        provider="marketdata",
+        ticker="AAA",
+        lookback_days=30,
+    )
+    assert sync is not None
+    assert sync.status == "ok"
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [

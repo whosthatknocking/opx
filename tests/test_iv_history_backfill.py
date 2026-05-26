@@ -224,6 +224,35 @@ def test_iv_history_backfill_rejects_malformed_tickers(tmp_path, bad_ticker):
         )
 
 
+@pytest.mark.parametrize("bad_ticker", [True, None, False])
+def test_iv_history_backfill_rejects_non_string_ticker_scope(tmp_path, bad_ticker):
+    """Direct ticker filter members should not be stringified into symbols."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    config = make_runtime_config(data_provider="marketdata", tickers=("TSLA",))
+
+    with pytest.raises(ValueError, match="tickers must be a string or iterable of strings"):
+        run_iv_history_backfill(
+            providers=("marketdata",),
+            tickers=(bad_ticker,),
+            config=config,
+            store=store,
+            storage=FakeStorage([]),
+        )
+
+
+def test_iv_history_backfill_rejects_malformed_default_provider(tmp_path) -> None:
+    """Direct config provider values should fail at a stable backfill boundary."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    config = make_runtime_config(data_provider=True, tickers=("TSLA",))
+
+    with pytest.raises(ValueError, match="data_provider must be a non-empty string"):
+        run_iv_history_backfill(
+            config=config,
+            store=store,
+            storage=FakeStorage([]),
+        )
+
+
 def test_iv_history_backfill_filters_explicit_dataset_ids_by_provider(tmp_path):
     """Explicit retained datasets should still respect requested provider scope."""
     marketdata_path = tmp_path / "marketdata.csv"

@@ -84,7 +84,9 @@ def _normalize_providers(
         for provider in _normalize_csv_values(values, name="providers")
     )
     if not providers:
-        providers = (default_provider.lower(),)
+        if not isinstance(default_provider, str) or not default_provider.strip():
+            raise ValueError("data_provider must be a non-empty string")
+        providers = (default_provider.strip().lower(),)
     unsupported = sorted(set(providers) - SUPPORTED_PROVIDERS)
     if unsupported:
         supported = ", ".join(sorted(SUPPORTED_PROVIDERS))

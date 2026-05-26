@@ -20,7 +20,7 @@ from opx_chain.config import (
     get_runtime_config_override,
     set_runtime_config_override,
 )
-from opx_chain.config_coercion import ConfigError
+from opx_chain.config_coercion import ConfigError, coerce_path
 from opx_chain.error_summary import compact_exception_summary
 from opx_chain.export import prepare_export_frame, write_options_csv
 from opx_chain.fetch import fetch_ticker_option_chain, fetch_ticker_price_context
@@ -49,6 +49,7 @@ from opx_chain.storage.models import (
     TickerFetchResult,
     ValidationRecord,
 )
+from opx_chain.tickers import is_valid_ticker
 from opx_chain.timestamps import format_utc_compact, format_utc_z_seconds
 from opx_chain.validate import ValidationFinding, emit_validation_report, validate_export_frame
 
@@ -171,6 +172,10 @@ def _coerce_run_fetch_tickers(tickers) -> tuple[str, ...]:
         symbol = ticker.strip().upper()
         if not symbol:
             raise ConfigError("Config field 'run_fetch.tickers' must not contain blank values.")
+        if not is_valid_ticker(symbol):
+            raise ConfigError(
+                "Config field 'run_fetch.tickers' must contain valid stock ticker symbols."
+            )
         normalized.append(symbol)
     if not normalized:
         raise ConfigError("Config field 'run_fetch.tickers' must not be empty.")
@@ -832,7 +837,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
 
 
 def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-arguments
-    positions_path: Path | None = None,
+    positions_path: Path | str | None = None,
     tickers: tuple[str, ...] | None = None,
     max_expiration_weeks: int | None = None,
     stale_quote_seconds: int | None = None,
@@ -864,6 +869,11 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
         price_context_only,
         field_name="run_fetch.price_context_only",
     )
+    if positions_path is not None:
+        if isinstance(positions_path, str):
+            positions_path = coerce_path(positions_path, field_name="run_fetch.positions_path")
+        elif not isinstance(positions_path, Path):
+            raise ConfigError("Config field 'run_fetch.positions_path' must be a path or string.")
     if tickers is not None:
         config = replace(config, tickers=_coerce_run_fetch_tickers(tickers))
     if max_expiration_weeks is not None:

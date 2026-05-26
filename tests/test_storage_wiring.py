@@ -928,6 +928,27 @@ def test_run_fetch_passes_positions_path(tmp_path: Path):
     assert called_path == positions_file.expanduser()
 
 
+def test_run_fetch_accepts_string_positions_path(tmp_path: Path):
+    """run_fetch(positions_path=...) should accept common string path callers."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    positions_file = tmp_path / "custom_positions.csv"
+    positions_file.write_text("", encoding="utf-8")
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True)
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in patches]
+        fetcher.run_fetch(positions_path=str(positions_file))
+
+    mock_load = mocks[8]
+    mock_load.assert_called_once()
+    called_path = mock_load.call_args[0][0]
+    assert called_path == positions_file.expanduser()
+
+
 def test_run_fetch_tickers_override_replaces_config_tickers(tmp_path: Path):
     """run_fetch(tickers=...) must use the supplied tickers, not config.tickers."""
     from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
@@ -946,7 +967,22 @@ def test_run_fetch_tickers_override_replaces_config_tickers(tmp_path: Path):
     assert set_call[0][0].tickers == ("AAPL",)
 
 
-@pytest.mark.parametrize("bad_tickers", ["MSFT", b"MSFT", (), ("",), ("MSFT", 1)])
+@pytest.mark.parametrize(
+    "bad_tickers",
+    [
+        "MSFT",
+        b"MSFT",
+        (),
+        ("",),
+        ("MSFT", 1),
+        ("BAD/TICKER",),
+        ("A0",),
+        ("...",),
+        ("ABCDEFGHIJK",),
+        ("BRK..B",),
+        ("A.",),
+    ],
+)
 def test_run_fetch_tickers_override_rejects_malformed_shapes(tmp_path: Path, bad_tickers):
     """run_fetch(tickers=...) should reject scalar and malformed overrides."""
     from opx_chain import fetcher  # pylint: disable=import-outside-toplevel

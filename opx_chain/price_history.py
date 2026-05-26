@@ -101,7 +101,7 @@ def _optional_text(value: object, *, name: str) -> str | None:
 
 
 def _normalize_provider(value: object) -> str:
-    return _non_empty_text(value, name="provider").strip()
+    return _non_empty_text(value, name="provider").strip().lower()
 
 
 def _normalize_ticker(value: object) -> str:
