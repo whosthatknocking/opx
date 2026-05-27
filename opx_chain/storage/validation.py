@@ -200,6 +200,21 @@ def validate_run_context(context: RunContext) -> RunContext:
     )
 
 
+def sanitize_retained_run_tickers(value: Any) -> tuple[str, ...]:
+    """Return valid retained run tickers, or an empty tuple for corrupt metadata."""
+    if not isinstance(value, (list, tuple)):
+        return ()
+    tickers: list[str] = []
+    for raw_ticker in value:
+        if not isinstance(raw_ticker, str):
+            return ()
+        ticker = raw_ticker.strip().upper()
+        if not is_valid_ticker(ticker):
+            return ()
+        tickers.append(ticker)
+    return tuple(tickers)
+
+
 def validate_ticker_fetch_result(result: TickerFetchResult) -> TickerFetchResult:
     """Validate per-ticker fetch result metadata before persistence."""
     if not isinstance(result, TickerFetchResult):

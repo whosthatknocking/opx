@@ -42,6 +42,7 @@ from opx_chain.storage._disk import (
 from opx_chain.storage.serializers import get_serializer
 from opx_chain.storage.validation import (
     INVALID_TICKER_FILTER,
+    sanitize_retained_run_tickers,
     validate_artifact_write,
     validate_dataset_list_filters,
     validate_dataset_id,
@@ -383,6 +384,13 @@ class SqliteIndexedBackend:
     def _backfill_dataset_sort_keys_for_listing(self, conn: sqlite3.Connection) -> None:
         if self._backfill_dataset_sort_keys(conn):
             conn.commit()
+
+    def _row_tickers(self, value: str | None) -> tuple[str, ...]:
+        try:
+            decoded = json.loads(value or "[]")
+        except json.JSONDecodeError:
+            return ()
+        return sanitize_retained_run_tickers(decoded)
 
     def _sidecar_path(self, run_id: str, filename: str) -> Path:
         return resolve_child_path(self._runs_dir, run_id, filename)
@@ -831,7 +839,7 @@ class SqliteIndexedBackend:
             status=row["status"],
             provider=row["provider"],
             script_version=row["script_version"] or UNKNOWN_SCRIPT_VERSION,
-            tickers=tuple(json.loads(row["tickers"] or "[]")),
+            tickers=self._row_tickers(row["tickers"]),
             config_fingerprint=row["config_fingerprint"],
             positions_fingerprint=row["positions_fingerprint"],
             dataset_id=row["dataset_id"],

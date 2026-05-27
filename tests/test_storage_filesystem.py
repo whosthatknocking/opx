@@ -174,6 +174,48 @@ def test_create_run_initial_status_is_running(tmp_path: Path):
     assert run.script_version == __version__
 
 
+@pytest.mark.parametrize(
+    ("stored_tickers", "expected"),
+    [
+        ("TSLA", ()),
+        (["TSLA", True, 7, ""], ()),
+        (None, ()),
+        ({"symbol": "TSLA"}, ()),
+        (["tsla", "NVDA"], ("TSLA", "NVDA")),
+    ],
+)
+def test_get_run_sanitizes_retained_ticker_payload(
+    tmp_path: Path,
+    stored_tickers,
+    expected: tuple[str, ...],
+):
+    """Retained run sidecars must not return malformed ticker tuples."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    run_path = tmp_path / "runs" / run_id / "run.json"
+    data = json.loads(run_path.read_text(encoding="utf-8"))
+    data["tickers"] = stored_tickers
+    run_path.write_text(json.dumps(data), encoding="utf-8")
+
+    run = backend.get_run(run_id)
+
+    assert run.tickers == expected
+
+
+def test_get_run_sanitizes_missing_retained_ticker_payload(tmp_path: Path):
+    """Legacy run sidecars without ticker metadata should read back as an empty universe."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    run_path = tmp_path / "runs" / run_id / "run.json"
+    data = json.loads(run_path.read_text(encoding="utf-8"))
+    data.pop("tickers")
+    run_path.write_text(json.dumps(data), encoding="utf-8")
+
+    run = backend.get_run(run_id)
+
+    assert not run.tickers
+
+
 def test_finalize_run_sets_status_complete(tmp_path: Path):
     """finalize_run must update status to complete and set finished_at."""
     backend = _make_backend(tmp_path)

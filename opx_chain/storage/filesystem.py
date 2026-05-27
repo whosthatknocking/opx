@@ -37,6 +37,7 @@ from opx_chain.storage._disk import (
 from opx_chain.storage.serializers import get_serializer
 from opx_chain.storage.validation import (
     INVALID_TICKER_FILTER,
+    sanitize_retained_run_tickers,
     validate_artifact_write,
     validate_dataset_list_filters,
     validate_dataset_id,
@@ -644,7 +645,7 @@ class FilesystemBackend:
             status=data["status"],
             provider=data["provider"],
             script_version=data.get("script_version", UNKNOWN_SCRIPT_VERSION),
-            tickers=tuple(data.get("tickers", ())),
+            tickers=sanitize_retained_run_tickers(data.get("tickers", ())),
             config_fingerprint=data["config_fingerprint"],
             positions_fingerprint=data["positions_fingerprint"],
             dataset_id=data.get("dataset_id"),

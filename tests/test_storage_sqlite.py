@@ -353,6 +353,38 @@ def test_create_run_initial_status_is_running(tmp_path: Path):
     assert run.script_version == __version__
 
 
+@pytest.mark.parametrize(
+    ("stored_tickers", "expected"),
+    [
+        ("not-json", ()),
+        ('"TSLA"', ()),
+        ('["TSLA", true, 7, ""]', ()),
+        ('["tsla", "NVDA"]', ("TSLA", "NVDA")),
+    ],
+)
+def test_get_run_sanitizes_retained_ticker_json(
+    tmp_path: Path,
+    stored_tickers: str,
+    expected: tuple[str, ...],
+):
+    """Retained run ticker metadata must not leak parser errors or malformed members."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        conn.execute(
+            "UPDATE runs SET tickers = ? WHERE run_id = ?",
+            (stored_tickers, run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    run = backend.get_run(run_id)
+
+    assert run.tickers == expected
+
+
 def test_finalize_run_sets_status_complete(tmp_path: Path):
     """finalize_run must update status to complete."""
     backend = _make_backend(tmp_path)
