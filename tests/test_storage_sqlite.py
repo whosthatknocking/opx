@@ -228,6 +228,44 @@ def test_schema_backfills_dataset_created_at_sort_key(tmp_path: Path):
     assert sort_key is not None
 
 
+def test_list_datasets_commits_created_at_sort_key_backfill(tmp_path: Path):
+    """Listing-triggered sort-key repair must not leave a pooled write transaction open."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    record = _write(backend, run_id)
+    db_path = tmp_path / "opx-chain.db"
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE datasets SET created_at = ?, created_at_sort_key = NULL "
+            "WHERE dataset_id = ?",
+            ("2026-05-27T12:00:00Z", record.dataset_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    records = backend.list_datasets(limit=1)
+
+    assert [dataset.dataset_id for dataset in records] == [record.dataset_id]
+    assert backend._connection is not None  # pylint: disable=protected-access
+    assert not backend._connection.in_transaction  # pylint: disable=protected-access
+
+    conn = sqlite3.connect(db_path, timeout=0.1)
+    try:
+        sort_key = conn.execute(
+            "SELECT created_at_sort_key FROM datasets WHERE dataset_id = ?",
+            (record.dataset_id,),
+        ).fetchone()[0]
+        conn.execute("UPDATE _schema_meta SET value = value WHERE key = 'schema_version'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert sort_key is not None
+
+
 def test_table_columns_rejects_unsafe_table_identifier(tmp_path: Path):
     """Migration idempotence checks must not interpolate arbitrary table names."""
     backend = _make_backend(tmp_path)

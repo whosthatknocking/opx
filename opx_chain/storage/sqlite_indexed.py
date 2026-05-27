@@ -353,9 +353,9 @@ class SqliteIndexedBackend:
                 (str(next_version),),
             )
 
-    def _backfill_dataset_sort_keys(self, conn: sqlite3.Connection) -> None:
+    def _backfill_dataset_sort_keys(self, conn: sqlite3.Connection) -> bool:
         if "created_at_sort_key" not in self._table_columns(conn, "datasets"):
-            return
+            return False
         rows = conn.execute(
             "SELECT dataset_id, created_at FROM datasets WHERE created_at_sort_key IS NULL"
         ).fetchall()
@@ -369,6 +369,8 @@ class SqliteIndexedBackend:
                 "UPDATE datasets SET created_at_sort_key = ? WHERE dataset_id = ?",
                 updates,
             )
+            return True
+        return False
 
     def _ensure_dataset_sort_key_index(self, conn: sqlite3.Connection) -> None:
         if "created_at_sort_key" not in self._table_columns(conn, "datasets"):
@@ -377,6 +379,10 @@ class SqliteIndexedBackend:
             "CREATE INDEX IF NOT EXISTS idx_datasets_created_at_sort_key "
             "ON datasets(created_at_sort_key DESC, dataset_id DESC)"
         )
+
+    def _backfill_dataset_sort_keys_for_listing(self, conn: sqlite3.Connection) -> None:
+        if self._backfill_dataset_sort_keys(conn):
+            conn.commit()
 
     def _sidecar_path(self, run_id: str, filename: str) -> Path:
         return resolve_child_path(self._runs_dir, run_id, filename)
@@ -719,7 +725,7 @@ class SqliteIndexedBackend:
             sql += " LIMIT ?"
             params.append(filters.limit)
         with self._open_connection() as conn:
-            self._backfill_dataset_sort_keys(conn)
+            self._backfill_dataset_sort_keys_for_listing(conn)
             rows = conn.execute(sql, params).fetchall()
             records: list[DatasetRecord] = []
             for row in rows:
