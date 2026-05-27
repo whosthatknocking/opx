@@ -132,6 +132,17 @@ def test_price_context_normalization_drops_boolean_ohlcv_rows():
     assert context["resistance_1"] != 1.0
 
 
+def test_price_context_normalization_drops_close_outside_daily_range():
+    """Daily bars with close outside high/low should not produce context levels."""
+    history = _history(periods=30)
+    history.loc[history.index[-1], "Close"] = history.loc[history.index[-1], "High"] + 100
+
+    normalized = normalize_price_history_frame(history)
+
+    assert len(normalized) == 29
+    assert normalized["date"].max().date().isoformat() == "2025-08-08"
+
+
 def test_blank_price_context_accepts_status_enum():
     """Callers should use the canonical enum without leaking enum objects to JSON."""
     context = blank_price_context(source="unit", status=PriceContextStatus.ERROR)

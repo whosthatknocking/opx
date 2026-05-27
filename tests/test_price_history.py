@@ -41,6 +41,17 @@ class HistoryProvider:  # pylint: disable=too-few-public-methods
         return _history(end=self.end, periods=lookback_days)
 
 
+class WrongSymbolHistoryProvider(HistoryProvider):  # pylint: disable=too-few-public-methods
+    """Provider stub that returns identity-bearing bars for a different ticker."""
+
+    def load_price_history(self, ticker, *, lookback_days):  # pylint: disable=unused-argument
+        """Return deterministic daily bars with a mismatched symbol column."""
+        self.lookback_calls.append(lookback_days)
+        history = _history(end=self.end, periods=lookback_days)
+        history["symbol"] = "MSFT"
+        return history
+
+
 class EmptyHistoryProvider(HistoryProvider):  # pylint: disable=too-few-public-methods
     """Provider stub that records requests but returns no usable rows."""
 
@@ -217,6 +228,52 @@ def test_reconcile_price_history_uses_store_when_coverage_is_current(tmp_path):
     assert result.fetched is False
     assert len(result.history) == 30
     assert not provider.lookback_calls
+
+
+def test_reconcile_price_history_refresh_refetches_complete_coverage(tmp_path):
+    """A zero TTL should force provider reconciliation even with complete local bars."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+    store.upsert_bars(provider="stub", ticker="AAA", history=_history(periods=30))
+    provider = HistoryProvider()
+    config = make_runtime_config(
+        today=date(2026, 3, 20),
+        price_context_lookback_days=30,
+        provider_price_context_ttl=0,
+    )
+
+    result = reconcile_price_history(
+        ticker="AAA",
+        provider=provider,
+        config=config,
+        store=store,
+    )
+
+    assert result.fetched is True
+    assert result.requested_lookback_days == 30
+    assert provider.lookback_calls == [30]
+
+
+def test_reconcile_price_history_rejects_wrong_symbol_provider_rows(tmp_path):
+    """Provider-returned identity-bearing rows must match the requested ticker."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+    provider = WrongSymbolHistoryProvider()
+    config = make_runtime_config(
+        today=date(2026, 3, 20),
+        price_context_lookback_days=30,
+        provider_price_context_ttl=86400,
+    )
+
+    result = reconcile_price_history(
+        ticker="AAA",
+        provider=provider,
+        config=config,
+        store=store,
+    )
+
+    assert result.fetched is False
+    assert result.stored_rows == 0
+    assert result.error_summary == "provider returned no usable price history rows"
+    assert store.stats(provider="stub", ticker="AAA").row_count == 0
 
 
 def test_reconcile_price_history_fetches_tail_delta(tmp_path):
@@ -603,6 +660,28 @@ def test_price_history_store_normalizes_provider_case(tmp_path) -> None:
     )
     assert sync is not None
     assert sync.status == "ok"
+
+
+def test_price_history_record_sync_normalizes_naive_checked_at(tmp_path) -> None:
+    """Sync writes should not persist new offset-naive checked_at metadata."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+
+    store.record_sync(
+        provider="stub",
+        ticker="AAA",
+        lookback_days=30,
+        status="ok",
+        requested_lookback_days=30,
+        latest_trading_date=date(2026, 3, 20),
+        fetched_rows=3,
+        stored_rows=3,
+        checked_at=datetime(2026, 3, 20, 12, 0),
+    )
+
+    sync = store.get_sync(provider="stub", ticker="AAA", lookback_days=30)
+
+    assert sync is not None
+    assert sync.checked_at == datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc)
 
 
 @pytest.mark.parametrize(

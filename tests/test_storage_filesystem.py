@@ -1103,6 +1103,26 @@ def test_list_datasets_until_excludes_newer_records(tmp_path: Path):
     assert not results
 
 
+def test_list_datasets_normalizes_legacy_naive_created_at(tmp_path: Path):
+    """Legacy naive dataset timestamps should not crash date filtering."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    record = _write(backend, run_id)
+    meta_path = _meta_path(record)
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    metadata["created_at"] = "2026-05-27T12:00:00"
+    meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+    (tmp_path / "runs" / "datasets.index.json").unlink()
+
+    results = backend.list_datasets(
+        since=datetime(2026, 5, 27, 11, 59, tzinfo=timezone.utc),
+        until=datetime(2026, 5, 27, 12, 1, tzinfo=timezone.utc),
+    )
+
+    assert [item.dataset_id for item in results] == [record.dataset_id]
+    assert results[0].created_at == datetime(2026, 5, 27, 12, 0, tzinfo=timezone.utc)
+
+
 def test_list_datasets_orders_by_created_at_not_meta_file_mtime(tmp_path: Path):
     """Filesystem listing order should match SQLite's created_at ordering."""
     backend = _make_backend(tmp_path)
@@ -1208,6 +1228,19 @@ def test_count_runs_today_cache_invalidates_on_run_write(tmp_path: Path):
     assert backend.count_runs_today("marketdata") == 0
 
     backend.finalize_run(market_run, RunSummary(status="complete"))
+
+    assert backend.count_runs_today("marketdata") == 1
+
+
+def test_count_runs_today_handles_legacy_naive_started_at(tmp_path: Path):
+    """Legacy naive run timestamps should be normalized before day counting."""
+    backend = _make_backend(tmp_path)
+    market_run = backend.create_run(_make_context(provider="marketdata"))
+    backend.finalize_run(market_run, RunSummary(status="complete"))
+    run_path = tmp_path / "runs" / market_run / "run.json"
+    data = json.loads(run_path.read_text(encoding="utf-8"))
+    data["started_at"] = datetime.now(tz=timezone.utc).replace(tzinfo=None).isoformat()
+    run_path.write_text(json.dumps(data), encoding="utf-8")
 
     assert backend.count_runs_today("marketdata") == 1
 

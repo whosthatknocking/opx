@@ -143,6 +143,28 @@ def test_filesystem_cache_prunes_expired_entries_on_startup(tmp_path: Path):
     assert not meta_path.exists()
 
 
+def test_filesystem_cache_prune_handles_legacy_naive_expiry(tmp_path: Path):
+    """Legacy naive expiry timestamps should not crash startup pruning."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    bin_path, meta_path = _cache_paths(cache_dir, "naive-key")
+    bin_path.write_bytes(b"cached")
+    meta_path.write_text(
+        json.dumps({
+            "key": "naive-key",
+            "expires_at": (
+                datetime.now(tz=timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+            ).isoformat(),
+        }),
+        encoding="utf-8",
+    )
+
+    FilesystemCache(cache_dir)
+
+    assert bin_path.exists()
+    assert meta_path.exists()
+
+
 def test_filesystem_cache_prunes_unreadable_metadata_on_startup(tmp_path: Path):
     """Corrupt metadata should not keep orphaned cache payloads forever."""
     cache_dir = tmp_path / "cache"

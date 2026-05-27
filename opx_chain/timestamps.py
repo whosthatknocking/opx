@@ -34,8 +34,9 @@ def _is_missing_timestamp(value: Any) -> bool:
 
 
 def datetime_to_iso(value: Any) -> str | None:
-    """Serialize a datetime value to ISO text, preserving None."""
-    return None if _is_missing_timestamp(value) else value.isoformat()
+    """Serialize a datetime value to UTC ISO text, preserving None."""
+    timestamp = _as_utc_timestamp(value)
+    return None if timestamp is None else timestamp.to_pydatetime().isoformat()
 
 
 def _as_utc_timestamp(value: Any) -> pd.Timestamp | None:
@@ -71,7 +72,10 @@ def iso_to_datetime(value: str | None) -> datetime | None:
 
 
 def parse_iso_datetime(value: str) -> datetime:
-    """Parse ISO datetimes, accepting a trailing UTC ``Z`` suffix."""
+    """Parse ISO datetimes as UTC-aware values, accepting a trailing UTC ``Z`` suffix."""
     text = value.strip()
     normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
-    return datetime.fromisoformat(normalized)
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

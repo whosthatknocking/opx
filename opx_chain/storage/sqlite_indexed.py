@@ -161,6 +161,28 @@ _SCHEMA_MIGRATIONS: dict[int, str] = {
        """,
 }
 
+_COUNT_RUNS_TODAY_SQL = (
+    "SELECT started_at FROM runs "
+    "WHERE provider = ? AND status = 'complete' AND started_at >= ?"
+)
+
+
+def _utc_sort_key(value: datetime | None) -> datetime:
+    """Return a timezone-aware UTC datetime suitable for stable comparisons."""
+    if value is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _row_datetime_sort_key(row: sqlite3.Row, column: str) -> datetime:
+    """Return a stable UTC sort key for retained timestamp text."""
+    try:
+        return _utc_sort_key(iso_to_datetime(row[column]))
+    except (TypeError, ValueError):
+        return datetime.min.replace(tzinfo=timezone.utc)
+
 _ADD_COLUMN_RE = re.compile(
     r"^ALTER\s+TABLE\s+(?P<table>[A-Za-z_][A-Za-z0-9_]*)\s+"
     r"ADD\s+COLUMN\s+(?P<column>[A-Za-z_][A-Za-z0-9_]*)\b",
@@ -406,12 +428,13 @@ class SqliteIndexedBackend:
         if self._max_runs_retained <= 0:
             return []
         rows = conn.execute(
-            "SELECT dataset_id, run_id, location "
-            "FROM datasets "
-            "ORDER BY created_at DESC "
-            "LIMIT -1 OFFSET ?",
-            (self._max_runs_retained,),
+            "SELECT dataset_id, run_id, location, created_at FROM datasets"
         ).fetchall()
+        rows = sorted(
+            rows,
+            key=lambda row: (_row_datetime_sort_key(row, "created_at"), row["dataset_id"]),
+            reverse=True,
+        )[self._max_runs_retained:]
         pending: list[_DeferredDelete] = []
         for row in rows:
             dataset_path = retained_path_under_roots(row["location"], (self._runs_dir,))
@@ -610,7 +633,7 @@ class SqliteIndexedBackend:
             content_hash=content_hash,
         )
 
-    def list_datasets(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    def list_datasets(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         self,
         limit: int = 50,
         provider: str | None = None,
@@ -638,19 +661,17 @@ class SqliteIndexedBackend:
         if filters.provider is not None:
             conditions.append("d.provider = ?")
             params.append(filters.provider)
-        if filters.since is not None:
-            conditions.append("d.created_at >= ?")
-            params.append(datetime_to_iso(filters.since))
-        if filters.until is not None:
-            conditions.append("d.created_at <= ?")
-            params.append(datetime_to_iso(filters.until))
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
-        sql += " ORDER BY d.created_at DESC"
         with self._open_connection() as conn:
             rows = conn.execute(sql, params).fetchall()
             records: list[DatasetRecord] = []
-            for row in rows:
+            sorted_rows = sorted(
+                rows,
+                key=lambda row: (_row_datetime_sort_key(row, "created_at"), row["dataset_id"]),
+                reverse=True,
+            )
+            for row in sorted_rows:
                 if filters.ticker is not None and not self._row_has_ticker(
                     conn,
                     row,
@@ -658,9 +679,14 @@ class SqliteIndexedBackend:
                 ):
                     continue
                 try:
-                    records.append(self._row_to_record(row))
+                    record = self._row_to_record(row)
                 except ValueError:
                     continue
+                if filters.since is not None and record.created_at < filters.since:
+                    continue
+                if filters.until is not None and record.created_at > filters.until:
+                    continue
+                records.append(record)
                 if len(records) >= filters.limit:
                     break
         return records
@@ -708,14 +734,29 @@ class SqliteIndexedBackend:
         """Mark running runs older than cutoff as interrupted."""
         cutoff, error_summary = validate_stale_run_inputs(cutoff, error_summary)
         with self._open_connection() as conn:
-            cursor = conn.execute(
-                "UPDATE runs "
-                "SET status = 'interrupted', finished_at = ?, error_summary = ? "
-                "WHERE status = 'running' AND started_at < ?",
-                (datetime_to_iso(utc_now()), error_summary, datetime_to_iso(cutoff)),
-            )
+            rows = conn.execute(
+                "SELECT run_id, started_at FROM runs WHERE status = 'running'"
+            ).fetchall()
+            stale_run_ids = []
+            for row in rows:
+                try:
+                    started_at = iso_to_datetime(row["started_at"])
+                except (TypeError, ValueError):
+                    continue
+                if started_at is not None and started_at < cutoff:
+                    stale_run_ids.append(row["run_id"])
+            if stale_run_ids:
+                conn.executemany(
+                    "UPDATE runs "
+                    "SET status = 'interrupted', finished_at = ?, error_summary = ? "
+                    "WHERE run_id = ? AND status = 'running'",
+                    [
+                        (datetime_to_iso(utc_now()), error_summary, run_id)
+                        for run_id in stale_run_ids
+                    ],
+                )
             conn.commit()
-        return cursor.rowcount
+        return len(stale_run_ids)
 
     def get_run(self, run_id: str) -> RunRecord:
         """Return a RunRecord for the given run_id."""
@@ -747,12 +788,11 @@ class SqliteIndexedBackend:
         now_et = datetime.now(tz=US_MARKET_TIMEZONE)
         midnight_et = now_et.replace(hour=0, minute=0, second=0, microsecond=0)
         since_utc = midnight_et.astimezone(timezone.utc)
-        since_utc_text = datetime_to_iso(since_utc)
+        since_utc_floor_text = since_utc.date().isoformat()
         with self._open_connection() as conn:
             rows = conn.execute(
-                "SELECT started_at FROM runs "
-                "WHERE provider = ? AND started_at >= ? AND status = 'complete'",
-                (provider, since_utc_text),
+                _COUNT_RUNS_TODAY_SQL,
+                (provider, since_utc_floor_text),
             ).fetchall()
         count = 0
         for row in rows:

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from numbers import Integral
 from pathlib import Path
 import sqlite3
@@ -146,7 +146,33 @@ def _optional_date_arg(value: object, *, name: str) -> date | None:
 def _datetime_arg(value: object, *, name: str) -> datetime:
     if not isinstance(value, datetime):
         raise ValueError(f"{name} must be a datetime")
-    return value
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _history_identity_column(history: pd.DataFrame) -> str | None:
+    """Return the first supported ticker identity column in a provider history frame."""
+    normalized_columns = {
+        str(column).strip().lower(): column
+        for column in history.columns
+    }
+    for alias in ("symbol", "ticker", "underlying_symbol"):
+        column = normalized_columns.get(alias)
+        if column is not None:
+            return column
+    return None
+
+
+def _filter_history_identity(history: pd.DataFrame, *, ticker: str) -> pd.DataFrame:
+    """Keep only provider daily bars that match the requested ticker identity."""
+    if not isinstance(history, pd.DataFrame) or history.empty:
+        return history
+    identity_column = _history_identity_column(history)
+    if identity_column is None:
+        return history
+    identities = history[identity_column].astype("string").str.strip().str.upper()
+    return history.loc[identities == ticker].copy()
 
 
 @dataclass(frozen=True)
@@ -409,11 +435,13 @@ class PriceHistoryStore:
         fetched_at: datetime | None = None,
     ) -> int:
         """Normalize and upsert daily bars. Returns normalized row count."""
-        normalized = normalize_price_history_frame(history)
-        if normalized.empty:
-            return 0
         provider_key = _normalize_provider(provider)
         ticker_key = _normalize_ticker(ticker)
+        normalized = normalize_price_history_frame(
+            _filter_history_identity(history, ticker=ticker_key)
+        )
+        if normalized.empty:
+            return 0
         fetched = (
             _datetime_arg(fetched_at, name="fetched_at")
             if fetched_at is not None
@@ -594,7 +622,7 @@ def _fetch_days_for_reason(
     latest_date: date | None,
     today: date,
 ) -> int:
-    if reason in {"missing", "backfill"} or latest_date is None:
+    if reason in {"missing", "backfill", "refresh"} or latest_date is None:
         return lookback_days
     age_days = max((today - latest_date).days, 0)
     return min(lookback_days, max(PRICE_HISTORY_TAIL_REFRESH_DAYS, age_days + 1))
@@ -676,7 +704,11 @@ def reconcile_price_history(  # pylint: disable=too-many-locals
         lookback_days=lookback_days,
         logger=logger,
     )
-    if reason is None or (
+    if reason is None:
+        if ttl_seconds > 0:
+            return PriceHistoryReconcileResult(history=history, fetched=False)
+        reason = "refresh"
+    elif (
         not history.empty
         and _sync_recent(
             sync,

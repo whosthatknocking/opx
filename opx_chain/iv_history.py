@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 import threading
@@ -165,7 +165,9 @@ def _optional_date_arg(value: object, *, name: str) -> date | None:
 def _datetime_arg(value: object, *, name: str) -> datetime:
     if not isinstance(value, datetime):
         raise ValueError(f"{name} must be a datetime")
-    return value
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _normalize_option_type(value: object) -> str:
@@ -558,8 +560,12 @@ class IVHistoryStore:
             ).fetchone()
         if row is None:
             return None
+        try:
+            checked_at = parse_iso_datetime(row["checked_at"])
+        except (TypeError, ValueError):
+            return None
         return IVHistorySync(
-            checked_at=parse_iso_datetime(row["checked_at"]),
+            checked_at=checked_at,
             status=str(row["status"]),
             provider=str(row["provider"]),
             run_id=row["run_id"],

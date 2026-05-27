@@ -67,6 +67,8 @@ def normalize_vendor_option_frame(  # pylint: disable=too-many-arguments,too-man
         if column in df.columns:
             df[column] = finite_numeric_series(df[column])
 
+    if "option_quote_time" not in df.columns:
+        df["option_quote_time"] = pd.NaT
     df["option_quote_time"] = pd.to_datetime(df["option_quote_time"], utc=True, errors="coerce")
     return df
 

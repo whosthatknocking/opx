@@ -522,6 +522,58 @@ def test_list_datasets_skips_corrupt_created_at(tmp_path: Path):
     assert [record.dataset_id for record in records] == [good_record.dataset_id]
 
 
+def test_list_datasets_normalizes_legacy_naive_created_at(tmp_path: Path):
+    """Legacy naive dataset timestamps should not leak or break date filtering."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    record = _write(backend, run_id)
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        conn.execute(
+            "UPDATE datasets SET created_at = ? WHERE dataset_id = ?",
+            ("2026-05-27T12:00:00", record.dataset_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    records = backend.list_datasets(
+        since=datetime(2026, 5, 27, 11, 59, tzinfo=timezone.utc),
+        until=datetime(2026, 5, 27, 12, 1, tzinfo=timezone.utc),
+    )
+
+    assert [item.dataset_id for item in records] == [record.dataset_id]
+    assert records[0].created_at == datetime(2026, 5, 27, 12, 0, tzinfo=timezone.utc)
+
+
+def test_list_datasets_orders_same_second_legacy_timestamps(tmp_path: Path):
+    """Parsed UTC timestamps, not raw ISO text, should determine recency."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    older = _write(backend, run_id)
+    newer = _write(backend, run_id)
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        conn.execute(
+            "UPDATE datasets SET created_at = ? WHERE dataset_id = ?",
+            ("2026-05-27T12:00:00Z", older.dataset_id),
+        )
+        conn.execute(
+            "UPDATE datasets SET created_at = ? WHERE dataset_id = ?",
+            ("2026-05-27T12:00:00.500000+00:00", newer.dataset_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    records = backend.list_datasets(limit=2)
+
+    assert [record.dataset_id for record in records] == [
+        newer.dataset_id,
+        older.dataset_id,
+    ]
+
+
 def test_list_datasets_limit(tmp_path: Path):
     """list_datasets must honour the limit parameter."""
     backend = _make_backend(tmp_path)
@@ -809,8 +861,8 @@ def test_pruning_removes_oldest_when_limit_exceeded(tmp_path: Path):
     assert backend.get_run(run_id).dataset_id == r3.dataset_id
 
 
-def test_pruning_queries_only_excess_rows(tmp_path: Path):
-    """Pruning must let SQLite skip retained rows instead of slicing all rows in Python."""
+def test_pruning_loads_created_at_for_parsed_order(tmp_path: Path):
+    """Pruning must inspect created_at so legacy ISO forms sort chronologically."""
     backend = _make_backend(tmp_path, max_runs_retained=7)
     calls = []
 
@@ -832,8 +884,8 @@ def test_pruning_queries_only_excess_rows(tmp_path: Path):
     backend._prune_datasets(TrackingConnection())  # pylint: disable=protected-access
 
     sql, params = calls[0]
-    assert "LIMIT -1 OFFSET ?" in sql
-    assert params == (7,)
+    assert "created_at" in sql
+    assert params == ()
 
 
 def test_pruning_clears_dataset_id_for_pruned_run(tmp_path: Path):
@@ -926,6 +978,35 @@ def test_pruning_removes_run_log_artifact_for_pruned_run(tmp_path: Path):
     assert remaining == 0
     assert not artifact_path.exists()
     assert not artifact_dir.exists()
+
+
+def test_pruning_uses_parsed_created_at_order(tmp_path: Path):
+    """Retention should keep the newest parsed timestamp across legacy ISO forms."""
+    backend = _make_backend(tmp_path, max_runs_retained=0)
+    run_id = backend.create_run(_make_context())
+    older = _write(backend, run_id, rows=1)
+    newer = _write(backend, run_id, rows=2)
+    backend._max_runs_retained = 1  # pylint: disable=protected-access
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute(
+            "UPDATE datasets SET created_at = ? WHERE dataset_id = ?",
+            ("2026-05-27T12:00:00Z", older.dataset_id),
+        )
+        conn.execute(
+            "UPDATE datasets SET created_at = ? WHERE dataset_id = ?",
+            ("2026-05-27T12:00:00.500000+00:00", newer.dataset_id),
+        )
+        pending = backend._prune_datasets(conn)  # pylint: disable=protected-access
+        conn.commit()
+    finally:
+        conn.close()
+    backend._delete_deferred_paths(pending)  # pylint: disable=protected-access
+
+    records = backend.list_datasets(limit=10)
+
+    assert [record.dataset_id for record in records] == [newer.dataset_id]
 
 
 def test_no_pruning_when_max_runs_retained_zero(tmp_path: Path):
@@ -1094,6 +1175,24 @@ def test_count_runs_today_skips_malformed_started_at(tmp_path: Path):
     assert backend.count_runs_today("marketdata") == 1
 
 
+def test_count_runs_today_handles_legacy_naive_started_at(tmp_path: Path):
+    """Legacy naive run timestamps should be normalized before day counting."""
+    backend = _make_backend(tmp_path)
+    market_run = backend.create_run(_make_context(provider="marketdata"))
+    backend.finalize_run(market_run, RunSummary(status="complete"))
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        conn.execute(
+            "UPDATE runs SET started_at = ? WHERE run_id = ?",
+            (datetime.now(tz=timezone.utc).replace(tzinfo=None).isoformat(), market_run),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert backend.count_runs_today("marketdata") == 1
+
+
 def test_count_runs_today_uses_composite_index(tmp_path: Path):
     """count_runs_today must use the provider/status/started_at index."""
     _make_backend(tmp_path)
@@ -1101,9 +1200,8 @@ def test_count_runs_today_uses_composite_index(tmp_path: Path):
     try:
         plan = conn.execute(
             "EXPLAIN QUERY PLAN "
-            "SELECT COUNT(*) FROM runs "
-            "WHERE provider = ? AND started_at >= ? AND status = 'complete'",
-            ("marketdata", "2026-01-01T00:00:00+00:00"),
+            f"{sqlite_indexed_mod._COUNT_RUNS_TODAY_SQL}",  # pylint: disable=protected-access
+            ("marketdata", "2026-01-01"),
         ).fetchall()
     finally:
         conn.close()
@@ -1170,3 +1268,26 @@ def test_interrupt_stale_runs_marks_old_running_rows(tmp_path: Path):
     assert stale_record.finished_at is not None
     assert stale_record.error_summary == "process_terminated_uncleanly"
     assert backend.get_run(fresh_run).status == "running"
+
+
+def test_interrupt_stale_runs_compares_parsed_legacy_z_timestamp(tmp_path: Path):
+    """Legacy Z timestamps should not evade stale recovery through text ordering."""
+    backend = _make_backend(tmp_path)
+    stale_run = backend.create_run(_make_context(provider="marketdata"))
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        conn.execute(
+            "UPDATE runs SET started_at = ? WHERE run_id = ?",
+            ("2026-05-27T12:00:00Z", stale_run),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    count = backend.interrupt_stale_runs(
+        datetime(2026, 5, 27, 12, 0, 0, 500000, tzinfo=timezone.utc),
+        "process_terminated_uncleanly",
+    )
+
+    assert count == 1
+    assert backend.get_run(stale_run).status == "interrupted"

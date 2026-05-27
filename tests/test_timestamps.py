@@ -32,6 +32,14 @@ def test_parse_iso_datetime_accepts_trailing_z_suffix():
     assert parsed.isoformat() == "2026-04-22T12:00:00+00:00"
 
 
+def test_parse_iso_datetime_normalizes_naive_values_to_utc():
+    """Legacy retained naive timestamps should not leak offset-naive datetimes."""
+    parsed = parse_iso_datetime("2026-04-22T12:00:00")
+
+    assert parsed.utcoffset() == timezone.utc.utcoffset(parsed)
+    assert parsed.isoformat() == "2026-04-22T12:00:00+00:00"
+
+
 def test_parse_iso_datetime_does_not_replace_embedded_z():
     """Only a trailing Z should be normalized, not every Z in the string."""
     with pytest.raises(ValueError):
@@ -46,6 +54,13 @@ def test_datetime_to_iso_and_iso_to_datetime_preserve_none_and_timezone():
     assert iso_to_datetime("2026-04-22T12:00:00Z") == value
     assert datetime_to_iso(None) is None
     assert iso_to_datetime(None) is None
+
+
+def test_datetime_to_iso_normalizes_naive_values_to_utc():
+    """Storage writes should not create new offset-naive timestamp text."""
+    value = datetime(2026, 4, 22, 12, 0)
+
+    assert datetime_to_iso(value) == "2026-04-22T12:00:00+00:00"
 
 
 def test_timestamp_helpers_preserve_pandas_nat_as_missing():

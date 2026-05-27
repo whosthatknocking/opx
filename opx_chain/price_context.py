@@ -145,6 +145,8 @@ def _normalize_history_frame(history: pd.DataFrame) -> pd.DataFrame:
         & (normalized["low"] > 0)
         & (normalized["close"] > 0)
         & (normalized["high"] >= normalized["low"])
+        & (normalized["close"] >= normalized["low"])
+        & (normalized["close"] <= normalized["high"])
     ]
     return normalized.sort_values("date").drop_duplicates(subset=["date"], keep="last")
 

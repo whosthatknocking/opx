@@ -8,6 +8,7 @@ from opx_chain.normalize import (
     filter_strikes_near_spot,
     filter_wide_spread_quotes,
     filter_zero_bid_quotes,
+    normalize_vendor_option_frame,
 )
 from opx_chain.positions import OptionPositionKey, STRIKE_MATCH_TOLERANCE
 
@@ -82,6 +83,37 @@ def test_filter_wide_spread_quotes_keeps_rows_at_the_cutoff(monkeypatch: pytest.
     result = filter_wide_spread_quotes(frame)
 
     assert result["contract_symbol"].tolist() == ["TIGHT", "EDGE"]
+
+
+def test_normalize_vendor_option_frame_allows_missing_quote_timestamp(monkeypatch):
+    """Provider rows without quote timestamps should carry nullable freshness."""
+    def make_config():
+        return type("Config", (), {
+            "today": pd.Timestamp("2026-05-27").date(),
+            "risk_free_rate": 0.04,
+        })()
+
+    monkeypatch.setattr("opx_chain.normalize.get_runtime_config", make_config)
+    frame = pd.DataFrame([
+        {
+            "contractSymbol": "TSLA260619C00100000",
+            "strike": 100,
+            "bid": 1.0,
+            "ask": 1.2,
+        }
+    ])
+
+    result = normalize_vendor_option_frame(
+        frame,
+        underlying_price=110.0,
+        expiration_date="2026-06-19",
+        option_type="call",
+        ticker="TSLA",
+        data_source="unit",
+    )
+
+    assert "option_quote_time" in result.columns
+    assert pd.isna(result.loc[0, "option_quote_time"])
 
 
 def test_apply_post_download_filters_position_keys_bypass_all_filters(monkeypatch):

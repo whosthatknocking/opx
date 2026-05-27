@@ -509,6 +509,45 @@ def test_iv_history_backfill_retries_failed_or_empty_sync_without_refresh(
     assert store.stats(provider="marketdata", ticker="TSLA").observation_dates == 1
 
 
+def test_iv_history_backfill_retries_malformed_sync_timestamp(tmp_path):
+    """Malformed retained sync metadata should not abort retained replay."""
+    path = tmp_path / "chain.csv"
+    _dataset(path)
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    record = _record(path)
+    conn = store._connection_for_use()  # pylint: disable=protected-access
+    conn.execute(
+        """
+        INSERT INTO iv_history_syncs
+            (dataset_id, provider, run_id, checked_at, status,
+             observation_date, source_rows, stored_rows)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            record.dataset_id,
+            record.provider,
+            record.run_id,
+            "not-a-timestamp",
+            "INGESTED",
+            "2026-05-22",
+            3,
+            8,
+        ),
+    )
+    conn.commit()
+    config = make_runtime_config(data_provider="marketdata", tickers=("TSLA",))
+
+    result = run_iv_history_backfill(
+        providers=("marketdata",),
+        config=config,
+        store=store,
+        storage=FakeStorage([record]),
+    )
+
+    assert result.rows[0].status == "INGESTED"
+    assert result.rows[0].stored_rows > 0
+
+
 def test_iv_history_backfill_retries_ingested_sync_without_observations(tmp_path):
     """Successful sync metadata alone should not suppress a retained replay."""
     path = tmp_path / "chain.csv"
