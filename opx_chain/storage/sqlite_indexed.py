@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS datasets (
     dataset_id      TEXT PRIMARY KEY,
     run_id          TEXT NOT NULL REFERENCES runs(run_id),
     created_at      TEXT NOT NULL,
+    created_at_sort_key INTEGER,
     provider        TEXT NOT NULL,
     script_version  TEXT NOT NULL DEFAULT 'unknown',
     schema_version  INTEGER NOT NULL,
@@ -148,7 +149,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_provider_status_started
     ON runs(provider, status, started_at);
 """
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 _SCHEMA_MIGRATIONS: dict[int, str] = {
     2: "ALTER TABLE runs ADD COLUMN tickers TEXT NOT NULL DEFAULT '[]';",
     3: """
@@ -158,6 +159,11 @@ _SCHEMA_MIGRATIONS: dict[int, str] = {
     4: """
        CREATE INDEX IF NOT EXISTS idx_runs_provider_status_started
            ON runs(provider, status, started_at);
+       """,
+    5: """
+       ALTER TABLE datasets ADD COLUMN created_at_sort_key INTEGER;
+       CREATE INDEX IF NOT EXISTS idx_datasets_created_at_sort_key
+           ON datasets(created_at_sort_key DESC, dataset_id DESC);
        """,
 }
 
@@ -176,12 +182,23 @@ def _utc_sort_key(value: datetime | None) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _row_datetime_sort_key(row: sqlite3.Row, column: str) -> datetime:
-    """Return a stable UTC sort key for retained timestamp text."""
+def _datetime_to_sort_key(value: datetime) -> int:
+    """Return a UTC microsecond sort key suitable for SQLite ordering."""
+    normalized = _utc_sort_key(value)
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return int((normalized - epoch).total_seconds() * 1_000_000)
+
+
+def _created_at_text_to_sort_key(value: str) -> int | None:
+    """Return a retained timestamp sort key, preserving malformed rows as null."""
     try:
-        return _utc_sort_key(iso_to_datetime(row[column]))
+        parsed = iso_to_datetime(value)
     except (TypeError, ValueError):
-        return datetime.min.replace(tzinfo=timezone.utc)
+        return None
+    if parsed is None:
+        return None
+    return _datetime_to_sort_key(parsed)
+
 
 _ADD_COLUMN_RE = re.compile(
     r"^ALTER\s+TABLE\s+(?P<table>[A-Za-z_][A-Za-z0-9_]*)\s+"
@@ -276,6 +293,8 @@ class SqliteIndexedBackend:
                 )
             elif current_version < _SCHEMA_VERSION:
                 self._migrate_schema(conn, current_version, _SCHEMA_VERSION)
+            self._ensure_dataset_sort_key_index(conn)
+            self._backfill_dataset_sort_keys(conn)
             conn.commit()
 
     def _read_schema_version(self, conn: sqlite3.Connection) -> int | None:
@@ -333,6 +352,31 @@ class SqliteIndexedBackend:
                 "UPDATE _schema_meta SET value = ? WHERE key = 'schema_version'",
                 (str(next_version),),
             )
+
+    def _backfill_dataset_sort_keys(self, conn: sqlite3.Connection) -> None:
+        if "created_at_sort_key" not in self._table_columns(conn, "datasets"):
+            return
+        rows = conn.execute(
+            "SELECT dataset_id, created_at FROM datasets WHERE created_at_sort_key IS NULL"
+        ).fetchall()
+        updates = [
+            (sort_key, row["dataset_id"])
+            for row in rows
+            if (sort_key := _created_at_text_to_sort_key(row["created_at"])) is not None
+        ]
+        if updates:
+            conn.executemany(
+                "UPDATE datasets SET created_at_sort_key = ? WHERE dataset_id = ?",
+                updates,
+            )
+
+    def _ensure_dataset_sort_key_index(self, conn: sqlite3.Connection) -> None:
+        if "created_at_sort_key" not in self._table_columns(conn, "datasets"):
+            return
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_datasets_created_at_sort_key "
+            "ON datasets(created_at_sort_key DESC, dataset_id DESC)"
+        )
 
     def _sidecar_path(self, run_id: str, filename: str) -> Path:
         return resolve_child_path(self._runs_dir, run_id, filename)
@@ -427,14 +471,14 @@ class SqliteIndexedBackend:
     def _prune_datasets(self, conn: sqlite3.Connection) -> list[_DeferredDelete]:
         if self._max_runs_retained <= 0:
             return []
+        self._backfill_dataset_sort_keys(conn)
         rows = conn.execute(
-            "SELECT dataset_id, run_id, location, created_at FROM datasets"
+            "SELECT dataset_id, run_id, location, created_at, created_at_sort_key "
+            "FROM datasets "
+            "ORDER BY created_at_sort_key DESC, dataset_id DESC "
+            "LIMIT -1 OFFSET ?",
+            (self._max_runs_retained,),
         ).fetchall()
-        rows = sorted(
-            rows,
-            key=lambda row: (_row_datetime_sort_key(row, "created_at"), row["dataset_id"]),
-            reverse=True,
-        )[self._max_runs_retained:]
         pending: list[_DeferredDelete] = []
         for row in rows:
             dataset_path = retained_path_under_roots(row["location"], (self._runs_dir,))
@@ -553,13 +597,14 @@ class SqliteIndexedBackend:
             with self._open_connection() as conn:
                 conn.execute(
                     """INSERT INTO datasets
-                       (dataset_id, run_id, created_at, provider, script_version, schema_version,
-                        row_count, format, location, content_hash)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (dataset_id, run_id, created_at, created_at_sort_key, provider,
+                        script_version, schema_version, row_count, format, location, content_hash)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         dataset_id,
                         run_id,
                         datetime_to_iso(now),
+                        _datetime_to_sort_key(now),
                         dataset.provider,
                         dataset.script_version,
                         dataset.schema_version,
@@ -661,17 +706,23 @@ class SqliteIndexedBackend:
         if filters.provider is not None:
             conditions.append("d.provider = ?")
             params.append(filters.provider)
+        if filters.since is not None:
+            conditions.append("d.created_at_sort_key >= ?")
+            params.append(_datetime_to_sort_key(filters.since))
+        if filters.until is not None:
+            conditions.append("d.created_at_sort_key <= ?")
+            params.append(_datetime_to_sort_key(filters.until))
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY d.created_at_sort_key DESC, d.dataset_id DESC"
+        if filters.ticker is None:
+            sql += " LIMIT ?"
+            params.append(filters.limit)
         with self._open_connection() as conn:
+            self._backfill_dataset_sort_keys(conn)
             rows = conn.execute(sql, params).fetchall()
             records: list[DatasetRecord] = []
-            sorted_rows = sorted(
-                rows,
-                key=lambda row: (_row_datetime_sort_key(row, "created_at"), row["dataset_id"]),
-                reverse=True,
-            )
-            for row in sorted_rows:
+            for row in rows:
                 if filters.ticker is not None and not self._row_has_ticker(
                     conn,
                     row,

@@ -194,7 +194,38 @@ def test_schema_migration_recovers_partial_add_column_state(tmp_path: Path):
 
     assert version == str(sqlite_indexed_mod._SCHEMA_VERSION)  # pylint: disable=protected-access
     assert {"tickers", "script_version"}.issubset(run_columns)
-    assert "script_version" in dataset_columns
+    assert {"script_version", "created_at_sort_key"}.issubset(dataset_columns)
+
+
+def test_schema_backfills_dataset_created_at_sort_key(tmp_path: Path):
+    """Startup should repair retained rows missing the normalized created-at sort key."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context())
+    record = _write(backend, run_id)
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        conn.execute(
+            "UPDATE datasets SET created_at = ?, created_at_sort_key = NULL "
+            "WHERE dataset_id = ?",
+            ("2026-05-27T12:00:00Z", record.dataset_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    backend.close()
+
+    _make_backend(tmp_path)
+
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        sort_key = conn.execute(
+            "SELECT created_at_sort_key FROM datasets WHERE dataset_id = ?",
+            (record.dataset_id,),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert sort_key is not None
 
 
 def test_table_columns_rejects_unsafe_table_identifier(tmp_path: Path):
@@ -530,7 +561,8 @@ def test_list_datasets_normalizes_legacy_naive_created_at(tmp_path: Path):
     conn = sqlite3.connect(tmp_path / "opx-chain.db")
     try:
         conn.execute(
-            "UPDATE datasets SET created_at = ? WHERE dataset_id = ?",
+            "UPDATE datasets SET created_at = ?, created_at_sort_key = NULL "
+            "WHERE dataset_id = ?",
             ("2026-05-27T12:00:00", record.dataset_id),
         )
         conn.commit()
@@ -555,11 +587,13 @@ def test_list_datasets_orders_same_second_legacy_timestamps(tmp_path: Path):
     conn = sqlite3.connect(tmp_path / "opx-chain.db")
     try:
         conn.execute(
-            "UPDATE datasets SET created_at = ? WHERE dataset_id = ?",
+            "UPDATE datasets SET created_at = ?, created_at_sort_key = NULL "
+            "WHERE dataset_id = ?",
             ("2026-05-27T12:00:00Z", older.dataset_id),
         )
         conn.execute(
-            "UPDATE datasets SET created_at = ? WHERE dataset_id = ?",
+            "UPDATE datasets SET created_at = ?, created_at_sort_key = NULL "
+            "WHERE dataset_id = ?",
             ("2026-05-27T12:00:00.500000+00:00", newer.dataset_id),
         )
         conn.commit()
@@ -861,31 +895,44 @@ def test_pruning_removes_oldest_when_limit_exceeded(tmp_path: Path):
     assert backend.get_run(run_id).dataset_id == r3.dataset_id
 
 
-def test_pruning_loads_created_at_for_parsed_order(tmp_path: Path):
-    """Pruning must inspect created_at so legacy ISO forms sort chronologically."""
-    backend = _make_backend(tmp_path, max_runs_retained=7)
-    calls = []
+def test_pruning_uses_created_at_sort_key_index(tmp_path: Path):
+    """Retention pruning should remain bounded by the normalized timestamp index."""
+    _make_backend(tmp_path, max_runs_retained=7)
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        plan = conn.execute(
+            "EXPLAIN QUERY PLAN "
+            "SELECT dataset_id, run_id, location, created_at, created_at_sort_key "
+            "FROM datasets "
+            "ORDER BY created_at_sort_key DESC, dataset_id DESC "
+            "LIMIT -1 OFFSET ?",
+            (7,),
+        ).fetchall()
+    finally:
+        conn.close()
 
-    class EmptyCursor:  # pylint: disable=too-few-public-methods
-        """Cursor stub returning no prunable rows."""
+    details = " ".join(str(row[-1]) for row in plan)
+    assert "idx_datasets_created_at_sort_key" in details
 
-        def fetchall(self):
-            """Return an empty pruning result set."""
-            return []
 
-    class TrackingConnection:  # pylint: disable=too-few-public-methods
-        """Connection stub that records the pruning query."""
+def test_list_datasets_limit_uses_created_at_sort_key_index(tmp_path: Path):
+    """Small dataset listings should use the normalized timestamp index and limit."""
+    _make_backend(tmp_path)
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        plan = conn.execute(
+            "EXPLAIN QUERY PLAN "
+            "SELECT d.*, r.tickers AS run_tickers "
+            "FROM datasets d LEFT JOIN runs r ON r.run_id = d.run_id "
+            "ORDER BY d.created_at_sort_key DESC, d.dataset_id DESC "
+            "LIMIT ?",
+            (1,),
+        ).fetchall()
+    finally:
+        conn.close()
 
-        def execute(self, sql, params=()):
-            """Record the query and return an empty cursor."""
-            calls.append((sql, params))
-            return EmptyCursor()
-
-    backend._prune_datasets(TrackingConnection())  # pylint: disable=protected-access
-
-    sql, params = calls[0]
-    assert "created_at" in sql
-    assert params == ()
+    details = " ".join(str(row[-1]) for row in plan)
+    assert "idx_datasets_created_at_sort_key" in details
 
 
 def test_pruning_clears_dataset_id_for_pruned_run(tmp_path: Path):
@@ -991,11 +1038,13 @@ def test_pruning_uses_parsed_created_at_order(tmp_path: Path):
     conn.row_factory = sqlite3.Row
     try:
         conn.execute(
-            "UPDATE datasets SET created_at = ? WHERE dataset_id = ?",
+            "UPDATE datasets SET created_at = ?, created_at_sort_key = NULL "
+            "WHERE dataset_id = ?",
             ("2026-05-27T12:00:00Z", older.dataset_id),
         )
         conn.execute(
-            "UPDATE datasets SET created_at = ? WHERE dataset_id = ?",
+            "UPDATE datasets SET created_at = ?, created_at_sort_key = NULL "
+            "WHERE dataset_id = ?",
             ("2026-05-27T12:00:00.500000+00:00", newer.dataset_id),
         )
         pending = backend._prune_datasets(conn)  # pylint: disable=protected-access
