@@ -1,6 +1,7 @@
 """Fetch orchestration using the configured market-data provider."""
 
 from datetime import datetime, timezone
+from numbers import Integral
 from numbers import Real
 import pickle
 
@@ -41,6 +42,15 @@ from opx_chain.validate import validate_option_rows
 _JSON_TIMESTAMP_KEY = "__opx_pd_timestamp__"
 _JSON_NAT_KEY = "__opx_pd_nat__"
 _LOGGER = get_logger("fetch")
+
+
+def _non_negative_int_arg(value, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise ValueError(f"{name} must be a non-negative integer")
+    resolved = int(value)
+    if resolved < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return resolved
 
 
 def _with_fetch_counts(
@@ -274,6 +284,10 @@ def fetch_ticker_price_context(  # pylint: disable=too-many-arguments
     del cache  # Price context is derived from the durable price-history store.
     config = config or get_runtime_config()
     provider = provider or get_data_provider()
+    max_age_days = _non_negative_int_arg(
+        config.price_context_max_age_days,
+        name="price_context_max_age_days",
+    )
 
     try:
         result = reconcile_price_history(
@@ -289,7 +303,7 @@ def fetch_ticker_price_context(  # pylint: disable=too-many-arguments
             result.history,
             source=provider.name,
             today=config.today,
-            max_age_days=config.price_context_max_age_days,
+            max_age_days=max_age_days,
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught
         context = blank_price_context(source=provider.name, status=PriceContextStatus.ERROR)

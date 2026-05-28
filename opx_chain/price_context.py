@@ -115,14 +115,60 @@ def _column_by_alias(frame: pd.DataFrame, aliases: tuple[str, ...]) -> str | Non
 def _normalize_dates(series: pd.Series) -> pd.Series:
     if pd.api.types.is_datetime64_any_dtype(series):
         return pd.to_datetime(series, utc=True, errors="coerce")
-    numeric = pd.to_numeric(series, errors="coerce")
-    if numeric.notna().any():
-        max_value = numeric.max()
-        if max_value > 100_000_000_000:
-            return pd.to_datetime(numeric, unit="ms", utc=True, errors="coerce")
-        if max_value > 100_000_000:
-            return pd.to_datetime(numeric, unit="s", utc=True, errors="coerce")
-    return pd.to_datetime(series, utc=True, errors="coerce")
+    text = series.astype("string").str.strip()
+    numeric = pd.to_numeric(text, errors="coerce")
+    normalized = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns, UTC]")
+
+    compact_mask = numeric.notna() & text.str.fullmatch(r"\d{8}(?:\.0+)?", na=False)
+    if compact_mask.any():
+        compact_values = numeric.loc[compact_mask].astype("int64").astype(str)
+        normalized.loc[compact_mask] = pd.to_datetime(
+            compact_values,
+            format="%Y%m%d",
+            utc=True,
+            errors="coerce",
+        )
+
+    abs_numeric = numeric.abs()
+    epoch_masks = (
+        ("ns", numeric.notna() & abs_numeric.ge(1_000_000_000_000_000_000)),
+        (
+            "us",
+            numeric.notna()
+            & abs_numeric.ge(1_000_000_000_000_000)
+            & abs_numeric.lt(1_000_000_000_000_000_000),
+        ),
+        (
+            "ms",
+            numeric.notna()
+            & abs_numeric.ge(100_000_000_000)
+            & abs_numeric.lt(1_000_000_000_000_000),
+        ),
+        (
+            "s",
+            numeric.notna()
+            & abs_numeric.ge(1_000_000_000)
+            & abs_numeric.lt(100_000_000_000),
+        ),
+    )
+    for unit, mask in epoch_masks:
+        unresolved = mask & normalized.isna()
+        if unresolved.any():
+            normalized.loc[unresolved] = pd.to_datetime(
+                numeric.loc[unresolved],
+                unit=unit,
+                utc=True,
+                errors="coerce",
+            )
+
+    text_mask = numeric.isna() & text.notna() & text.ne("")
+    if text_mask.any():
+        normalized.loc[text_mask] = pd.to_datetime(
+            text.loc[text_mask],
+            utc=True,
+            errors="coerce",
+        )
+    return normalized
 
 
 def _normalize_history_frame(history: pd.DataFrame) -> pd.DataFrame:
@@ -171,7 +217,10 @@ def _normalize_history_frame(history: pd.DataFrame) -> pd.DataFrame:
         & (normalized["close"] >= normalized["low"])
         & (normalized["close"] <= normalized["high"])
     ]
-    return normalized.sort_values("date").drop_duplicates(subset=["date"], keep="last")
+    normalized = normalized.sort_values("date")
+    normalized["_trading_date"] = pd.to_datetime(normalized["date"], utc=True).dt.date
+    normalized = normalized.drop_duplicates(subset=["_trading_date"], keep="last")
+    return normalized.drop(columns=["_trading_date"])
 
 
 def normalize_price_history_frame(history: pd.DataFrame) -> pd.DataFrame:

@@ -248,6 +248,21 @@ def test_marketdata_provider_load_price_history_uses_daily_candles(monkeypatch):
     assert client.last_candles_kwargs["mode"].value == "delayed"  # pylint: disable=no-member
 
 
+@pytest.mark.parametrize("lookback_days", [True, False, 0, -1, 1.5, "260", None])
+def test_marketdata_provider_load_price_history_validates_lookback_before_sdk(
+    monkeypatch,
+    lookback_days,
+):
+    """Direct provider calls should reject malformed lookbacks before paid SDK work."""
+    patch_marketdata_client(monkeypatch)
+    provider = MarketDataProvider()
+
+    with pytest.raises(ValueError, match="lookback_days"):
+        provider.load_price_history("TSLA", lookback_days=lookback_days)
+
+    assert provider._client_cache is None  # pylint: disable=protected-access
+
+
 def test_marketdata_provider_loads_historical_chain_for_iv_history(monkeypatch):
     """Historical IV seeding should pass a provider date and return canonical columns."""
     patch_marketdata_client(monkeypatch)
@@ -271,6 +286,24 @@ def test_marketdata_provider_loads_historical_chain_for_iv_history(monkeypatch):
     assert frame["implied_volatility"].tolist() == [0.31, 0.29]
     assert frame["days_to_expiration"].tolist() == [16, 16]
     assert str(frame["option_quote_time"].iloc[0]) == "2024-03-20 13:40:00+00:00"
+
+
+@pytest.mark.parametrize("observation_date", [None, "2026-04-01", True, 1775001600])
+def test_marketdata_provider_validates_historical_chain_observation_date_before_sdk(
+    monkeypatch,
+    observation_date,
+):
+    """Historical IV seeding should reject malformed dates before paid SDK work."""
+    patch_marketdata_client(monkeypatch)
+    provider = MarketDataProvider()
+
+    with pytest.raises(ValueError, match="observation_date"):
+        provider.load_historical_option_chain_frame(
+            "TSLA",
+            observation_date=observation_date,
+        )
+
+    assert provider._client_cache is None  # pylint: disable=protected-access
 
 
 def test_marketdata_provider_derives_historical_iv_when_vendor_iv_missing(monkeypatch):

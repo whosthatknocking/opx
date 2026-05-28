@@ -37,8 +37,10 @@ from opx_chain.providers.base import (
     TRANSIENT_BASE_EXCEPTIONS,
     compute_backoff_delay,
     empty_underlying_snapshot,
+    date_arg,
     is_provider_quota_error,
     normalize_provider_frame,
+    positive_int_arg,
 )
 from opx_chain.providers._dates import parse_event_date as _parse_event_date
 from opx_chain.runlog import get_logger, logger_name
@@ -834,12 +836,13 @@ class MarketDataProvider(DataProvider):
 
     def load_price_history(self, ticker: str, *, lookback_days: int) -> pd.DataFrame:
         """Load daily stock candles for optional price-context enrichment."""
+        resolved_lookback = positive_int_arg(lookback_days, name="lookback_days")
         self._active_debug_ticker = ticker.upper()
         try:
             result = self._client().stocks.candles(
                 ticker.upper(),
                 resolution="D",
-                countback=lookback_days,
+                countback=resolved_lookback,
                 adjust_splits=True,
                 output_format=OutputFormat.JSON,
                 mode=self._mode(),
@@ -945,11 +948,19 @@ class MarketDataProvider(DataProvider):
         observation_date: date,
     ) -> pd.DataFrame:
         """Fetch a historical Market Data option-chain snapshot for IV-history seeding."""
-        frame = self._chain_frame(ticker, self._mode(), chain_date=observation_date)
+        resolved_observation_date = date_arg(
+            observation_date,
+            name="observation_date",
+        )
+        frame = self._chain_frame(
+            ticker,
+            self._mode(),
+            chain_date=resolved_observation_date,
+        )
         return self._iv_history_frame(
             frame,
             ticker=ticker,
-            observation_date=observation_date,
+            observation_date=resolved_observation_date,
         )
 
     def normalize_option_frame(  # pylint: disable=too-many-arguments,too-many-positional-arguments

@@ -182,6 +182,80 @@ def test_price_context_normalization_drops_close_outside_daily_range():
     assert normalized["date"].max().date().isoformat() == "2025-08-08"
 
 
+def test_price_context_normalization_parses_integer_yyyymmdd_dates():
+    """Compact numeric daily dates should not become 1970 nanosecond timestamps."""
+    history = pd.DataFrame(
+        {
+            "date": [20260501, 20260504, 20260505],
+            "high": [101.0, 102.0, 103.0],
+            "low": [99.0, 100.0, 101.0],
+            "close": [100.0, 101.0, 102.0],
+            "volume": [1000, 1000, 1000],
+        }
+    )
+
+    normalized = normalize_price_history_frame(history)
+    context = compute_price_context(
+        history,
+        source="unit",
+        today=date(2026, 5, 5),
+        max_age_days=7,
+    )
+
+    assert normalized["date"].dt.date.astype(str).tolist() == [
+        "2026-05-01",
+        "2026-05-04",
+        "2026-05-05",
+    ]
+    assert context["price_context_as_of"] == "2026-05-05"
+    assert context["price_context_staleness_status"] == PriceContextStatus.FRESH.value
+
+
+def test_price_context_normalization_handles_mixed_iso_and_numeric_epoch_dates():
+    """A numeric timestamp row should not cause valid ISO date rows to be dropped."""
+    history = pd.DataFrame(
+        {
+            "date": ["2026-05-01", 1777852800, "2026-05-05"],
+            "high": [101.0, 102.0, 103.0],
+            "low": [99.0, 100.0, 101.0],
+            "close": [100.0, 101.0, 102.0],
+            "volume": [1000, 1000, 1000],
+        }
+    )
+
+    normalized = normalize_price_history_frame(history)
+
+    assert normalized["date"].dt.date.astype(str).tolist() == [
+        "2026-05-01",
+        "2026-05-04",
+        "2026-05-05",
+    ]
+
+
+def test_price_context_normalization_supports_high_resolution_epoch_dates():
+    """Epoch seconds, milliseconds, microseconds, and nanoseconds should parse identically."""
+    epoch_seconds = 1777939200
+    history = pd.DataFrame(
+        {
+            "date": [
+                epoch_seconds,
+                epoch_seconds * 1_000,
+                epoch_seconds * 1_000_000,
+                epoch_seconds * 1_000_000_000,
+            ],
+            "high": [101.0, 102.0, 103.0, 104.0],
+            "low": [99.0, 100.0, 101.0, 102.0],
+            "close": [100.0, 101.0, 102.0, 103.0],
+            "volume": [1000, 1000, 1000, 1000],
+        }
+    )
+
+    normalized = normalize_price_history_frame(history)
+
+    assert normalized["date"].dt.date.astype(str).tolist() == ["2026-05-05"]
+    assert normalized["close"].tolist() == [103.0]
+
+
 def test_blank_price_context_accepts_status_enum():
     """Callers should use the canonical enum without leaking enum objects to JSON."""
     context = blank_price_context(source="unit", status=PriceContextStatus.ERROR)

@@ -31,6 +31,7 @@ from opx_chain.providers.base import (
     compute_backoff_delay,
     is_provider_quota_error,
     normalize_provider_frame,
+    positive_int_arg,
 )
 from opx_chain.providers._dates import parse_event_date as _parse_event_date
 from opx_chain.utils import (
@@ -116,9 +117,10 @@ def _pick_next_future_date(raw_values: list[Any], today: date) -> date | None:
 
 def _calendar_days_for_trading_lookback(lookback_days: int) -> int:
     """Return a Yahoo calendar-day span large enough for daily-bar coverage."""
+    resolved_lookback = positive_int_arg(lookback_days, name="lookback_days")
     return max(
-        lookback_days,
-        math.ceil(lookback_days * _TRADING_TO_CALENDAR_DAY_RATIO)
+        resolved_lookback,
+        math.ceil(resolved_lookback * _TRADING_TO_CALENDAR_DAY_RATIO)
         + _PRICE_HISTORY_CALENDAR_BUFFER_DAYS,
     )
 
@@ -396,8 +398,8 @@ class YFinanceProvider(DataProvider):
 
     def load_price_history(self, ticker: str, *, lookback_days: int) -> pd.DataFrame:
         """Load daily OHLCV history for optional price-context enrichment."""
-        stock = yf.Ticker(ticker)
         calendar_days = _calendar_days_for_trading_lookback(lookback_days)
+        stock = yf.Ticker(ticker)
         history = self._call_yahoo(
             f"{ticker} price history",
             lambda: stock.history(

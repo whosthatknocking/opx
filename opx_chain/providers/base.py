@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 import json
 import math
+from numbers import Integral
 from pathlib import Path
 import random
 import re
@@ -45,6 +46,25 @@ def empty_underlying_snapshot() -> dict:
         "underlying_day_change_pct": np.nan,
         "historical_volatility": np.nan,
     }
+
+
+def positive_int_arg(value: object, *, name: str) -> int:
+    """Validate a public provider integer argument."""
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise ValueError(f"{name} must be a positive integer")
+    resolved = int(value)
+    if resolved <= 0:
+        raise ValueError(f"{name} must be positive")
+    return resolved
+
+
+def date_arg(value: object, *, name: str) -> date:
+    """Validate a public provider date argument before any provider call."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    raise ValueError(f"{name} must be a date")
 
 
 def compute_backoff_delay(

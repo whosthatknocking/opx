@@ -1,5 +1,7 @@
 """Fetch-path tests covering raw provider row-count logging."""
 
+# pylint: disable=too-many-lines
+
 import logging
 from datetime import date
 
@@ -516,6 +518,31 @@ def test_fetch_ticker_price_context_uses_price_history_store(monkeypatch, tmp_pa
     assert first["price_context_staleness_status"] == PriceContextStatus.FRESH.value
     assert second["price_context_staleness_status"] == PriceContextStatus.FRESH.value
     assert provider.history_calls == 1
+
+
+@pytest.mark.parametrize("max_age_days", [None, "7", True, -1])
+def test_fetch_ticker_price_context_validates_max_age_before_provider_work(
+    max_age_days,
+):
+    """Direct config-like max-age values should fail before provider/store calls."""
+    class CountingProvider(StubProvider):
+        """Provider stub that records whether price-history loading was reached."""
+
+        def __init__(self):
+            super().__init__()
+            self.history_calls = 0
+
+        def load_price_history(self, ticker, *, lookback_days):
+            self.history_calls += 1
+            return super().load_price_history(ticker, lookback_days=lookback_days)
+
+    provider = CountingProvider()
+    config = make_runtime_config(price_context_max_age_days=max_age_days)
+
+    with pytest.raises(ValueError, match="price_context_max_age_days"):
+        fetch.fetch_ticker_price_context("TEST", provider=provider, config=config)
+
+    assert provider.history_calls == 0
 
 
 def test_fetch_ticker_price_context_returns_error_payload_on_failure():

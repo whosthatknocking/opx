@@ -204,6 +204,29 @@ def test_yfinance_provider_load_price_history_uses_daily_adjusted_history(monkey
     assert calls == [{"period": "378d", "interval": "1d", "auto_adjust": True}]
 
 
+@pytest.mark.parametrize("lookback_days", [True, False, 0, -1, 1.5, "260", None])
+def test_yfinance_provider_load_price_history_validates_lookback_before_yahoo(
+    monkeypatch,
+    lookback_days,
+):
+    """Direct provider calls should reject malformed lookbacks before Yahoo work."""
+    ticker_calls = []
+
+    class PriceHistoryTicker(FakeTicker):  # pylint: disable=too-few-public-methods
+        """Ticker stub that fails the test if constructed before validation."""
+
+        def __init__(self, ticker):
+            ticker_calls.append(ticker)
+            super().__init__(ticker)
+
+    monkeypatch.setattr("opx_chain.providers.yfinance.yf.Ticker", PriceHistoryTicker)
+
+    with pytest.raises(ValueError, match="lookback_days"):
+        YFinanceProvider().load_price_history("TSLA", lookback_days=lookback_days)
+
+    assert not ticker_calls
+
+
 def test_yfinance_provider_load_ticker_events_returns_blanks_on_missing_data(monkeypatch):
     """Yahoo event loading should degrade to blank canonical fields when data is absent."""
     class BlankEventTicker(FakeTicker):  # pylint: disable=too-few-public-methods

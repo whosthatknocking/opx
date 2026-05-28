@@ -84,6 +84,36 @@ def test_build_price_volatility_features_reports_ready_rv_context() -> None:
     assert 0 <= features["rv_3d_percentile_1y"] <= 100
 
 
+def test_build_price_volatility_features_counts_daily_sessions_not_intraday_rows() -> None:
+    """Direct helper inputs should not treat intraday-shaped rows as daily coverage."""
+    rows = []
+    for day in pd.date_range("2026-05-18", periods=5, freq="D"):
+        for hour in range(19):
+            close = 100.0 + len(rows) * 0.01
+            rows.append(
+                {
+                    "date": day + pd.Timedelta(hours=hour),
+                    "open": close - 0.1,
+                    "high": close + 0.2,
+                    "low": close - 0.2,
+                    "close": close,
+                    "volume": 1000,
+                }
+            )
+    history = pd.DataFrame(rows)
+
+    features = build_price_volatility_features(
+        history,
+        ticker="TSLA",
+        provider="marketdata",
+        as_of=date(2026, 5, 22),
+        min_context_sessions=90,
+    )
+
+    assert features["price_history_lookback_sessions"] == 5
+    assert features["source_status"] == SOURCE_INSUFFICIENT_HISTORY
+
+
 def test_build_price_volatility_features_reports_insufficient_history() -> None:
     features = build_price_volatility_features(
         _history(periods=6),

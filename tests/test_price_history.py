@@ -696,6 +696,35 @@ def test_price_history_store_normalizes_provider_case(tmp_path) -> None:
     assert sync.status == "ok"
 
 
+def test_price_history_upsert_counts_stored_daily_sessions_after_intraday_collapse(
+    tmp_path,
+) -> None:
+    """Stored-row metadata should reflect durable daily bars, not raw intraday rows."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+    rows = []
+    for day in pd.date_range("2026-03-16", periods=5, freq="D"):
+        for hour in range(19):
+            close = 100.0 + len(rows) * 0.01
+            rows.append(
+                {
+                    "Date": day + pd.Timedelta(hours=hour),
+                    "Open": close - 0.1,
+                    "High": close + 0.2,
+                    "Low": close - 0.2,
+                    "Close": close,
+                    "Volume": 1000,
+                }
+            )
+    history = pd.DataFrame(rows)
+
+    stored_rows = store.upsert_bars(provider="stub", ticker="AAA", history=history)
+    stats = store.stats(provider="stub", ticker="AAA")
+
+    assert len(history) == 95
+    assert stored_rows == 5
+    assert stats.row_count == 5
+
+
 def test_price_history_record_sync_normalizes_naive_checked_at(tmp_path) -> None:
     """Sync writes should not persist new offset-naive checked_at metadata."""
     store = PriceHistoryStore(tmp_path / "price-history.db")
