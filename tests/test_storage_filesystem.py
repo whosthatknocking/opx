@@ -92,6 +92,13 @@ def _record_ticker(backend: FilesystemBackend, run_id: str, ticker: str) -> None
     )
 
 
+def _update_run_sidecar(tmp_path: Path, run_id: str, **updates) -> None:
+    run_path = tmp_path / "runs" / run_id / "run.json"
+    data = json.loads(run_path.read_text(encoding="utf-8"))
+    data.update(updates)
+    run_path.write_text(json.dumps(data), encoding="utf-8")
+
+
 class _SlowReadFilesystemBackend(FilesystemBackend):
     """Filesystem backend variant that tracks overlapping run sidecar reads."""
 
@@ -663,6 +670,43 @@ def test_list_datasets_filter_ticker_uses_run_context_tickers(tmp_path: Path):
     results = backend.list_datasets(limit=1, ticker="tsla")
 
     assert [record.dataset_id for record in results] == [tsla_record.dataset_id]
+
+
+@pytest.mark.parametrize(
+    "stored_tickers",
+    [
+        ["TSLA", True],
+        None,
+        "TSLA",
+        {"TSLA": True},
+    ],
+)
+def test_list_datasets_filter_ticker_sanitizes_retained_run_tickers(
+    tmp_path: Path,
+    stored_tickers,
+):
+    """Ticker-filter listing must not match or crash on corrupt sidecar tickers."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context(tickers=("TSLA",)))
+    _write(backend, run_id)
+    _update_run_sidecar(tmp_path, run_id, tickers=stored_tickers, ticker_results=[])
+
+    assert not backend.list_datasets(ticker="TSLA")
+
+
+def test_list_datasets_filter_ticker_uses_ticker_result_when_run_tickers_corrupt(
+    tmp_path: Path,
+):
+    """Valid per-ticker results should remain the fallback for corrupt run tickers."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context(tickers=("TSLA",)))
+    _record_ticker(backend, run_id, "TSLA")
+    record = _write(backend, run_id)
+    _update_run_sidecar(tmp_path, run_id, tickers=None)
+
+    results = backend.list_datasets(ticker="TSLA")
+
+    assert [result.dataset_id for result in results] == [record.dataset_id]
 
 
 def test_list_datasets_empty_when_no_runs_dir(tmp_path: Path):

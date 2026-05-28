@@ -204,12 +204,16 @@ class FilesystemBackend:
         except (OSError, ValueError):
             return False
         expected = ticker.upper()
-        run_tickers = {str(symbol).upper() for symbol in data.get("tickers", [])}
-        if expected in run_tickers:
+        if expected in sanitize_retained_run_tickers(data.get("tickers", ())):
             return True
+        ticker_results = data.get("ticker_results", [])
+        if not isinstance(ticker_results, list):
+            return False
         return any(
-            str(row.get("ticker", "")).upper() == expected
-            for row in data.get("ticker_results", [])
+            isinstance(row, dict)
+            and isinstance(row.get("ticker"), str)
+            and row["ticker"].upper() == expected
+            for row in ticker_results
         )
 
     def _write_run(self, run_id: str, data: dict) -> None:

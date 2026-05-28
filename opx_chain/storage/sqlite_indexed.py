@@ -921,7 +921,7 @@ class SqliteIndexedBackend:
             run_tickers = json.loads(row["run_tickers"] or "[]")
         except (TypeError, ValueError):
             run_tickers = []
-        if expected in {str(symbol).upper() for symbol in run_tickers}:
+        if expected in sanitize_retained_run_tickers(run_tickers):
             return True
         ticker_row = conn.execute(
             "SELECT 1 FROM ticker_results WHERE run_id = ? AND UPPER(ticker) = ?",

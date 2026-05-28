@@ -729,6 +729,59 @@ def test_list_datasets_filter_ticker_uses_run_context_tickers(tmp_path: Path):
     assert [record.dataset_id for record in results] == [tsla_record.dataset_id]
 
 
+@pytest.mark.parametrize(
+    "stored_tickers",
+    [
+        '"TSLA"',
+        "null",
+        '["TSLA", true]',
+        '{"TSLA": true}',
+    ],
+)
+def test_list_datasets_filter_ticker_sanitizes_retained_run_tickers(
+    tmp_path: Path,
+    stored_tickers: str,
+):
+    """Ticker-filter listing must not match corrupt retained run ticker metadata."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context(tickers=("TSLA",)))
+    _write(backend, run_id)
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        conn.execute(
+            "UPDATE runs SET tickers = ? WHERE run_id = ?",
+            (stored_tickers, run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert not backend.list_datasets(ticker="TSLA")
+
+
+def test_list_datasets_filter_ticker_uses_ticker_result_when_run_tickers_corrupt(
+    tmp_path: Path,
+):
+    """Valid per-ticker results should remain the fallback for corrupt run tickers."""
+    backend = _make_backend(tmp_path)
+    run_id = backend.create_run(_make_context(tickers=("TSLA",)))
+    _record_ticker(backend, run_id, "TSLA")
+    record = _write(backend, run_id)
+    conn = sqlite3.connect(tmp_path / "opx-chain.db")
+    try:
+        conn.execute(
+            "UPDATE runs SET tickers = ? WHERE run_id = ?",
+            ('["TSLA", true]', run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    results = backend.list_datasets(ticker="TSLA")
+
+    assert [result.dataset_id for result in results] == [record.dataset_id]
+
+
 @pytest.mark.parametrize("bad_limit", [-1, True, 1.5, "2", None, [], {}])
 def test_list_datasets_rejects_malformed_limit(tmp_path: Path, bad_limit):
     """list_datasets must reject non-integer and negative limits consistently."""
