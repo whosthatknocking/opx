@@ -230,7 +230,7 @@ be positive. Non-finite TOML floats such as `inf`, `-inf`, and `nan` are invalid
 #### Optional Price Context Defaults
 
 - `price_context.enable = false`: standalone daily-OHLCV support/resistance artifact generation is disabled by default.
-- `price_context.lookback_days = 260`: provider history window used for moving averages, 20-day boundaries, VWAP, and volume-node proxy.
+- `price_context.lookback_days = 260`: provider history window used for moving averages, 20-day boundaries, VWAP, RSI/EMA technical context, and volume-node proxy.
 - `price_context.max_age_days = 7`: maximum age for the latest daily candle. Stale history exports blank numeric price-context fields plus `price_context_staleness_status = STALE`.
 - `storage.price_context_ttl = 86400`: minimum age before retrying provider reconciliation for daily price-history bars, separate from faster-moving option-chain and quote caches.
 
@@ -495,10 +495,15 @@ percentiles without relying on a current-chain proxy.
 Current fields include `support_1`, `support_2`, `resistance_1`,
 `resistance_2`, `20d_high`, `20d_low`, `50dma`, `200dma`, `vwap`,
 `volume_profile_high_volume_node`, `gap_fill_level`, and
-`pre_earnings_move_pct`. Metadata fields include `price_context_as_of`,
-`price_context_age_days`, `price_context_source`,
+`pre_earnings_move_pct`, `rsi_14`, `ema_20`, `ema_50`,
+`ema_cloud_state`, and `price_vs_ema50_pct`. Metadata fields include
+`price_context_as_of`, `price_context_age_days`, `price_context_source`,
 `price_context_lookback_trading_days`, `price_context_calculation_method`, and
 `price_context_staleness_status`.
+
+The RSI/EMA fields are deterministic market-data features only. opx-chain does
+not assign strategy meaning to them; downstream consumers decide whether to
+display, tag, rank, or ignore them.
 
 Provider availability:
 

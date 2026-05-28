@@ -89,6 +89,11 @@ leaves numeric levels blank and uses metadata fields to explain why.
 - `20d_low`: Lowest daily low in the trailing 20 trading bars.
 - `50dma`: Trailing 50-trading-day simple moving average of daily closes. Blank when fewer than 50 bars are available.
 - `200dma`: Trailing 200-trading-day simple moving average of daily closes. Blank when fewer than 200 bars are available.
+- `rsi_14`: Fourteen-period daily RSI derived from adjusted daily closes. Blank when fewer than 15 usable bars are available.
+- `ema_20`: Twenty-period exponential moving average of daily closes. Blank when fewer than 20 usable bars are available.
+- `ema_50`: Fifty-period exponential moving average of daily closes. Blank when fewer than 50 usable bars are available.
+- `ema_cloud_state`: Deterministic EMA trend state: `BULLISH` when 20 EMA and latest close are above 50 EMA, `BEARISH` when 20 EMA and latest close are below 50 EMA, `TRANSITION` when the EMA/price relationship is mixed, and `UNKNOWN` when required EMA inputs are unavailable.
+- `price_vs_ema50_pct`: Latest close distance from 50 EMA as a percent. Positive means price is above 50 EMA; negative means below.
 - `vwap`: Trailing 20-trading-bar volume-weighted average price approximation using daily typical price and volume.
 - `volume_profile_high_volume_node`: Daily-history proxy for the high-volume node, using the typical price of the highest-volume day in the trailing 60 trading bars.
 - `gap_fill_level`: Most recent unfilled daily gap-fill level detected in the trailing 60 trading bars.

@@ -9,6 +9,7 @@ import pytest
 
 from opx_chain.price_context import (
     PRICE_CONTEXT_FIELDS,
+    TECHNICAL_CONTEXT_FIELDS,
     PriceContextStatus,
     blank_price_context,
     compute_price_context,
@@ -59,12 +60,38 @@ def test_compute_price_context_derives_daily_ohlcv_boundaries():
     assert context["20d_low"] == pytest.approx(138.5)
     assert context["50dma"] == pytest.approx(138.9)
     assert context["200dma"] == pytest.approx(123.9)
+    assert context["rsi_14"] == pytest.approx(100.0)
+    assert context["ema_20"] == pytest.approx(141.9)
+    assert context["ema_50"] == pytest.approx(138.900768)
+    assert context["ema_cloud_state"] == "BULLISH"
+    assert context["price_vs_ema50_pct"] == pytest.approx(3.527145)
     assert context["support_1"] == pytest.approx(143.633333)
     assert context["support_2"] == pytest.approx(138.9)
     assert context["resistance_1"] == pytest.approx(144.8)
     assert context["vwap"] > 0
     assert context["volume_profile_high_volume_node"] > 0
     assert context["pre_earnings_move_pct"] is None
+
+
+def test_compute_price_context_classifies_bearish_ema_cloud():
+    """EMA cloud state should be deterministic and provider-agnostic."""
+    history = _history(periods=90)
+    history["Close"] = list(reversed(history["Close"].tolist()))
+    history["Open"] = history["Close"] + 0.5
+    history["High"] = history["Close"] + 1.0
+    history["Low"] = history["Close"] - 1.5
+
+    context = compute_price_context(
+        history,
+        source="unit",
+        today=date(2025, 11, 4),
+        max_age_days=7,
+    )
+
+    assert context["price_context_staleness_status"] == PriceContextStatus.FRESH.value
+    assert context["ema_20"] < context["ema_50"]
+    assert context["ema_cloud_state"] == "BEARISH"
+    assert context["price_vs_ema50_pct"] < 0
 
 
 def test_compute_price_context_blanks_stale_numeric_fields():
@@ -80,6 +107,12 @@ def test_compute_price_context_blanks_stale_numeric_fields():
     assert context["price_context_as_of"] == "2025-07-28"
     assert context["price_context_age_days"] > 7
     assert all(context[field] is None for field in PRICE_CONTEXT_FIELDS)
+    assert all(
+        context[field] is None
+        for field in TECHNICAL_CONTEXT_FIELDS
+        if field != "ema_cloud_state"
+    )
+    assert context["ema_cloud_state"] == "UNKNOWN"
 
 
 def test_compute_price_context_blanks_future_daily_history():
@@ -96,6 +129,12 @@ def test_compute_price_context_blanks_future_daily_history():
     assert context["price_context_age_days"] == -3
     assert context["price_context_lookback_trading_days"] == 3
     assert all(context[field] is None for field in PRICE_CONTEXT_FIELDS)
+    assert all(
+        context[field] is None
+        for field in TECHNICAL_CONTEXT_FIELDS
+        if field != "ema_cloud_state"
+    )
+    assert context["ema_cloud_state"] == "UNKNOWN"
 
 
 def test_compute_price_context_returns_blank_payload_for_missing_history():

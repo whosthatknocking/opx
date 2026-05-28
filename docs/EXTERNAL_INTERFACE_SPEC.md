@@ -622,7 +622,7 @@ option-chain CSV schema.
 
 ```python
 # opx_chain.price_context
-PRICE_CONTEXT_SCHEMA_VERSION = 1
+PRICE_CONTEXT_SCHEMA_VERSION = 2
 PriceContextStatus.FRESH.value == "FRESH"
 ```
 
@@ -636,7 +636,7 @@ and only missing/backfill/tail history is fetched.
 ```json
 {
   "artifact_type": "price_context",
-  "schema_version": 1,
+  "schema_version": 2,
   "provider": "marketdata",
   "fetched_at": "2026-05-06T20:00:00Z",
   "tickers": ["TSLA"],
@@ -644,6 +644,11 @@ and only missing/backfill/tail history is fetched.
     {
       "ticker": "TSLA",
       "support_1": 100.0,
+      "rsi_14": 52.3,
+      "ema_20": 105.4,
+      "ema_50": 101.8,
+      "ema_cloud_state": "BULLISH",
+      "price_vs_ema50_pct": 3.1,
       "price_context_as_of": "2026-05-06",
       "price_context_staleness_status": "FRESH"
     }
@@ -656,6 +661,11 @@ need row-level price context.
 
 `records[].price_context_staleness_status` uses the stable
 `PriceContextStatus` vocabulary: `FRESH`, `STALE`, `MISSING`, and `ERROR`.
+Schema version 2 adds deterministic technical indicator fields to each record:
+`rsi_14`, `ema_20`, `ema_50`, `ema_cloud_state`, and
+`price_vs_ema50_pct`. `ema_cloud_state` is one of `BULLISH`, `BEARISH`,
+`TRANSITION`, or `UNKNOWN`. These are market-data features only; downstream
+strategy packages decide whether they are rendered, tagged, ranked, or ignored.
 
 ### 5.5 `VOLATILITY_FEATURE_SCHEMA_VERSION` constant
 

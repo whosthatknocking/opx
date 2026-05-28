@@ -25,6 +25,16 @@ PRICE_CONTEXT_FIELDS: tuple[str, ...] = (
     "gap_fill_level",
     "pre_earnings_move_pct",
 )
+TECHNICAL_CONTEXT_NUMERIC_FIELDS: tuple[str, ...] = (
+    "rsi_14",
+    "ema_20",
+    "ema_50",
+    "price_vs_ema50_pct",
+)
+TECHNICAL_CONTEXT_FIELDS: tuple[str, ...] = (
+    *TECHNICAL_CONTEXT_NUMERIC_FIELDS,
+    "ema_cloud_state",
+)
 PRICE_CONTEXT_METADATA_FIELDS: tuple[str, ...] = (
     "price_context_as_of",
     "price_context_age_days",
@@ -35,10 +45,16 @@ PRICE_CONTEXT_METADATA_FIELDS: tuple[str, ...] = (
 )
 PRICE_CONTEXT_RECORD_FIELDS: tuple[str, ...] = (
     *PRICE_CONTEXT_FIELDS,
+    *TECHNICAL_CONTEXT_FIELDS,
     *PRICE_CONTEXT_METADATA_FIELDS,
 )
 PRICE_CONTEXT_CALCULATION_METHOD = "daily_ohlcv_v1"
-PRICE_CONTEXT_SCHEMA_VERSION = 1
+PRICE_CONTEXT_SCHEMA_VERSION = 2
+
+EMA_CLOUD_BULLISH = "BULLISH"
+EMA_CLOUD_BEARISH = "BEARISH"
+EMA_CLOUD_TRANSITION = "TRANSITION"
+EMA_CLOUD_UNKNOWN = "UNKNOWN"
 
 
 class PriceContextStatus(str, Enum):
@@ -60,6 +76,8 @@ def blank_price_context(
     status_value = status.value if isinstance(status, PriceContextStatus) else str(status)
     return {
         **{field: None for field in PRICE_CONTEXT_FIELDS},
+        **{field: None for field in TECHNICAL_CONTEXT_NUMERIC_FIELDS},
+        "ema_cloud_state": EMA_CLOUD_UNKNOWN,
         "price_context_as_of": None,
         "price_context_age_days": None,
         "price_context_source": source,
@@ -78,6 +96,11 @@ def _positive_float(value: Any) -> float | None:
 
 def _rounded(value: Any) -> float | None:
     resolved = _positive_float(value)
+    return None if resolved is None else round(resolved, 6)
+
+
+def _rounded_any(value: Any) -> float | None:
+    resolved = finite_float_or_none(value)
     return None if resolved is None else round(resolved, 6)
 
 
@@ -209,6 +232,47 @@ def _rolling_vwap(history: pd.DataFrame, window: int = 20) -> float | None:
     return _rounded((typical[valid] * volume[valid]).sum() / volume[valid].sum())
 
 
+def _ema(close: pd.Series, span: int) -> float | None:
+    values = finite_numeric_series(close).dropna()
+    if len(values) < span:
+        return None
+    return _rounded(values.ewm(span=span, adjust=False).mean().iloc[-1])
+
+
+def _rsi_14(close: pd.Series) -> float | None:
+    values = finite_numeric_series(close).dropna()
+    if len(values) < 15:
+        return None
+    delta = values.diff().dropna().tail(14)
+    if len(delta) < 14:
+        return None
+    gains = delta.clip(lower=0)
+    losses = -delta.clip(upper=0)
+    avg_gain = finite_float_or_none(gains.mean())
+    avg_loss = finite_float_or_none(losses.mean())
+    if avg_gain is None or avg_loss is None:
+        return None
+    if avg_loss == 0:
+        return 100.0 if avg_gain > 0 else 50.0
+    rs = avg_gain / avg_loss
+    return _rounded_any(100.0 - (100.0 / (1.0 + rs)))
+
+
+def _ema_cloud_state(
+    *,
+    latest_close: float,
+    ema_20: float | None,
+    ema_50: float | None,
+) -> str:
+    if ema_20 is None or ema_50 is None:
+        return EMA_CLOUD_UNKNOWN
+    if ema_20 > ema_50 and latest_close > ema_50:
+        return EMA_CLOUD_BULLISH
+    if ema_20 < ema_50 and latest_close < ema_50:
+        return EMA_CLOUD_BEARISH
+    return EMA_CLOUD_TRANSITION
+
+
 def _volume_node(history: pd.DataFrame, window: int = 60) -> float | None:
     recent = history.tail(window)
     if recent.empty or "volume" not in recent.columns:
@@ -299,6 +363,14 @@ def compute_price_context(  # pylint: disable=too-many-locals
     two_hundred_dma = (
         _rounded(normalized["close"].tail(200).mean()) if len(normalized) >= 200 else None
     )
+    rsi_14 = _rsi_14(normalized["close"])
+    ema_20 = _ema(normalized["close"], 20)
+    ema_50 = _ema(normalized["close"], 50)
+    price_vs_ema50_pct = (
+        _rounded_any((latest_close - ema_50) / ema_50 * 100.0)
+        if ema_50 is not None and ema_50 > 0
+        else None
+    )
     vwap = _rolling_vwap(normalized)
     volume_node = _volume_node(normalized)
     gap_fill_level = _latest_unfilled_gap(normalized)
@@ -320,6 +392,15 @@ def compute_price_context(  # pylint: disable=too-many-locals
         "20d_low": twenty_day_low,
         "50dma": fifty_dma,
         "200dma": two_hundred_dma,
+        "rsi_14": rsi_14,
+        "ema_20": ema_20,
+        "ema_50": ema_50,
+        "ema_cloud_state": _ema_cloud_state(
+            latest_close=latest_close,
+            ema_20=ema_20,
+            ema_50=ema_50,
+        ),
+        "price_vs_ema50_pct": price_vs_ema50_pct,
         "vwap": vwap,
         "volume_profile_high_volume_node": volume_node,
         "gap_fill_level": gap_fill_level,

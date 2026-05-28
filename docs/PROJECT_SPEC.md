@@ -302,7 +302,7 @@ Field-mapping rules already implemented for Market Data include:
 - `optionSymbol -> contract_symbol`
 - `underlying -> underlying_symbol`
 - `stocks/quotes/{symbol}/ last -> underlying_price`, with `updated` and `changepct` from the same quote row supplying `underlying_price_time` and `underlying_day_change_pct`
-- optional daily price context uses `stocks.candles/{resolution}/{symbol}/` via the official SDK with `resolution="D"`, `countback=price_context.lookback_days`, and split adjustment enabled
+- optional daily price context uses `stocks.candles/{resolution}/{symbol}/` via the official SDK with `resolution="D"`, `countback=price_context.lookback_days`, and split adjustment enabled; the artifact also derives deterministic RSI/EMA technical fields while leaving all strategy interpretation to downstream consumers
 - `last -> last_trade_price` for the option contract itself; `underlyingPrice` is not used for `last_trade_price`
 - `updated -> option_quote_time` for option rows; if stock quotes are unavailable, the latest chain row with a usable `underlyingPrice` is used as a fallback for `underlying_price` and `underlying_price_time`
 - `bid`, `ask`, `last`, `openInterest`, `volume`, `iv`, and greeks map directly into canonical fields
