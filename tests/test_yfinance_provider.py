@@ -201,7 +201,7 @@ def test_yfinance_provider_load_price_history_uses_daily_adjusted_history(monkey
     history = YFinanceProvider().load_price_history("TSLA", lookback_days=260)
 
     assert not history.empty
-    assert calls == [{"period": "260d", "interval": "1d", "auto_adjust": True}]
+    assert calls == [{"period": "378d", "interval": "1d", "auto_adjust": True}]
 
 
 def test_yfinance_provider_load_ticker_events_returns_blanks_on_missing_data(monkeypatch):

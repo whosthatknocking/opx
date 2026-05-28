@@ -230,7 +230,7 @@ be positive. Non-finite TOML floats such as `inf`, `-inf`, and `nan` are invalid
 #### Optional Price Context Defaults
 
 - `price_context.enable = false`: standalone daily-OHLCV support/resistance artifact generation is disabled by default.
-- `price_context.lookback_days = 260`: provider history window used for moving averages, 20-day boundaries, VWAP, RSI/EMA technical context, and volume-node proxy.
+- `price_context.lookback_days = 260`: desired usable daily trading-bar window used for moving averages, 20-day boundaries, VWAP, RSI/EMA technical context, and volume-node proxy. Providers whose history API accepts calendar spans, such as yfinance, request a buffered calendar period so the retained store can still satisfy the trading-bar lookback after weekends and holidays.
 - `price_context.max_age_days = 7`: maximum age for the latest daily candle. Stale history exports blank numeric price-context fields plus `price_context_staleness_status = STALE`.
 - `storage.price_context_ttl = 86400`: minimum age before retrying provider reconciliation for daily price-history bars, separate from faster-moving option-chain and quote caches.
 

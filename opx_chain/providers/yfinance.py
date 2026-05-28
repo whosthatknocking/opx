@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from datetime import date
+import math
 import time
 from typing import Any
 
@@ -37,6 +38,9 @@ from opx_chain.utils import (
     first_non_missing as _first_non_missing,
     normalize_timestamp,
 )
+
+_PRICE_HISTORY_CALENDAR_BUFFER_DAYS = 14
+_TRADING_TO_CALENDAR_DAY_RATIO = 7 / 5
 
 
 _transient_yfinance_exceptions: tuple[type[BaseException], ...] = (
@@ -108,6 +112,15 @@ def _pick_next_future_date(raw_values: list[Any], today: date) -> date | None:
         if (parsed := _parse_event_date(raw_value)) is not None and parsed >= today
     )
     return upcoming[0] if upcoming else None
+
+
+def _calendar_days_for_trading_lookback(lookback_days: int) -> int:
+    """Return a Yahoo calendar-day span large enough for daily-bar coverage."""
+    return max(
+        lookback_days,
+        math.ceil(lookback_days * _TRADING_TO_CALENDAR_DAY_RATIO)
+        + _PRICE_HISTORY_CALENDAR_BUFFER_DAYS,
+    )
 
 
 def compute_historical_volatility(stock, load_history=None):  # pylint: disable=broad-exception-caught
@@ -384,10 +397,11 @@ class YFinanceProvider(DataProvider):
     def load_price_history(self, ticker: str, *, lookback_days: int) -> pd.DataFrame:
         """Load daily OHLCV history for optional price-context enrichment."""
         stock = yf.Ticker(ticker)
+        calendar_days = _calendar_days_for_trading_lookback(lookback_days)
         history = self._call_yahoo(
             f"{ticker} price history",
             lambda: stock.history(
-                period=f"{lookback_days}d",
+                period=f"{calendar_days}d",
                 interval="1d",
                 auto_adjust=True,
             ),

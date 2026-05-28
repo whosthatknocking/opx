@@ -333,6 +333,40 @@ def test_reconcile_price_history_respects_recent_sync_ttl(tmp_path):
     assert not provider.lookback_calls
 
 
+def test_reconcile_price_history_refetches_recent_partial_ok_sync(tmp_path):
+    """A recent ok sync must not suppress backfill when durable bars are short."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+    store.upsert_bars(provider="stub", ticker="AAA", history=_history(end="2026-03-18", periods=3))
+    store.record_sync(
+        provider="stub",
+        ticker="AAA",
+        lookback_days=5,
+        status="ok",
+        requested_lookback_days=5,
+        latest_trading_date=date(2026, 3, 18),
+        fetched_rows=3,
+        stored_rows=3,
+        checked_at=datetime.now(tz=timezone.utc) - timedelta(seconds=10),
+    )
+    provider = HistoryProvider(end="2026-03-20")
+    config = make_runtime_config(
+        today=date(2026, 3, 20),
+        price_context_lookback_days=5,
+        provider_price_context_ttl=86400,
+    )
+
+    result = reconcile_price_history(
+        ticker="AAA",
+        provider=provider,
+        config=config,
+        store=store,
+    )
+
+    assert result.fetched is True
+    assert provider.lookback_calls == [5]
+    assert len(result.history) == 5
+
+
 def test_reconcile_price_history_ignores_recent_ok_sync_without_bars(tmp_path):
     """Metadata-only ok sync rows should not suppress durable bar repair."""
     store = PriceHistoryStore(tmp_path / "price-history.db")

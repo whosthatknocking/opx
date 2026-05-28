@@ -709,7 +709,8 @@ def reconcile_price_history(  # pylint: disable=too-many-locals
             return PriceHistoryReconcileResult(history=history, fetched=False)
         reason = "refresh"
     elif (
-        not history.empty
+        reason == "tail"
+        and not history.empty
         and _sync_recent(
             sync,
             ttl_seconds=ttl_seconds,
