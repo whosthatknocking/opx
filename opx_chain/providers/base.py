@@ -61,7 +61,7 @@ def positive_int_arg(value: object, *, name: str) -> int:
 def date_arg(value: object, *, name: str) -> date:
     """Validate a public provider date argument before any provider call."""
     if isinstance(value, datetime):
-        return value.date()
+        raise ValueError(f"{name} must be a date, not a datetime")
     if isinstance(value, date):
         return value
     raise ValueError(f"{name} must be a date")

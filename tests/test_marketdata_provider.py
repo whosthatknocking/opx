@@ -288,7 +288,10 @@ def test_marketdata_provider_loads_historical_chain_for_iv_history(monkeypatch):
     assert str(frame["option_quote_time"].iloc[0]) == "2024-03-20 13:40:00+00:00"
 
 
-@pytest.mark.parametrize("observation_date", [None, "2026-04-01", True, 1775001600])
+@pytest.mark.parametrize(
+    "observation_date",
+    [None, "2026-04-01", True, 1775001600, datetime(2026, 4, 1, 12, 30)],
+)
 def test_marketdata_provider_validates_historical_chain_observation_date_before_sdk(
     monkeypatch,
     observation_date,
