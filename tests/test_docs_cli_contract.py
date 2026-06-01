@@ -102,6 +102,9 @@ def test_domain_helpers_are_stable_public_surface():
     public_surface = public_surface.split("### 3.2", maxsplit=1)[0]
     price_context_section = spec.split("### 5.4 `PRICE_CONTEXT_SCHEMA_VERSION`", maxsplit=1)[1]
     for name in (
+        "BackupDependencyRecord",
+        "BackupInventory",
+        "build_backup_inventory",
         "PRICE_CONTEXT_RECORD_FIELDS",
         "PRICE_CONTEXT_SCHEMA_VERSION",
         "PriceContextStatus",
@@ -118,6 +121,7 @@ def test_domain_helpers_are_stable_public_surface():
         assert name in public_surface
     for status in ("FRESH", "STALE", "MISSING", "ERROR"):
         assert status in price_context_section
+    assert "backup-inventory surface" in public_surface
 
 
 def test_external_interface_notes_are_present_tense():

@@ -280,6 +280,11 @@ The stable public surface is:
 
 ```python
 from opx_chain.fetcher import run_fetch
+from opx_chain.backup_inventory import (
+    BackupDependencyRecord,
+    BackupInventory,
+    build_backup_inventory,
+)
 from opx_chain.storage.base import StorageBackend
 from opx_chain.storage.models import DatasetHandle, DatasetRecord, RunRecord
 from opx_chain.storage.factory import get_storage_backend
@@ -350,6 +355,24 @@ querying `iv-history.db` directly. Store read/write helpers validate provider,
 ticker, date, positive-window, sync-status, and row-count inputs at the public
 boundary and raise `ValueError` for malformed direct calls rather than returning
 backend-specific empty windows or raw SQLite errors.
+
+`build_backup_inventory`, `BackupInventory`, and `BackupDependencyRecord` are
+the stable backup-inventory surface for downstream applications that need to
+archive OPX Chain execution dependencies without scanning private storage
+layout. The inventory owns current dependency discovery for durable
+price-history, durable IV-history, standalone price-context artifacts, and
+consumer-provided retained chain dataset locations under the OPX Chain runs
+root. Downstream consumers own archive assembly and restore policy; they should
+not hard-code OPX Chain dependency filenames or runs-root glob patterns.
+When callers omit explicit roots, the inventory resolves the active runtime
+`[storage].dir` and uses that storage base for both `BackupInventory.data_dir`
+and `BackupInventory.runs_dir`. When `data_dir` is supplied without `runs_dir`,
+`runs_dir` is derived as `<data_dir>/runs`; callers that pass one custom storage
+base do not need to pass both roots to avoid split-root inventories.
+For standalone price-context artifacts, `BackupDependencyRecord.freshness_status`
+summarizes every `records[].price_context_staleness_status` value; mixed
+artifacts use `MIXED:<sorted statuses>` such as `MIXED:ERROR,FRESH,STALE`
+rather than reporting only the first record.
 
 `OPTION_TYPE_CALL`, `OPTION_TYPE_PUT`, `OPTION_TYPES`,
 `normalize_option_type`, and `option_type_label` are the stable option-type
@@ -661,6 +684,9 @@ need row-level price context.
 
 `records[].price_context_staleness_status` uses the stable
 `PriceContextStatus` vocabulary: `FRESH`, `STALE`, `MISSING`, and `ERROR`.
+Backup inventory metadata aggregates those per-record values across the whole
+artifact, returning the single status when all records agree and
+`MIXED:<sorted statuses>` when records differ.
 Schema version 2 adds deterministic technical indicator fields to each record:
 `rsi_14`, `ema_20`, `ema_50`, `ema_cloud_state`, and
 `price_vs_ema50_pct`. `ema_cloud_state` is one of `BULLISH`, `BEARISH`,
