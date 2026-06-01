@@ -842,6 +842,25 @@ def load_runtime_config(  # pylint: disable=too-many-locals
     return config
 
 
+def load_storage_dir_config(config_path: Path | None = None) -> Path | None:
+    """Load only storage.dir without validating provider credentials."""
+    default_config_path = DEFAULT_CONFIG_PATH_OVERRIDE or get_default_config_path()
+    resolved_path = (config_path or default_config_path).expanduser()
+    warnings: list[str] = []
+    data = _read_config_data(resolved_path, warnings)
+    storage_settings = _resolve_table(
+        data.get("storage", {}),
+        field_name="storage",
+        warnings=warnings,
+    )
+    return _resolve_optional_path_setting(
+        storage_settings.get("dir"),
+        field_name="storage.dir",
+        base_dir=get_data_dir(),
+        warnings=warnings,
+    )
+
+
 @lru_cache(maxsize=1)
 def _load_runtime_config_for_market_day(market_day: date) -> RuntimeConfig:
     """Return config cached only for the active market-calendar date."""

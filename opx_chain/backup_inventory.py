@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from opx_chain.config import get_runtime_config
+from opx_chain.config import get_runtime_config_override, load_storage_dir_config
 from opx_chain.paths import get_data_dir, get_runs_dir
 
 
@@ -121,10 +121,11 @@ def _resolve_storage_roots(
     if data_dir is not None:
         resolved_data_dir = Path(data_dir).expanduser()
     else:
-        config = get_runtime_config()
+        config = get_runtime_config_override()
+        storage_dir = config.storage_dir if config is not None else load_storage_dir_config()
         resolved_data_dir = (
-            Path(config.storage_dir).expanduser()
-            if config.storage_dir
+            Path(storage_dir).expanduser()
+            if storage_dir
             else get_data_dir()
         )
 

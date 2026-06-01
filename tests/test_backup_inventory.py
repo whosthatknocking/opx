@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from opx_chain.backup_inventory import build_backup_inventory
+from opx_chain.paths import get_data_dir
 
 
 def _sqlite_file(path: Path) -> None:
@@ -128,8 +129,49 @@ def test_backup_inventory_uses_runtime_storage_dir_when_overrides_omitted(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "opx_chain.backup_inventory.get_runtime_config",
+        "opx_chain.backup_inventory.get_runtime_config_override",
         lambda: SimpleNamespace(storage_dir=storage_dir),
+    )
+
+    inventory = build_backup_inventory()
+
+    assert inventory.data_dir == storage_dir
+    assert inventory.runs_dir == runs_dir
+    assert [record.archive_path for record in inventory.records] == [
+        "dependencies/opx-chain/runs/price_context_latest.json"
+    ]
+
+
+def test_backup_inventory_storage_dir_does_not_require_provider_credentials(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Storage-only discovery should not require fetch-provider credentials."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """
+[settings]
+data_provider = "marketdata"
+auto_fallback_to_yfinance = false
+
+[storage]
+dir = "store"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("opx_chain.config.DEFAULT_CONFIG_PATH_OVERRIDE", config_path)
+    storage_dir = get_data_dir() / "store"
+    runs_dir = storage_dir / "runs"
+    runs_dir.mkdir(parents=True)
+    (runs_dir / "price_context_latest.json").write_text(
+        json.dumps(
+            {
+                "artifact_type": "price_context",
+                "provider": "marketdata",
+                "records": [],
+            }
+        ),
+        encoding="utf-8",
     )
 
     inventory = build_backup_inventory()

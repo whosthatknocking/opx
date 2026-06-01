@@ -368,7 +368,9 @@ When callers omit explicit roots, the inventory resolves the active runtime
 `[storage].dir` and uses that storage base for both `BackupInventory.data_dir`
 and `BackupInventory.runs_dir`. When `data_dir` is supplied without `runs_dir`,
 `runs_dir` is derived as `<data_dir>/runs`; callers that pass one custom storage
-base do not need to pass both roots to avoid split-root inventories.
+base do not need to pass both roots to avoid split-root inventories. Storage-root
+resolution is independent from provider credential validation, so missing fetch
+tokens do not block local dependency discovery.
 For standalone price-context artifacts, `BackupDependencyRecord.freshness_status`
 summarizes every `records[].price_context_staleness_status` value; mixed
 artifacts use `MIXED:<sorted statuses>` such as `MIXED:ERROR,FRESH,STALE`
