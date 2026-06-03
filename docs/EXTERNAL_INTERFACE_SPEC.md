@@ -371,6 +371,10 @@ and `BackupInventory.runs_dir`. When `data_dir` is supplied without `runs_dir`,
 base do not need to pass both roots to avoid split-root inventories. Storage-root
 resolution is independent from provider credential validation, so missing fetch
 tokens do not block local dependency discovery.
+Dependency discovery is fail-closed for symlinked storage roots and symlinked
+dependency parent directories. Unsafe roots still appear in the returned
+`BackupInventory` metadata for diagnostics, but no dependency records are
+reported from paths reached through those symlinks.
 For standalone price-context artifacts, `BackupDependencyRecord.freshness_status`
 summarizes every `records[].price_context_staleness_status` value; mixed
 artifacts use `MIXED:<sorted statuses>` such as `MIXED:ERROR,FRESH,STALE`

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -56,12 +57,17 @@ def build_backup_inventory(
         seen.add(record.archive_path)
         records.append(record)
 
+    data_root_safe = _is_dependency_root(resolved_data_dir)
+    runs_root_safe = _is_dependency_root(resolved_runs_dir) and (
+        runs_dir is not None or data_root_safe
+    )
+
     for db_name, kind in (
         ("price-history.db", "price_history_db"),
         ("iv-history.db", "iv_history_db"),
     ):
         source_path = resolved_data_dir / db_name
-        if _is_regular_dependency(source_path):
+        if data_root_safe and _is_regular_dependency(source_path, root=resolved_data_dir):
             append(
                 BackupDependencyRecord(
                     logical_kind=kind,
@@ -73,9 +79,12 @@ def build_backup_inventory(
             )
 
     runs_root = resolved_runs_dir.resolve(strict=False)
-    if _is_dependency_root(resolved_runs_dir):
+    if runs_root_safe:
         for path in sorted(resolved_runs_dir.glob("price_context*.json")):
-            if not _path_stays_under(path, runs_root) or not _is_regular_dependency(path):
+            if (
+                not _path_stays_under(path, runs_root)
+                or not _is_regular_dependency(path, root=resolved_runs_dir)
+            ):
                 continue
             metadata = _price_context_metadata(path)
             append(
@@ -92,7 +101,10 @@ def build_backup_inventory(
 
         for raw_location in chain_locations:
             path = Path(raw_location).expanduser()
-            if not _path_stays_under(path, runs_root) or not _is_regular_dependency(path):
+            if (
+                not _path_stays_under(path, runs_root)
+                or not _is_regular_dependency(path, root=resolved_runs_dir)
+            ):
                 continue
             relative = path.resolve(strict=False).relative_to(runs_root)
             append(
@@ -138,11 +150,61 @@ def _resolve_storage_roots(
 
 
 def _is_dependency_root(path: Path) -> bool:
-    return path.exists() and path.is_dir() and not path.is_symlink()
+    try:
+        mode = path.lstat().st_mode
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(mode)
+        and not stat.S_ISLNK(mode)
+        and _has_real_directory_components(path)
+    )
 
 
-def _is_regular_dependency(path: Path) -> bool:
-    return path.exists() and path.is_file() and not path.is_symlink()
+def _is_regular_dependency(path: Path, *, root: Path | None = None) -> bool:
+    try:
+        mode = path.lstat().st_mode
+    except OSError:
+        return False
+    if not stat.S_ISREG(mode) or stat.S_ISLNK(mode):
+        return False
+    if root is not None and not _has_real_parent_dirs(path, root):
+        return False
+    return True
+
+
+def _has_real_parent_dirs(path: Path, root: Path) -> bool:
+    try:
+        relative_parent = path.parent.relative_to(root)
+    except ValueError:
+        return False
+    current = root
+    for part in relative_parent.parts:
+        current = current / part
+        try:
+            mode = current.lstat().st_mode
+        except OSError:
+            return False
+        if not stat.S_ISDIR(mode) or stat.S_ISLNK(mode):
+            return False
+    return True
+
+
+def _has_real_directory_components(path: Path) -> bool:
+    full_path = path if path.is_absolute() else Path.cwd() / path
+    current = Path(full_path.anchor) if full_path.anchor else Path()
+    parts = full_path.parts[1:] if full_path.anchor else full_path.parts
+    for part in parts:
+        current = current / part
+        try:
+            mode = current.lstat().st_mode
+        except OSError:
+            return False
+        if stat.S_ISLNK(mode):
+            return False
+        if current == full_path and not stat.S_ISDIR(mode):
+            return False
+    return True
 
 
 def _path_stays_under(path: Path, root: Path) -> bool:

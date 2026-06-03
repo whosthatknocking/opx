@@ -200,6 +200,51 @@ def test_backup_inventory_ignores_chain_locations_outside_runs_dir(tmp_path: Pat
     assert not inventory.records
 
 
+def test_backup_inventory_ignores_symlinked_storage_root(tmp_path: Path) -> None:
+    """Inventory must not follow a declared storage root through a symlink."""
+    outside_storage = tmp_path / "outside-storage"
+    outside_runs = outside_storage / "runs"
+    outside_runs.mkdir(parents=True)
+    _sqlite_file(outside_storage / "price-history.db")
+    (outside_runs / "price_context_latest.json").write_text(
+        json.dumps({"artifact_type": "price_context", "provider": "marketdata", "records": []}),
+        encoding="utf-8",
+    )
+    storage_link = tmp_path / "storage-link"
+    storage_link.symlink_to(outside_storage, target_is_directory=True)
+
+    inventory = build_backup_inventory(data_dir=storage_link)
+
+    assert inventory.data_dir == storage_link
+    assert inventory.runs_dir == storage_link / "runs"
+    assert not inventory.records
+
+
+def test_backup_inventory_ignores_explicit_runs_dir_under_symlinked_storage_root(
+    tmp_path: Path,
+) -> None:
+    """Explicit runs_dir must not bypass symlinked storage-root protection."""
+    outside_storage = tmp_path / "outside-storage"
+    outside_runs = outside_storage / "runs"
+    outside_runs.mkdir(parents=True)
+    _sqlite_file(outside_storage / "price-history.db")
+    (outside_runs / "price_context_latest.json").write_text(
+        json.dumps({"artifact_type": "price_context", "provider": "marketdata", "records": []}),
+        encoding="utf-8",
+    )
+    storage_link = tmp_path / "storage-link"
+    storage_link.symlink_to(outside_storage, target_is_directory=True)
+
+    inventory = build_backup_inventory(
+        data_dir=storage_link,
+        runs_dir=storage_link / "runs",
+    )
+
+    assert inventory.data_dir == storage_link
+    assert inventory.runs_dir == storage_link / "runs"
+    assert not inventory.records
+
+
 def test_backup_inventory_reports_mixed_price_context_freshness(tmp_path: Path) -> None:
     """Mixed per-record freshness should be represented explicitly."""
     data_dir = tmp_path / "data"
