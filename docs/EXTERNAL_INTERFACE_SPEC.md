@@ -301,6 +301,10 @@ from opx_chain.price_context import (
     PriceContextStatus,
     blank_price_context,
 )
+from opx_chain.analyst_forecast import (
+    ANALYST_FORECAST_SCHEMA_VERSION,
+    fetch_analyst_forecasts,
+)
 from opx_chain.iv_history import (
     IVHistoryStore,
     build_iv_observation_frame,
@@ -339,6 +343,13 @@ and parsed-position fingerprint as `opx-fetch`.
 artifact vocabulary for downstream consumers that join optional daily-OHLCV
 levels to option-chain rows.
 
+`ANALYST_FORECAST_SCHEMA_VERSION` and `fetch_analyst_forecasts` are the stable
+analyst-forecast advisory surface for downstream consumers that need normalized
+12-month analyst target/rating facts without depending on yfinance/Yahoo field
+names. The payload is context-only market-data metadata; downstream strategy
+packages own run lifecycle, artifact reuse, rendering, validation, and any
+operator-facing advisory policy.
+
 `VOLATILITY_FEATURE_SCHEMA_VERSION`, `build_price_volatility_features`,
 `load_price_volatility_features`, `build_iv_features`,
 `build_ticker_volatility_features`, and `dte_bucket` are the stable volatility
@@ -360,10 +371,14 @@ backend-specific empty windows or raw SQLite errors.
 the stable backup-inventory surface for downstream applications that need to
 archive OPX Chain execution dependencies without scanning private storage
 layout. The inventory owns current dependency discovery for durable
-price-history, durable IV-history, standalone price-context artifacts, and
-consumer-provided retained chain dataset locations under the OPX Chain runs
-root. Downstream consumers own archive assembly and restore policy; they should
-not hard-code OPX Chain dependency filenames or runs-root glob patterns.
+price-history, durable IV-history, standalone price-context artifacts, Event
+Data snapshot artifacts, and consumer-provided retained chain dataset locations
+under the OPX Chain runs root. Event Data snapshot discovery includes the
+producer-owned latest alias `event_snapshot_latest.json` plus retained
+`event_snapshots/*.json` artifacts under the OPX Chain data root. Downstream
+consumers own archive assembly and restore policy; they should not hard-code
+OPX Chain dependency filenames, Event Data snapshot filenames, or runs-root
+glob patterns.
 When callers omit explicit roots, the inventory resolves the active runtime
 `[storage].dir` and uses that storage base for both `BackupInventory.data_dir`
 and `BackupInventory.runs_dir`. When `data_dir` is supplied without `runs_dir`,
@@ -699,7 +714,134 @@ Schema version 2 adds deterministic technical indicator fields to each record:
 `TRANSITION`, or `UNKNOWN`. These are market-data features only; downstream
 strategy packages decide whether they are rendered, tagged, ranked, or ignored.
 
-### 5.5 `VOLATILITY_FEATURE_SCHEMA_VERSION` constant
+### 5.5 Event Data Snapshots
+
+Event Data snapshots are a separate programmatic contract, not part of the
+option-chain CSV schema. Downstream consumers call `opx_chain.event_data`
+helpers directly:
+
+```python
+from opx_chain.event_data import run_event_fetch, summarize_latest_event_data
+
+result = run_event_fetch(
+    enabled=True,
+    provider="yfinance",
+    chain_provider="marketdata",
+    fetch_mode="auto",
+    trading_date=date(2026, 6, 4),
+    tickers=("GOOGL", "MSFT"),
+    ticker_universe_source="new_run_portfolio_and_ticker_intents",
+)
+```
+
+Every snapshot payload is JSON-safe and includes ticker coverage provenance:
+
+```json
+{
+  "artifact_type": "event_data_snapshot",
+  "schema_version": 1,
+  "status": "ready",
+  "provider": "yfinance",
+  "resolved_provider": "yfinance",
+  "trading_date": "2026-06-04",
+  "freshness_policy": "trading_day",
+  "fresh_through_trading_date": "2026-06-04",
+  "ticker_universe_source": "new_run_portfolio_and_ticker_intents",
+  "tickers_requested": ["GOOGL", "MSFT"],
+  "tickers_succeeded": ["GOOGL"],
+  "tickers_failed": [],
+  "tickers_no_known_event": ["MSFT"],
+  "records": [],
+  "canonical_events": []
+}
+```
+
+Disabled Event Data returns `status="disabled"` without resolving provider-
+specific requirements such as `same_as_chain`, without requiring a chain
+provider, and without making provider calls. Disabled payloads set `provider`
+and `resolved_provider` to `null` while still recording the requested ticker
+universe and `ticker_universe_source`.
+
+`summarize_latest_event_data(...)` is read-only source health. Same-trading-day
+usable snapshots return `freshness_label="CURRENT_TRADING_DAY"` and
+`auto_would_reuse=true`. Older retained usable snapshots are surfaced as
+`status="stale"` / `freshness_label="STALE"` with snapshot id, provider,
+fetched timestamp, snapshot trading date, freshness-through date,
+`snapshot_age_days`, `ticker_universe_source`, and
+`provider_api_call_expected=true`; they are not reused by Auto fetch.
+Malformed, provider-error, or wrong-artifact retained snapshots are skipped for
+both Auto reuse and stale source-health visibility.
+
+### 5.6 `ANALYST_FORECAST_SCHEMA_VERSION` constant
+
+Analyst forecast facts are a separate programmatic contract, not part of the
+option-chain CSV schema. They are fetched on demand by downstream consumers:
+
+```python
+from datetime import date, datetime, timezone
+
+from opx_chain.analyst_forecast import fetch_analyst_forecasts
+
+payload = fetch_analyst_forecasts(
+    ["GOOGL", "MSFT"],
+    provider="yfinance",
+    fetched_at=datetime(2026, 6, 4, 14, 34, tzinfo=timezone.utc),
+    trading_date=date(2026, 6, 4),
+)
+```
+
+The returned payload is JSON-safe and provider-neutral:
+
+```json
+{
+  "schema_type": "analyst_forecast",
+  "schema_version": 1,
+  "provider": "yfinance",
+  "source_quality": "research_fallback",
+  "generated_at": "2026-06-04T14:34:00Z",
+  "trading_date": "2026-06-04",
+  "status": "ok",
+  "warnings": [],
+  "errors": [],
+  "forecasts": [
+    {
+      "ticker": "GOOGL",
+      "status": "ok",
+      "as_of": "2026-06-04",
+      "as_of_source": "fetched_at_fallback",
+      "horizon_months": 12,
+      "currency": "USD",
+      "target_low": 340.0,
+      "target_mean": 433.47,
+      "target_median": 430.0,
+      "target_high": 550.0,
+      "analyst_count": null,
+      "consensus_rating": "buy",
+      "recommendation_count": 47,
+      "rating_counts": {
+        "strong_buy": 12,
+        "buy": 26,
+        "hold": 8,
+        "sell": 1,
+        "strong_sell": 0
+      },
+      "warnings": []
+    }
+  ]
+}
+```
+
+Supported provider ids are explicit. Version 1 supports only `yfinance`.
+Unsupported provider ids, invalid tickers, or naive `fetched_at` datetimes
+raise `ValueError` before provider calls. Provider errors are row-scoped when
+possible so one failed ticker does not prevent usable rows for other tickers.
+
+The yfinance implementation uses structured price-target and recommendation
+summary fields only. It does not scrape consumer HTML pages, does not expose raw
+Yahoo field names through this public payload, and does not synthesize
+`analyst_count` from recommendation distributions.
+
+### 5.7 `VOLATILITY_FEATURE_SCHEMA_VERSION` constant
 
 Volatility advisory feature snapshots are a separate programmatic contract, not
 part of the option-chain CSV schema. They are built on demand from the local

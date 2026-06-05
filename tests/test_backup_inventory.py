@@ -45,6 +45,28 @@ def test_backup_inventory_reports_execution_dependencies(tmp_path: Path) -> None
         ),
         encoding="utf-8",
     )
+    (data_dir / "event_snapshot_latest.json").write_text(
+        json.dumps({
+            "artifact_type": "event_data_snapshot",
+            "provider": "yfinance",
+            "status": "ready",
+            "fetched_at": "2026-05-31T15:05:00Z",
+            "trading_date": "2026-05-31",
+            "records": [{"ticker": "TSLA"}],
+        }),
+        encoding="utf-8",
+    )
+    event_snapshot = data_dir / "event_snapshots" / "event-1.json"
+    event_snapshot.parent.mkdir()
+    event_snapshot.write_text(
+        json.dumps({
+            "artifact_type": "event_data_snapshot",
+            "provider": "yfinance",
+            "status": "ready",
+            "records": [{"ticker": "TSLA"}],
+        }),
+        encoding="utf-8",
+    )
 
     inventory = build_backup_inventory(
         data_dir=data_dir,
@@ -56,6 +78,8 @@ def test_backup_inventory_reports_execution_dependencies(tmp_path: Path) -> None
     assert set(records) == {
         "dependencies/opx-chain/price-history.db",
         "dependencies/opx-chain/iv-history.db",
+        "dependencies/opx-chain/event_snapshot_latest.json",
+        "dependencies/opx-chain/event_snapshots/event-1.json",
         "dependencies/opx-chain/runs/price_context_latest.json",
         "dependencies/opx-chain/runs/run-1/output/dataset.parquet",
     }
@@ -65,6 +89,12 @@ def test_backup_inventory_reports_execution_dependencies(tmp_path: Path) -> None
     assert price_context.provider == "marketdata"
     assert price_context.freshness_status == "FRESH"
     assert price_context.metadata["freshness_statuses"] == ["FRESH"]
+    event_context = records["dependencies/opx-chain/event_snapshot_latest.json"]
+    assert event_context.logical_kind == "event_data_snapshot_artifact"
+    assert event_context.required_for_execution is True
+    assert event_context.provider == "yfinance"
+    assert event_context.freshness_status == "ready"
+    assert event_context.metadata["record_count"] == 1
     dataset = records["dependencies/opx-chain/runs/run-1/output/dataset.parquet"]
     assert dataset.logical_kind == "chain_dataset_artifact"
     assert dataset.dataset_history is True
@@ -106,6 +136,31 @@ def test_backup_inventory_derives_runs_dir_from_data_dir_override(tmp_path: Path
     assert set(records) == {
         "dependencies/opx-chain/price-history.db",
         "dependencies/opx-chain/runs/price_context_latest.json",
+        "dependencies/opx-chain/runs/run-1/output/dataset.parquet",
+    }
+
+
+def test_backup_inventory_accepts_absolute_chain_location_under_relative_data_dir(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Relative custom roots must still include absolute retained chain paths."""
+    monkeypatch.chdir(tmp_path)
+    data_dir = Path("custom-storage")
+    runs_dir = data_dir / "runs"
+    chain_path = runs_dir / "run-1" / "output" / "dataset.parquet"
+    chain_path.parent.mkdir(parents=True)
+    chain_path.write_bytes(b"chain")
+
+    inventory = build_backup_inventory(
+        data_dir=data_dir,
+        chain_locations=[chain_path.resolve()],
+    )
+    records = {record.archive_path: record for record in inventory.records}
+
+    assert inventory.data_dir == data_dir
+    assert inventory.runs_dir == runs_dir
+    assert set(records) == {
         "dependencies/opx-chain/runs/run-1/output/dataset.parquet",
     }
 

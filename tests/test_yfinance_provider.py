@@ -151,6 +151,65 @@ def test_yfinance_provider_load_ticker_events_parses_earnings_and_dividends(monk
     assert events["dividend_amount"] == pytest.approx(0.88)
 
 
+def test_yfinance_provider_prefers_info_ex_dividend_date_over_calendar(monkeypatch):
+    """Yahoo calendar ex-dividend dates can lag/shift and must not override info."""
+    class EventTicker(FakeTicker):  # pylint: disable=too-few-public-methods
+        """Ticker stub matching the GOOGL off-by-one dividend-date shape."""
+
+        def __init__(self, ticker):
+            super().__init__(ticker)
+            self.info.update(
+                {
+                    "exDividendDate": 1780876800,  # 2026-06-08 00:00 UTC, date-only
+                }
+            )
+            self.calendar = {
+                "Ex-Dividend Date": date(2026, 6, 7),
+            }
+            self.dividends = pd.Series(dtype="float64")
+
+    monkeypatch.setattr(
+        "opx_chain.providers.yfinance.get_runtime_config",
+        lambda: make_runtime_config(today=date(2026, 6, 4)),
+    )
+    monkeypatch.setattr("opx_chain.providers.yfinance.yf.Ticker", EventTicker)
+
+    events = YFinanceProvider().load_ticker_events("GOOGL")
+
+    assert events["next_ex_div_date"] == "2026-06-08"
+    assert events["next_ex_div_date_source"] == "yfinance"
+    assert events["next_ex_div_date_confidence"] == "confirmed"
+    assert pd.isna(events["dividend_amount"])
+
+
+def test_yfinance_provider_uses_calendar_ex_dividend_when_stronger_sources_missing(
+    monkeypatch,
+):
+    """Yahoo calendar remains a fallback when info and dividend series are blank."""
+    class EventTicker(FakeTicker):  # pylint: disable=too-few-public-methods
+        """Ticker stub with only calendar dividend metadata."""
+
+        def __init__(self, ticker):
+            super().__init__(ticker)
+            self.calendar = {
+                "Ex-Dividend Date": date(2026, 6, 8),
+            }
+            self.dividends = pd.Series(dtype="float64")
+
+    monkeypatch.setattr(
+        "opx_chain.providers.yfinance.get_runtime_config",
+        lambda: make_runtime_config(today=date(2026, 6, 4)),
+    )
+    monkeypatch.setattr("opx_chain.providers.yfinance.yf.Ticker", EventTicker)
+
+    events = YFinanceProvider().load_ticker_events("GOOGL")
+
+    assert events["next_ex_div_date"] == "2026-06-08"
+    assert events["next_ex_div_date_source"] == "yfinance"
+    assert events["next_ex_div_date_confidence"] == "confirmed"
+    assert pd.isna(events["dividend_amount"])
+
+
 def test_yfinance_provider_rejects_boolean_dividend_amounts(monkeypatch):
     """Malformed Yahoo dividend booleans should not become one-dollar amounts."""
     class EventTicker(FakeTicker):  # pylint: disable=too-few-public-methods

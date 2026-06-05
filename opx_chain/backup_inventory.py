@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from opx_chain.config import get_runtime_config_override, load_storage_dir_config
+from opx_chain.event_data import EVENT_SNAPSHOT_DIRNAME, EVENT_SNAPSHOT_LATEST_FILENAME
 from opx_chain.paths import get_data_dir, get_runs_dir
 
 
@@ -77,6 +78,48 @@ def build_backup_inventory(
                     metadata={"filename": db_name},
                 )
             )
+
+    if data_root_safe:
+        latest_event_snapshot = resolved_data_dir / EVENT_SNAPSHOT_LATEST_FILENAME
+        if _is_regular_dependency(latest_event_snapshot, root=resolved_data_dir):
+            metadata = _event_snapshot_metadata(latest_event_snapshot)
+            append(
+                BackupDependencyRecord(
+                    logical_kind="event_data_snapshot_artifact",
+                    source_path=latest_event_snapshot,
+                    archive_path=f"dependencies/opx-chain/{EVENT_SNAPSHOT_LATEST_FILENAME}",
+                    required_for_execution=True,
+                    provider=_text_or_none(metadata.get("provider")),
+                    freshness_status=_text_or_none(metadata.get("status")),
+                    metadata=metadata,
+                )
+            )
+
+        event_snapshot_dir = resolved_data_dir / EVENT_SNAPSHOT_DIRNAME
+        event_snapshot_root = event_snapshot_dir.resolve(strict=False)
+        if _is_dependency_root(event_snapshot_dir):
+            for path in sorted(event_snapshot_dir.glob("*.json")):
+                if (
+                    not _path_stays_under(path, event_snapshot_root)
+                    or not _is_regular_dependency(path, root=resolved_data_dir)
+                ):
+                    continue
+                relative = path.relative_to(event_snapshot_dir)
+                metadata = _event_snapshot_metadata(path)
+                append(
+                    BackupDependencyRecord(
+                        logical_kind="event_data_snapshot_artifact",
+                        source_path=path,
+                        archive_path=(
+                            f"dependencies/opx-chain/{EVENT_SNAPSHOT_DIRNAME}/"
+                            f"{relative.as_posix()}"
+                        ),
+                        required_for_execution=True,
+                        provider=_text_or_none(metadata.get("provider")),
+                        freshness_status=_text_or_none(metadata.get("status")),
+                        metadata=metadata,
+                    )
+                )
 
     runs_root = resolved_runs_dir.resolve(strict=False)
     if runs_root_safe:
@@ -174,11 +217,13 @@ def _is_regular_dependency(path: Path, *, root: Path | None = None) -> bool:
 
 
 def _has_real_parent_dirs(path: Path, root: Path) -> bool:
+    full_path = path if path.is_absolute() else Path.cwd() / path
+    full_root = root if root.is_absolute() else Path.cwd() / root
     try:
-        relative_parent = path.parent.relative_to(root)
+        relative_parent = full_path.parent.relative_to(full_root)
     except ValueError:
         return False
-    current = root
+    current = full_root
     for part in relative_parent.parts:
         current = current / part
         try:
@@ -240,6 +285,24 @@ def _price_context_metadata(path: Path) -> dict[str, Any]:
         "freshness_status": freshness,
         "freshness_statuses": sorted(set(record_statuses)),
         "fetched_at": _text_or_none(payload.get("fetched_at")),
+        "record_count": len(records) if isinstance(records, list) else None,
+    }
+
+
+def _event_snapshot_metadata(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return {"artifact_readable": False}
+    if not isinstance(payload, dict):
+        return {"artifact_readable": False}
+    records = payload.get("records")
+    return {
+        "artifact_readable": True,
+        "provider": _text_or_none(payload.get("provider")),
+        "status": _text_or_none(payload.get("status")),
+        "fetched_at": _text_or_none(payload.get("fetched_at")),
+        "trading_date": _text_or_none(payload.get("trading_date")),
         "record_count": len(records) if isinstance(records, list) else None,
     }
 

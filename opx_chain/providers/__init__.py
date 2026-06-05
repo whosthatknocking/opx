@@ -39,6 +39,12 @@ def get_data_provider() -> DataProvider:
     return _make_provider(get_runtime_config().data_provider)
 
 
+def get_data_provider_by_name(provider_name: str) -> DataProvider:
+    """Return one provider implementation by explicit provider id."""
+    normalized = str(provider_name or "").strip().lower()
+    return _make_provider(normalized)
+
+
 def __getattr__(name: str):
     """Load provider classes only when callers explicitly request them."""
     if name in _CLASS_EXPORTS:
@@ -50,4 +56,5 @@ __all__ = [
     "DataProvider",
     "PROVIDER_FACTORIES",
     "get_data_provider",
+    "get_data_provider_by_name",
 ]

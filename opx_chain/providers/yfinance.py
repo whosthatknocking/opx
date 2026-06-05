@@ -115,6 +115,18 @@ def _pick_next_future_date(raw_values: list[Any], today: date) -> date | None:
     return upcoming[0] if upcoming else None
 
 
+def _parse_yahoo_date_only_event(raw_date) -> date | None:
+    """Parse Yahoo metadata fields that encode date-only values as UTC epochs."""
+    if raw_date is None:
+        return None
+    if isinstance(raw_date, (int, float, np.integer, np.floating)):
+        timestamp = normalize_timestamp(raw_date)
+        if pd.isna(timestamp):
+            return None
+        return timestamp.date()
+    return _parse_event_date(raw_date)
+
+
 def _calendar_days_for_trading_lookback(lookback_days: int) -> int:
     """Return a Yahoo calendar-day span large enough for daily-bar coverage."""
     resolved_lookback = positive_int_arg(lookback_days, name="lookback_days")
@@ -293,15 +305,16 @@ class YFinanceProvider(DataProvider):
                 future_dividends[ex_div_date] = np.nan if pd.isna(amount) else float(amount)
 
         candidates: list[date] = list(future_dividends)
-        info_ex_div_date = _parse_event_date(info.get("exDividendDate"))
+        info_ex_div_date = _parse_yahoo_date_only_event(info.get("exDividendDate"))
         if info_ex_div_date is not None and info_ex_div_date >= today:
             candidates.append(info_ex_div_date)
-        calendar_ex_div_date = _pick_next_future_date(
-            _extract_calendar_field(calendar_payload, "Ex-Dividend Date"),
-            today,
-        )
-        if calendar_ex_div_date is not None:
-            candidates.append(calendar_ex_div_date)
+        if not candidates:
+            calendar_ex_div_date = _pick_next_future_date(
+                _extract_calendar_field(calendar_payload, "Ex-Dividend Date"),
+                today,
+            )
+            if calendar_ex_div_date is not None:
+                candidates.append(calendar_ex_div_date)
         if not candidates:
             return None, np.nan
         next_date = min(candidates)
@@ -394,6 +407,52 @@ class YFinanceProvider(DataProvider):
             "next_ex_div_date_source": "yfinance" if next_ex_div_date else None,
             "next_ex_div_date_confidence": "confirmed" if next_ex_div_date else None,
             "dividend_amount": dividend_amount,
+        }
+
+    def load_analyst_forecast(self, ticker: str) -> dict:
+        """Load structured analyst price targets and recommendation summary."""
+        stock = yf.Ticker(ticker)
+        price_targets = self._safe_yfinance_attr(
+            f"{ticker} analyst price targets",
+            stock.get_analyst_price_targets,
+            default={},
+            expected_type=(dict, pd.Series),
+        )
+        if isinstance(price_targets, pd.Series):
+            price_targets = price_targets.to_dict()
+        if not price_targets:
+            price_targets = self._safe_yfinance_attr(
+                f"{ticker} analyst_price_targets",
+                lambda: stock.analyst_price_targets,
+                default={},
+                expected_type=(dict, pd.Series),
+            )
+            if isinstance(price_targets, pd.Series):
+                price_targets = price_targets.to_dict()
+        recommendations_summary = self._safe_yfinance_attr(
+            f"{ticker} recommendations summary",
+            stock.get_recommendations_summary,
+            default=None,
+            expected_type=(pd.DataFrame, pd.Series, dict),
+        )
+        if recommendations_summary is None:
+            recommendations_summary = self._safe_yfinance_attr(
+                f"{ticker} recommendations_summary",
+                lambda: stock.recommendations_summary,
+                default=None,
+                expected_type=(pd.DataFrame, pd.Series, dict),
+            )
+        self.debug_dump_payload(
+            ticker,
+            "analyst_forecast",
+            {
+                "price_targets": price_targets,
+                "recommendations_summary": recommendations_summary,
+            },
+        )
+        return {
+            "price_targets": price_targets if isinstance(price_targets, dict) else {},
+            "recommendations_summary": recommendations_summary,
         }
 
     def load_price_history(self, ticker: str, *, lookback_days: int) -> pd.DataFrame:
