@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 
 from opx_chain.providers import get_data_provider_by_name
+from opx_chain.providers.base import date_arg
 from opx_chain.tickers import is_valid_ticker
 from opx_chain.timestamps import format_utc_z_seconds
 from opx_chain.utils import finite_float_or_none
@@ -245,7 +246,11 @@ def fetch_analyst_forecasts(
         raise ValueError("fetched_at must be timezone-aware UTC")
     generated_dt = fetched_at or datetime.now(timezone.utc)
     generated_at = format_utc_z_seconds(generated_dt)
-    resolved_trading_date = trading_date or generated_dt.date()
+    resolved_trading_date = (
+        date_arg(trading_date, name="trading_date")
+        if trading_date is not None
+        else generated_dt.date()
+    )
     normalized_tickers = _normalize_tickers(tickers)
     provider_impl = get_data_provider_by_name(provider_id)
     rows: list[dict[str, Any]] = []

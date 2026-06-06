@@ -10,6 +10,7 @@ from datetime import date, datetime, timezone
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from opx_chain.config import get_runtime_config, set_runtime_config_override
 from opx_chain.event_data import (
@@ -169,6 +170,55 @@ def test_run_event_fetch_not_supported_preserves_ticker_universe_source(tmp_path
     assert result.payload["ticker_universe_source"] == "new_run_portfolio_and_ticker_intents"
 
 
+def test_run_event_fetch_rejects_naive_now_before_provider_calls(tmp_path, monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_provider(name: str):
+        calls.append(name)
+        return FakeEventProvider()
+
+    monkeypatch.setattr("opx_chain.event_data.get_data_provider_by_name", fake_provider)
+
+    with pytest.raises(ValueError, match="now must be timezone-aware UTC"):
+        run_event_fetch(
+            provider="yfinance",
+            chain_provider="marketdata",
+            fetch_mode="fetch_latest",
+            trading_date=date(2026, 6, 1),
+            tickers=("TSLA",),
+            base_dir=tmp_path,
+            now=datetime(2026, 6, 1, 14, 0),
+        )
+
+    assert not calls
+
+
+def test_run_event_fetch_rejects_datetime_trading_date_before_provider_calls(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_provider(name: str):
+        calls.append(name)
+        return FakeEventProvider()
+
+    monkeypatch.setattr("opx_chain.event_data.get_data_provider_by_name", fake_provider)
+
+    with pytest.raises(ValueError, match="trading_date must be a date"):
+        run_event_fetch(
+            provider="yfinance",
+            chain_provider="marketdata",
+            fetch_mode="fetch_latest",
+            trading_date=datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc),
+            tickers=("TSLA",),
+            base_dir=tmp_path,
+            now=datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc),
+        )
+
+    assert not calls
+
+
 def test_run_event_fetch_payload_preserves_selected_and_resolved_provider(
     tmp_path,
     monkeypatch,
@@ -229,6 +279,142 @@ def test_run_event_fetch_reports_partial_provider_errors(tmp_path, monkeypatch) 
     assert result.status == "partial"
     assert result.payload["tickers_failed"] == ["ERR"]
     assert result.payload["status_counts"] == {"provider_error": 1, "ready": 1}
+
+
+def test_summarize_latest_event_data_reports_failed_partial_ticker_non_reusable(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "opx_chain.event_data.get_data_provider_by_name",
+        lambda _name: FakeEventProvider(),
+    )
+    run_event_fetch(
+        provider="yfinance",
+        chain_provider="marketdata",
+        fetch_mode="fetch_latest",
+        trading_date=date(2026, 6, 1),
+        tickers=("TSLA", "ERR"),
+        base_dir=tmp_path,
+        now=datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc),
+    )
+
+    summary = summarize_latest_event_data(
+        provider="yfinance",
+        chain_provider="marketdata",
+        tickers=("ERR",),
+        trading_date=date(2026, 6, 1),
+        base_dir=tmp_path,
+    )
+
+    assert summary["available"] is True
+    assert summary["reusable"] is False
+    assert summary["status"] == "partial"
+    assert summary["freshness_label"] == "MISSING"
+    assert summary["covered_required_tickers"] == []
+    assert summary["missing_tickers"] == ["ERR"]
+    assert summary["status_counts"] == {"provider_error": 1, "ready": 1}
+    assert summary["auto_would_reuse"] is False
+    assert summary["provider_api_call_expected"] is True
+
+
+def test_run_event_fetch_auto_does_not_reuse_partial_failed_ticker(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_provider(name: str):
+        calls.append(name)
+        return FakeEventProvider()
+
+    monkeypatch.setattr("opx_chain.event_data.get_data_provider_by_name", fake_provider)
+
+    first = run_event_fetch(
+        provider="yfinance",
+        chain_provider="marketdata",
+        fetch_mode="fetch_latest",
+        trading_date=date(2026, 6, 1),
+        tickers=("TSLA", "ERR"),
+        base_dir=tmp_path,
+        now=datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc),
+    )
+    second = run_event_fetch(
+        provider="yfinance",
+        chain_provider="marketdata",
+        fetch_mode="auto",
+        trading_date=date(2026, 6, 1),
+        tickers=("ERR",),
+        base_dir=tmp_path,
+        now=datetime(2026, 6, 1, 14, 5, tzinfo=timezone.utc),
+    )
+
+    assert calls == ["yfinance", "yfinance"]
+    assert first.status == "partial"
+    assert second.reused is False
+    assert second.status == "provider_error"
+    assert second.snapshot_id != first.snapshot_id
+
+
+def test_run_event_fetch_auto_does_not_reuse_missing_snapshot(tmp_path, monkeypatch) -> None:
+    snapshot_dir = event_data_snapshot_dir(tmp_path)
+    snapshot_dir.mkdir(parents=True)
+    (snapshot_dir / "missing-retained.json").write_text(
+        json.dumps(
+            {
+                "artifact_type": "event_data_snapshot",
+                "schema_version": 1,
+                "event_snapshot_id": "missing-retained",
+                "provider": "yfinance",
+                "resolved_provider": "yfinance",
+                "status": "missing",
+                "fetched_at": "2026-06-01T14:00:00Z",
+                "trading_date": "2026-06-01",
+                "freshness_policy": "trading_day",
+                "fresh_through_trading_date": "2026-06-01",
+                "ticker_universe_source": "caller_supplied_tickers",
+                "tickers_requested": ["TSLA"],
+                "tickers_succeeded": [],
+                "tickers_failed": [],
+                "tickers_no_known_event": [],
+                "status_counts": {"missing": 1},
+                "records": [],
+                "canonical_events": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[str] = []
+
+    def fake_provider(name: str):
+        calls.append(name)
+        return FakeEventProvider()
+
+    summary = summarize_latest_event_data(
+        provider="yfinance",
+        chain_provider="marketdata",
+        tickers=("TSLA",),
+        trading_date=date(2026, 6, 1),
+        base_dir=tmp_path,
+    )
+    monkeypatch.setattr("opx_chain.event_data.get_data_provider_by_name", fake_provider)
+    result = run_event_fetch(
+        provider="yfinance",
+        chain_provider="marketdata",
+        fetch_mode="auto",
+        trading_date=date(2026, 6, 1),
+        tickers=("TSLA",),
+        base_dir=tmp_path,
+        now=datetime(2026, 6, 1, 14, 5, tzinfo=timezone.utc),
+    )
+
+    assert summary["status"] == "missing"
+    assert summary["freshness_label"] == "MISSING"
+    assert summary["auto_would_reuse"] is False
+    assert summary["provider_api_call_expected"] is True
+    assert calls == ["yfinance"]
+    assert result.reused is False
+    assert result.snapshot_id != "missing-retained"
 
 
 def test_run_event_fetch_auto_does_not_reuse_provider_error_snapshot(tmp_path, monkeypatch) -> None:
@@ -365,6 +551,91 @@ def test_event_data_reuse_skips_malformed_retained_tickers(tmp_path, monkeypatch
     assert summary["available"] is False
     assert calls == ["yfinance"]
     assert result.reused is False
+
+
+def test_summarize_latest_event_data_reports_provider_mismatch(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "opx_chain.event_data.get_data_provider_by_name",
+        lambda _name: FakeEventProvider(),
+    )
+    run_event_fetch(
+        provider="marketdata",
+        chain_provider="marketdata",
+        fetch_mode="fetch_latest",
+        trading_date=date(2026, 6, 1),
+        tickers=("TSLA",),
+        base_dir=tmp_path,
+        now=datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc),
+    )
+
+    summary = summarize_latest_event_data(
+        provider="yfinance",
+        chain_provider="marketdata",
+        tickers=("TSLA",),
+        trading_date=date(2026, 6, 1),
+        base_dir=tmp_path,
+    )
+
+    assert summary["available"] is True
+    assert summary["reusable"] is False
+    assert summary["status"] == "provider_mismatch"
+    assert summary["freshness_label"] == "PROVIDER_MISMATCH"
+    assert summary["provider"] == "yfinance"
+    assert summary["resolved_provider"] == "yfinance"
+    assert summary["retained_provider"] == "marketdata"
+    assert summary["retained_resolved_provider"] == "marketdata"
+    assert summary["covered_required_tickers"] == ["TSLA"]
+    assert summary["missing_tickers"] == []
+    assert summary["auto_would_reuse"] is False
+    assert summary["provider_api_call_expected"] is True
+
+
+def test_run_event_fetch_auto_requires_same_selected_provider(tmp_path, monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_provider(name: str):
+        calls.append(name)
+        return FakeEventProvider()
+
+    monkeypatch.setattr("opx_chain.event_data.get_data_provider_by_name", fake_provider)
+
+    first = run_event_fetch(
+        provider="same_as_chain",
+        chain_provider="yfinance",
+        fetch_mode="fetch_latest",
+        trading_date=date(2026, 6, 1),
+        tickers=("TSLA",),
+        base_dir=tmp_path,
+        now=datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc),
+    )
+    summary = summarize_latest_event_data(
+        provider="yfinance",
+        chain_provider="marketdata",
+        tickers=("TSLA",),
+        trading_date=date(2026, 6, 1),
+        base_dir=tmp_path,
+    )
+    second = run_event_fetch(
+        provider="yfinance",
+        chain_provider="marketdata",
+        fetch_mode="auto",
+        trading_date=date(2026, 6, 1),
+        tickers=("TSLA",),
+        base_dir=tmp_path,
+        now=datetime(2026, 6, 1, 14, 5, tzinfo=timezone.utc),
+    )
+
+    assert first.provider == "same_as_chain"
+    assert first.resolved_provider == "yfinance"
+    assert summary["status"] == "provider_mismatch"
+    assert summary["retained_provider"] == "same_as_chain"
+    assert summary["retained_resolved_provider"] == "yfinance"
+    assert calls == ["yfinance", "yfinance"]
+    assert second.reused is False
+    assert second.snapshot_id != first.snapshot_id
 
 
 def test_malformed_provider_earnings_date_is_invalid_payload(tmp_path, monkeypatch) -> None:
@@ -587,6 +858,17 @@ def test_summarize_latest_event_data_reports_missing_impact_fields(tmp_path) -> 
     assert summary["covered_required_tickers"] == []
     assert summary["missing_tickers"] == ["TSLA"]
     assert summary["record_count"] == 0
+
+
+def test_summarize_latest_event_data_rejects_datetime_trading_date(tmp_path) -> None:
+    with pytest.raises(ValueError, match="trading_date must be a date"):
+        summarize_latest_event_data(
+            provider="yfinance",
+            chain_provider="marketdata",
+            tickers=("TSLA",),
+            trading_date=datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc),
+            base_dir=tmp_path,
+        )
 
 
 def test_summarize_latest_event_data_reports_not_supported_impact_fields(tmp_path) -> None:

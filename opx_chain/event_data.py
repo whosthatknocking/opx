@@ -1,6 +1,7 @@
 """Event-data snapshots and overlays for canonical option-chain rows."""
 # pylint: disable=line-too-long,too-many-instance-attributes,too-many-return-statements
 # pylint: disable=too-many-arguments,too-many-locals,too-many-nested-blocks,duplicate-code
+# pylint: disable=too-many-lines
 
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ from opx_chain.json_utils import dumps_sanitized_json, loads_strict_json
 from opx_chain.metrics import add_event_risk_flags
 from opx_chain.paths import get_data_dir
 from opx_chain.providers import get_data_provider_by_name
+from opx_chain.providers.base import date_arg
 from opx_chain.storage.atomic import atomic_write_text
 from opx_chain.tickers import is_valid_ticker
 from opx_chain.timestamps import format_utc_z_seconds
@@ -37,6 +39,9 @@ EVENT_DATA_TICKER_UNIVERSE_SOURCE_DEFAULT = "caller_supplied_tickers"
 EVENT_SNAPSHOT_LATEST_FILENAME = "event_snapshot_latest.json"
 EVENT_SNAPSHOT_DIRNAME = "event_snapshots"
 _UNUSABLE_RETAINED_STATUSES = frozenset({"provider_error", "invalid_payload"})
+_INSPECTABLE_RETAINED_STATUSES = frozenset({"ready", "partial", "missing"})
+_REUSABLE_RETAINED_STATUSES = frozenset({"ready", "partial"})
+_USABLE_RECORD_STATUSES = frozenset({"ready", "no_known_event"})
 
 _EVENT_FIELD_DEFAULTS: dict[str, Any] = {
     "next_earnings_date": None,
@@ -231,31 +236,94 @@ def _snapshot_resolved_provider(payload: dict[str, Any]) -> str:
     return str(payload.get("resolved_provider") or payload.get("provider") or "").lower()
 
 
+def _snapshot_selected_provider(payload: dict[str, Any]) -> str:
+    return str(payload.get("provider") or "").strip().lower()
+
+
+def _snapshot_status(payload: dict[str, Any]) -> str:
+    return str(payload.get("status") or "").strip().lower()
+
+
+def _snapshot_base_valid(payload: dict[str, Any]) -> bool:
+    return (
+        payload.get("artifact_type") == "event_data_snapshot"
+        and payload.get("schema_version") == EVENT_DATA_SCHEMA_VERSION
+    )
+
+
+def _snapshot_providers_match(
+    payload: dict[str, Any],
+    *,
+    selected_provider: str,
+    resolved_provider: str,
+) -> bool:
+    if _snapshot_resolved_provider(payload) != resolved_provider:
+        return False
+    snapshot_selected = _snapshot_selected_provider(payload)
+    return not snapshot_selected or snapshot_selected == selected_provider
+
+
+def _snapshot_requested_tickers(payload: dict[str, Any]) -> tuple[str, ...] | None:
+    try:
+        return _normalize_tickers(payload.get("tickers_requested") or ())
+    except ValueError:
+        return None
+
+
+def _snapshot_usable_tickers(payload: dict[str, Any]) -> tuple[str, ...] | None:
+    records = payload.get("records")
+    usable: list[str] = []
+    if isinstance(records, list):
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            status = str(record.get("provider_status") or "").strip().lower()
+            if status not in _USABLE_RECORD_STATUSES:
+                continue
+            ticker = str(record.get("ticker") or "").strip().upper()
+            if ticker:
+                usable.append(ticker)
+        if usable or not payload.get("tickers_succeeded"):
+            try:
+                return _normalize_tickers(usable)
+            except ValueError:
+                return None
+    try:
+        return _normalize_tickers(payload.get("tickers_succeeded") or ())
+    except ValueError:
+        return None
+
+
+def _snapshot_same_trading_day(payload: dict[str, Any], trading_date: date) -> bool:
+    iso_date = trading_date.isoformat()
+    return (
+        str(payload.get("trading_date") or "") == iso_date
+        and str(payload.get("fresh_through_trading_date") or "") == iso_date
+    )
+
+
 def _snapshot_matches(
     payload: dict[str, Any],
     *,
-    provider: str,
+    selected_provider: str,
+    resolved_provider: str,
     trading_date: date,
     tickers: tuple[str, ...],
 ) -> bool:
-    if payload.get("artifact_type") != "event_data_snapshot":
+    if not _snapshot_base_valid(payload):
         return False
-    if payload.get("schema_version") != EVENT_DATA_SCHEMA_VERSION:
+    if _snapshot_status(payload) not in _REUSABLE_RETAINED_STATUSES:
         return False
-    status = str(payload.get("status") or "").strip().lower()
-    if status in _UNUSABLE_RETAINED_STATUSES:
+    if not _snapshot_providers_match(
+        payload,
+        selected_provider=selected_provider,
+        resolved_provider=resolved_provider,
+    ):
         return False
-    if _snapshot_resolved_provider(payload) != provider:
+    usable = _snapshot_usable_tickers(payload)
+    if usable is None or not set(tickers).issubset(set(usable)):
         return False
-    try:
-        requested = _normalize_tickers(payload.get("tickers_requested") or ())
-    except ValueError:
-        return False
-    if not set(tickers).issubset(set(requested)):
-        return False
-    if str(payload.get("trading_date") or "") != trading_date.isoformat():
-        return False
-    if str(payload.get("fresh_through_trading_date") or "") != trading_date.isoformat():
+    if not _snapshot_same_trading_day(payload, trading_date):
         return False
     return True
 
@@ -263,34 +331,88 @@ def _snapshot_matches(
 def _snapshot_covers_provider_tickers(
     payload: dict[str, Any],
     *,
-    provider: str,
+    selected_provider: str,
+    resolved_provider: str,
     tickers: tuple[str, ...],
 ) -> bool:
-    if payload.get("artifact_type") != "event_data_snapshot":
+    if not _snapshot_base_valid(payload):
         return False
-    if payload.get("schema_version") != EVENT_DATA_SCHEMA_VERSION:
+    if _snapshot_status(payload) not in _REUSABLE_RETAINED_STATUSES:
         return False
-    status = str(payload.get("status") or "").strip().lower()
-    if status in _UNUSABLE_RETAINED_STATUSES:
+    if not _snapshot_providers_match(
+        payload,
+        selected_provider=selected_provider,
+        resolved_provider=resolved_provider,
+    ):
         return False
-    if _snapshot_resolved_provider(payload) != provider:
+    usable = _snapshot_usable_tickers(payload)
+    if usable is None:
         return False
-    try:
-        requested = _normalize_tickers(payload.get("tickers_requested") or ())
-    except ValueError:
+    return set(tickers).issubset(set(usable))
+
+
+def _snapshot_source_health_matches(
+    payload: dict[str, Any],
+    *,
+    selected_provider: str,
+    resolved_provider: str,
+    trading_date: date,
+    tickers: tuple[str, ...],
+) -> bool:
+    if not _snapshot_base_valid(payload):
         return False
-    return set(tickers).issubset(set(requested))
+    if _snapshot_status(payload) not in _INSPECTABLE_RETAINED_STATUSES:
+        return False
+    if not _snapshot_providers_match(
+        payload,
+        selected_provider=selected_provider,
+        resolved_provider=resolved_provider,
+    ):
+        return False
+    requested = _snapshot_requested_tickers(payload)
+    if requested is None or not set(tickers).issubset(set(requested)):
+        return False
+    return _snapshot_same_trading_day(payload, trading_date)
+
+
+def _snapshot_provider_mismatch_matches(
+    payload: dict[str, Any],
+    *,
+    selected_provider: str,
+    resolved_provider: str,
+    tickers: tuple[str, ...],
+) -> bool:
+    if not _snapshot_base_valid(payload):
+        return False
+    if _snapshot_status(payload) not in _REUSABLE_RETAINED_STATUSES:
+        return False
+    if _snapshot_providers_match(
+        payload,
+        selected_provider=selected_provider,
+        resolved_provider=resolved_provider,
+    ):
+        return False
+    usable = _snapshot_usable_tickers(payload)
+    if usable is None:
+        return False
+    return set(tickers).issubset(set(usable))
 
 
 def latest_event_data_snapshot(
     *,
     provider: str,
+    selected_provider: str | None = None,
     trading_date: date | None = None,
     tickers: tuple[str, ...] | list[str] | set[str] = (),
     base_dir: Path | None = None,
 ) -> tuple[dict[str, Any] | None, Path | None]:
     """Return latest reusable same-trading-day event snapshot, if present."""
-    resolved_date = trading_date or get_runtime_config().today
+    resolved_date = (
+        date_arg(trading_date, name="trading_date")
+        if trading_date is not None
+        else get_runtime_config().today
+    )
+    selected = selected_provider or provider
     normalized_tickers = _normalize_tickers(tickers)
     for path in _snapshot_file_paths(base_dir):
         payload = _load_snapshot(path)
@@ -298,9 +420,33 @@ def latest_event_data_snapshot(
             continue
         if _snapshot_matches(
             payload,
-            provider=provider,
+            selected_provider=selected,
+            resolved_provider=provider,
             trading_date=resolved_date,
             tickers=normalized_tickers,
+        ):
+            return payload, path
+    return None, None
+
+
+def _latest_same_day_event_data_snapshot_for_source_health(
+    *,
+    selected_provider: str,
+    resolved_provider: str,
+    trading_date: date,
+    tickers: tuple[str, ...],
+    base_dir: Path | None = None,
+) -> tuple[dict[str, Any] | None, Path | None]:
+    for path in _snapshot_file_paths(base_dir):
+        payload = _load_snapshot(path)
+        if payload is None:
+            continue
+        if _snapshot_source_health_matches(
+            payload,
+            selected_provider=selected_provider,
+            resolved_provider=resolved_provider,
+            trading_date=trading_date,
+            tickers=tickers,
         ):
             return payload, path
     return None, None
@@ -309,10 +455,12 @@ def latest_event_data_snapshot(
 def latest_retained_event_data_snapshot(
     *,
     provider: str,
+    selected_provider: str | None = None,
     tickers: tuple[str, ...] | list[str] | set[str] = (),
     base_dir: Path | None = None,
 ) -> tuple[dict[str, Any] | None, Path | None]:
     """Return latest usable retained event snapshot regardless of trading date."""
+    selected = selected_provider or provider
     normalized_tickers = _normalize_tickers(tickers)
     for path in _snapshot_file_paths(base_dir):
         payload = _load_snapshot(path)
@@ -320,8 +468,30 @@ def latest_retained_event_data_snapshot(
             continue
         if _snapshot_covers_provider_tickers(
             payload,
-            provider=provider,
+            selected_provider=selected,
+            resolved_provider=provider,
             tickers=normalized_tickers,
+        ):
+            return payload, path
+    return None, None
+
+
+def _latest_provider_mismatch_event_data_snapshot(
+    *,
+    selected_provider: str,
+    resolved_provider: str,
+    tickers: tuple[str, ...],
+    base_dir: Path | None = None,
+) -> tuple[dict[str, Any] | None, Path | None]:
+    for path in _snapshot_file_paths(base_dir):
+        payload = _load_snapshot(path)
+        if payload is None:
+            continue
+        if _snapshot_provider_mismatch_matches(
+            payload,
+            selected_provider=selected_provider,
+            resolved_provider=resolved_provider,
+            tickers=tickers,
         ):
             return payload, path
     return None, None
@@ -531,9 +701,15 @@ def run_event_fetch(
 ) -> EventDataSnapshotResult:
     """Resolve or fetch a durable event snapshot for a run."""
     mode = normalize_event_data_fetch_mode(fetch_mode)
-    resolved_date = trading_date or get_runtime_config().today
+    resolved_date = (
+        date_arg(trading_date, name="trading_date")
+        if trading_date is not None
+        else get_runtime_config().today
+    )
     normalized_tickers = _normalize_tickers(tickers)
     universe_source = _normalize_ticker_universe_source(ticker_universe_source)
+    if now is not None and now.tzinfo is None:
+        raise ValueError("now must be timezone-aware UTC")
     current_time = now or datetime.now(timezone.utc)
     if not enabled:
         payload = {
@@ -604,6 +780,7 @@ def run_event_fetch(
     if mode == "auto":
         cached, cached_path = latest_event_data_snapshot(
             provider=resolved_provider,
+            selected_provider=selected_provider,
             trading_date=resolved_date,
             tickers=normalized_tickers,
             base_dir=base_dir,
@@ -703,7 +880,11 @@ def summarize_latest_event_data(
 ) -> dict[str, Any]:
     """Return read-only freshness metadata for New Run source health."""
     selected, resolved = normalize_event_data_provider(provider, chain_provider=chain_provider)
-    resolved_date = trading_date or get_runtime_config().today
+    resolved_date = (
+        date_arg(trading_date, name="trading_date")
+        if trading_date is not None
+        else get_runtime_config().today
+    )
     requested = _normalize_tickers(tickers)
     if resolved not in EVENT_DATA_SUPPORTED_PROVIDERS:
         return {
@@ -725,13 +906,72 @@ def summarize_latest_event_data(
         }
     payload, path = latest_event_data_snapshot(
         provider=resolved,
+        selected_provider=selected,
         trading_date=resolved_date,
         tickers=requested,
         base_dir=base_dir,
     )
     if payload is None:
+        same_day_payload, same_day_path = _latest_same_day_event_data_snapshot_for_source_health(
+            selected_provider=selected,
+            resolved_provider=resolved,
+            trading_date=resolved_date,
+            tickers=requested,
+            base_dir=base_dir,
+        )
+        if same_day_payload is not None:
+            status = str(same_day_payload.get("status") or "missing")
+            records = (
+                same_day_payload.get("records")
+                if isinstance(same_day_payload.get("records"), list)
+                else []
+            )
+            status_counts = (
+                same_day_payload.get("status_counts")
+                if isinstance(same_day_payload.get("status_counts"), dict)
+                else {}
+            )
+            covered = _snapshot_usable_tickers(same_day_payload) or ()
+            missing = sorted(set(requested) - set(covered))
+            reusable = not missing and status in _REUSABLE_RETAINED_STATUSES
+            freshness_label = (
+                "CURRENT_TRADING_DAY"
+                if reusable
+                else "MISSING"
+                if status == "missing" or missing
+                else "STALE"
+            )
+            return {
+                "available": True,
+                "reusable": reusable,
+                "status": status,
+                "freshness_label": freshness_label,
+                "provider": selected,
+                "resolved_provider": resolved,
+                "event_snapshot_id": same_day_payload.get("event_snapshot_id"),
+                "fetched_at": same_day_payload.get("fetched_at"),
+                "path": str(same_day_path) if same_day_path else None,
+                "trading_date": resolved_date.isoformat(),
+                "snapshot_trading_date": same_day_payload.get("trading_date"),
+                "fresh_through_trading_date": same_day_payload.get("fresh_through_trading_date"),
+                "snapshot_age_days": 0,
+                "ticker_universe_source": same_day_payload.get("ticker_universe_source"),
+                "required_tickers": list(requested),
+                "covered_required_tickers": sorted(set(requested) & set(covered)),
+                "missing_tickers": missing,
+                "record_count": len(records),
+                "status_counts": status_counts,
+                "auto_would_reuse": reusable,
+                "provider_api_call_expected": not reusable,
+                "summary": (
+                    f"Retained event snapshot {same_day_payload.get('event_snapshot_id')} "
+                    f"covers {len(set(requested) & set(covered))}/{len(requested)} "
+                    "requested ticker(s) with usable event rows."
+                ),
+            }
         stale_payload, stale_path = latest_retained_event_data_snapshot(
             provider=resolved,
+            selected_provider=selected,
             tickers=requested,
             base_dir=base_dir,
         )
@@ -746,7 +986,7 @@ def summarize_latest_event_data(
                 if isinstance(stale_payload.get("status_counts"), dict)
                 else {}
             )
-            covered = _normalize_tickers(stale_payload.get("tickers_requested") or ())
+            covered = _snapshot_usable_tickers(stale_payload) or ()
             snapshot_trading_date = _parse_date(stale_payload.get("trading_date"))
             snapshot_age_days = (
                 (resolved_date - snapshot_trading_date).days
@@ -780,6 +1020,62 @@ def summarize_latest_event_data(
                     f"is stale for {resolved_date.isoformat()}."
                 ),
             }
+        mismatch_payload, mismatch_path = _latest_provider_mismatch_event_data_snapshot(
+            selected_provider=selected,
+            resolved_provider=resolved,
+            tickers=requested,
+            base_dir=base_dir,
+        )
+        if mismatch_payload is not None:
+            records = (
+                mismatch_payload.get("records")
+                if isinstance(mismatch_payload.get("records"), list)
+                else []
+            )
+            status_counts = (
+                mismatch_payload.get("status_counts")
+                if isinstance(mismatch_payload.get("status_counts"), dict)
+                else {}
+            )
+            covered = _snapshot_usable_tickers(mismatch_payload) or ()
+            snapshot_trading_date = _parse_date(mismatch_payload.get("trading_date"))
+            snapshot_age_days = (
+                (resolved_date - snapshot_trading_date).days
+                if snapshot_trading_date is not None
+                else None
+            )
+            retained_provider = _snapshot_selected_provider(mismatch_payload) or None
+            retained_resolved_provider = _snapshot_resolved_provider(mismatch_payload) or None
+            return {
+                "available": True,
+                "reusable": False,
+                "status": "provider_mismatch",
+                "freshness_label": "PROVIDER_MISMATCH",
+                "provider": selected,
+                "resolved_provider": resolved,
+                "retained_provider": retained_provider,
+                "retained_resolved_provider": retained_resolved_provider,
+                "event_snapshot_id": mismatch_payload.get("event_snapshot_id"),
+                "fetched_at": mismatch_payload.get("fetched_at"),
+                "path": str(mismatch_path) if mismatch_path else None,
+                "trading_date": resolved_date.isoformat(),
+                "snapshot_trading_date": mismatch_payload.get("trading_date"),
+                "fresh_through_trading_date": mismatch_payload.get("fresh_through_trading_date"),
+                "snapshot_age_days": snapshot_age_days,
+                "ticker_universe_source": mismatch_payload.get("ticker_universe_source"),
+                "required_tickers": list(requested),
+                "covered_required_tickers": sorted(set(requested) & set(covered)),
+                "missing_tickers": sorted(set(requested) - set(covered)),
+                "record_count": len(records),
+                "status_counts": status_counts,
+                "auto_would_reuse": False,
+                "provider_api_call_expected": True,
+                "summary": (
+                    f"Retained event snapshot {mismatch_payload.get('event_snapshot_id')} "
+                    f"was produced by {retained_provider or retained_resolved_provider}, "
+                    f"not selected provider {selected}."
+                ),
+            }
         return {
             "available": False,
             "reusable": False,
@@ -800,7 +1096,7 @@ def summarize_latest_event_data(
     status = str(payload.get("status") or "ready")
     records = payload.get("records") if isinstance(payload.get("records"), list) else []
     status_counts = payload.get("status_counts") if isinstance(payload.get("status_counts"), dict) else {}
-    covered = _normalize_tickers(payload.get("tickers_requested") or ())
+    covered = _snapshot_usable_tickers(payload) or ()
     missing = sorted(set(requested) - set(covered))
     reusable = not missing and status in {"ready", "partial"}
     return {

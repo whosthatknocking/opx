@@ -142,3 +142,8 @@ def test_fetch_analyst_forecasts_rejects_invalid_inputs() -> None:
         fetch_analyst_forecasts(["bad ticker"])
     with pytest.raises(ValueError, match="timezone-aware"):
         fetch_analyst_forecasts(["GOOGL"], fetched_at=datetime(2026, 6, 4, 14, 0))
+    with pytest.raises(ValueError, match="trading_date must be a date"):
+        fetch_analyst_forecasts(
+            ["GOOGL"],
+            trading_date=datetime(2026, 6, 4, 14, 0, tzinfo=timezone.utc),
+        )

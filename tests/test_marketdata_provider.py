@@ -1158,8 +1158,8 @@ def test_marketdata_provider_parses_numeric_event_dates_in_market_timezone(monke
     assert events["next_earnings_date_confidence"] == "estimated"
 
 
-def test_marketdata_provider_load_ticker_events_returns_blanks_on_api_failure(monkeypatch):
-    """load_ticker_events should return blank values when the API call raises."""
+def test_marketdata_provider_load_ticker_events_raises_on_earnings_api_failure(monkeypatch):
+    """Unexpected earnings API failures should surface as provider errors."""
     patch_marketdata_client(monkeypatch)
     monkeypatch.setattr(
         "opx_chain.providers.marketdata.get_runtime_config",
@@ -1173,16 +1173,35 @@ def test_marketdata_provider_load_ticker_events_returns_blanks_on_api_failure(mo
 
     client.stocks = type("StocksResource", (), {"earnings": exploding_earnings})()
 
-    events = provider.load_ticker_events("TSLA")
+    with pytest.raises(RuntimeError, match="MarketData earnings request failed for TSLA"):
+        provider.load_ticker_events("TSLA")
 
-    assert events["next_earnings_date"] is None
-    assert events["next_earnings_date_is_estimated"] is None
-    assert events["next_earnings_date_source"] is None
-    assert events["next_earnings_date_confidence"] is None
-    assert events["next_ex_div_date"] is None
-    assert events["next_ex_div_date_source"] is None
-    assert events["next_ex_div_date_confidence"] is None
-    assert pd.isna(events["dividend_amount"])
+
+def test_marketdata_provider_load_ticker_events_raises_on_dividend_api_failure(monkeypatch):
+    """Unexpected dividend API failures should surface as provider errors."""
+
+    class ExplodingDividendClient(FakeMarketDataClient):  # pylint: disable=missing-class-docstring,too-few-public-methods
+        def _make_request(self, _method, url, *_args, **_kwargs):
+            if "stocks/dividends/" in url:
+                raise RuntimeError("API unreachable")
+            return super()._make_request(_method, url, *_args, **_kwargs)
+
+    monkeypatch.setattr(
+        "opx_chain.providers.marketdata.OpxMarketDataClient",
+        ExplodingDividendClient,
+    )
+    monkeypatch.setattr(
+        "opx_chain.providers.marketdata.get_provider_credentials",
+        lambda provider_name: {"api_token": "token"} if provider_name == "marketdata" else {},
+    )
+    monkeypatch.setattr(
+        "opx_chain.providers.marketdata.get_runtime_config",
+        lambda: make_runtime_config(today=date(2026, 4, 16)),
+    )
+    provider = MarketDataProvider()
+
+    with pytest.raises(RuntimeError, match="MarketData dividends request failed for TSLA"):
+        provider.load_ticker_events("TSLA")
 
 
 def test_base_provider_load_ticker_events_returns_blank_defaults():

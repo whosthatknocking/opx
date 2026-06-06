@@ -772,8 +772,10 @@ class MarketDataProvider(DataProvider):
             return min(upcoming, key=lambda item: item.value or "")
         except (ProviderAuthenticationError, ProviderQuotaError):
             raise
-        except Exception:  # pylint: disable=broad-exception-caught
-            return _BLANK_EVENT_DATE
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            raise RuntimeError(
+                f"MarketData earnings request failed for {ticker.upper()}"
+            ) from exc
 
     def _fetch_next_dividend(
         self,
@@ -815,8 +817,10 @@ class MarketDataProvider(DataProvider):
             return event, np.nan if amount is None else amount
         except (ProviderAuthenticationError, ProviderQuotaError):
             raise
-        except Exception:  # pylint: disable=broad-exception-caught
-            return _BLANK_EVENT_DATE, np.nan
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            raise RuntimeError(
+                f"MarketData dividends request failed for {ticker.upper()}"
+            ) from exc
 
     def load_ticker_events(self, ticker: str) -> dict:
         """Fetch upcoming earnings and dividend event data from the Market Data API."""

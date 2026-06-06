@@ -764,13 +764,32 @@ universe and `ticker_universe_source`.
 
 `summarize_latest_event_data(...)` is read-only source health. Same-trading-day
 usable snapshots return `freshness_label="CURRENT_TRADING_DAY"` and
-`auto_would_reuse=true`. Older retained usable snapshots are surfaced as
-`status="stale"` / `freshness_label="STALE"` with snapshot id, provider,
-fetched timestamp, snapshot trading date, freshness-through date,
-`snapshot_age_days`, `ticker_universe_source`, and
-`provider_api_call_expected=true`; they are not reused by Auto fetch.
-Malformed, provider-error, or wrong-artifact retained snapshots are skipped for
-both Auto reuse and stale source-health visibility.
+`auto_would_reuse=true` only when the retained snapshot has the same selected
+`provider`, the same resolved provider, the requested trading date, and usable
+per-ticker rows for every requested ticker. Usable per-ticker rows are
+`provider_status="ready"` or `provider_status="no_known_event"`; rows marked
+`provider_error` or `invalid_payload` do not count as covered ticker data even
+when the ticker appears in `tickers_requested`.
+
+Same-day retained snapshots with `status="missing"` or with failed required
+ticker rows remain visible in source health, but they set
+`auto_would_reuse=false` and `provider_api_call_expected=true` so Auto fetches
+again. Older retained usable snapshots are surfaced as `status="stale"` /
+`freshness_label="STALE"` with snapshot id, provider, fetched timestamp,
+snapshot trading date, freshness-through date, `snapshot_age_days`,
+`ticker_universe_source`, and `provider_api_call_expected=true`; they are not
+reused by Auto fetch. Retained snapshots for a different selected or resolved
+provider are surfaced as `status="provider_mismatch"` /
+`freshness_label="PROVIDER_MISMATCH"` with retained-provider provenance and are
+not reused by Auto. Malformed, provider-error, invalid-payload, disabled,
+unsupported, or wrong-artifact retained snapshots are skipped for Auto reuse.
+
+Explicit `trading_date` values must be `datetime.date` instances, not
+`datetime.datetime`; explicit `now` values must be timezone-aware datetimes.
+MarketData event endpoint quota/authentication failures and unexpected endpoint
+errors surface through Event Data as provider failures rather than provider-
+confirmed no-known-event rows. Expected no-data dividend responses still return
+blank dividend fields.
 
 ### 5.6 `ANALYST_FORECAST_SCHEMA_VERSION` constant
 
@@ -832,9 +851,10 @@ The returned payload is JSON-safe and provider-neutral:
 ```
 
 Supported provider ids are explicit. Version 1 supports only `yfinance`.
-Unsupported provider ids, invalid tickers, or naive `fetched_at` datetimes
-raise `ValueError` before provider calls. Provider errors are row-scoped when
-possible so one failed ticker does not prevent usable rows for other tickers.
+Unsupported provider ids, invalid tickers, naive `fetched_at` datetimes, or
+`datetime.datetime` values passed as `trading_date` raise `ValueError` before
+provider calls. Provider errors are row-scoped when possible so one failed
+ticker does not prevent usable rows for other tickers.
 
 The yfinance implementation uses structured price-target and recommendation
 summary fields only. It does not scrape consumer HTML pages, does not expose raw
