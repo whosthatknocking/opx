@@ -5,6 +5,7 @@ from __future__ import annotations
 # pylint: disable=missing-function-docstring,duplicate-code
 
 import json
+import os
 from dataclasses import replace
 from datetime import date, datetime, timezone
 
@@ -800,6 +801,85 @@ def test_summarize_latest_event_data_reports_reuse(tmp_path, monkeypatch) -> Non
     assert summary["status"] == "ready"
     assert summary["ticker_universe_source"] == "caller_supplied_tickers"
     assert summary["provider_api_call_expected"] is False
+
+
+def test_event_data_retained_lookup_orders_by_payload_fetched_at(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    snapshot_dir = event_data_snapshot_dir(tmp_path)
+    snapshot_dir.mkdir(parents=True)
+
+    def write_snapshot(snapshot_id: str, fetched_at: str, mtime: float) -> None:
+        path = snapshot_dir / f"{snapshot_id}.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "artifact_type": "event_data_snapshot",
+                    "schema_version": 1,
+                    "event_snapshot_id": snapshot_id,
+                    "provider": "yfinance",
+                    "resolved_provider": "yfinance",
+                    "status": "ready",
+                    "fetched_at": fetched_at,
+                    "trading_date": "2026-06-01",
+                    "freshness_policy": "trading_day",
+                    "fresh_through_trading_date": "2026-06-01",
+                    "ticker_universe_source": "caller_supplied_tickers",
+                    "tickers_requested": ["TSLA"],
+                    "tickers_succeeded": ["TSLA"],
+                    "tickers_failed": [],
+                    "tickers_no_known_event": [],
+                    "status_counts": {"ready": 1},
+                    "records": [
+                        {
+                            "ticker": "TSLA",
+                            "provider_status": "ready",
+                            "next_earnings_date": "2026-06-05",
+                        }
+                    ],
+                    "canonical_events": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        os.utime(path, (mtime, mtime))
+
+    write_snapshot("older-payload-newer-mtime", "2026-06-01T14:00:00Z", 200.0)
+    write_snapshot("newer-payload-older-mtime", "2026-06-01T15:00:00Z", 100.0)
+
+    summary = summarize_latest_event_data(
+        provider="yfinance",
+        chain_provider="marketdata",
+        tickers=("TSLA",),
+        trading_date=date(2026, 6, 1),
+        base_dir=tmp_path,
+    )
+
+    calls: list[str] = []
+
+    def fake_provider(name: str):
+        calls.append(name)
+        return FakeEventProvider()
+
+    monkeypatch.setattr("opx_chain.event_data.get_data_provider_by_name", fake_provider)
+    result = run_event_fetch(
+        provider="yfinance",
+        chain_provider="marketdata",
+        fetch_mode="auto",
+        trading_date=date(2026, 6, 1),
+        tickers=("TSLA",),
+        base_dir=tmp_path,
+        now=datetime(2026, 6, 1, 16, 0, tzinfo=timezone.utc),
+    )
+
+    assert summary["event_snapshot_id"] == "newer-payload-older-mtime"
+    assert summary["fetched_at"] == "2026-06-01T15:00:00Z"
+    assert summary["auto_would_reuse"] is True
+    assert result.reused is True
+    assert result.snapshot_id == "newer-payload-older-mtime"
+    assert result.fetched_at == "2026-06-01T15:00:00Z"
+    assert not calls
 
 
 def test_summarize_latest_event_data_reports_stale_retained_snapshot(

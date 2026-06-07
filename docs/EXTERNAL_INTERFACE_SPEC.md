@@ -769,7 +769,9 @@ usable snapshots return `freshness_label="CURRENT_TRADING_DAY"` and
 per-ticker rows for every requested ticker. Usable per-ticker rows are
 `provider_status="ready"` or `provider_status="no_known_event"`; rows marked
 `provider_error` or `invalid_payload` do not count as covered ticker data even
-when the ticker appears in `tickers_requested`.
+when the ticker appears in `tickers_requested`. When multiple retained snapshots
+qualify for a lookup, the newest parsed payload `fetched_at` wins; filesystem
+mtime is only a fallback for payloads with missing or malformed timestamps.
 
 Same-day retained snapshots with `status="missing"` or with failed required
 ticker rows remain visible in source health, but they set

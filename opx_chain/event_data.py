@@ -28,7 +28,7 @@ from opx_chain.providers import get_data_provider_by_name
 from opx_chain.providers.base import date_arg
 from opx_chain.storage.atomic import atomic_write_text
 from opx_chain.tickers import is_valid_ticker
-from opx_chain.timestamps import format_utc_z_seconds
+from opx_chain.timestamps import format_utc_z_seconds, parse_iso_datetime
 
 EVENT_DATA_SCHEMA_VERSION = 1
 EVENT_DATA_SUPPORTED_PROVIDERS = frozenset({"yfinance", "marketdata"})
@@ -221,7 +221,7 @@ def _snapshot_file_paths(base_dir: Path | None = None) -> list[Path]:
     root = event_data_snapshot_dir(base_dir)
     if not root.exists():
         return []
-    return sorted(root.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    return sorted(root.glob("*.json"))
 
 
 def _load_snapshot(path: Path) -> dict[str, Any] | None:
@@ -230,6 +230,41 @@ def _load_snapshot(path: Path) -> dict[str, Any] | None:
     except (OSError, ValueError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _snapshot_path_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _snapshot_fetched_at_epoch(payload: dict[str, Any]) -> float | None:
+    raw_value = payload.get("fetched_at")
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return None
+    try:
+        return parse_iso_datetime(raw_value).timestamp()
+    except ValueError:
+        return None
+
+
+def _snapshot_candidate_sort_key(candidate: tuple[Path, dict[str, Any]]) -> tuple[int, float, float, str]:
+    path, payload = candidate
+    fetched_at_epoch = _snapshot_fetched_at_epoch(payload)
+    mtime = _snapshot_path_mtime(path)
+    if fetched_at_epoch is not None:
+        return (1, fetched_at_epoch, mtime, path.name)
+    return (0, mtime, 0.0, path.name)
+
+
+def _snapshot_candidates(base_dir: Path | None = None) -> list[tuple[Path, dict[str, Any]]]:
+    candidates: list[tuple[Path, dict[str, Any]]] = []
+    for path in _snapshot_file_paths(base_dir):
+        payload = _load_snapshot(path)
+        if payload is not None:
+            candidates.append((path, payload))
+    return sorted(candidates, key=_snapshot_candidate_sort_key, reverse=True)
 
 
 def _snapshot_resolved_provider(payload: dict[str, Any]) -> str:
@@ -414,10 +449,7 @@ def latest_event_data_snapshot(
     )
     selected = selected_provider or provider
     normalized_tickers = _normalize_tickers(tickers)
-    for path in _snapshot_file_paths(base_dir):
-        payload = _load_snapshot(path)
-        if payload is None:
-            continue
+    for path, payload in _snapshot_candidates(base_dir):
         if _snapshot_matches(
             payload,
             selected_provider=selected,
@@ -437,10 +469,7 @@ def _latest_same_day_event_data_snapshot_for_source_health(
     tickers: tuple[str, ...],
     base_dir: Path | None = None,
 ) -> tuple[dict[str, Any] | None, Path | None]:
-    for path in _snapshot_file_paths(base_dir):
-        payload = _load_snapshot(path)
-        if payload is None:
-            continue
+    for path, payload in _snapshot_candidates(base_dir):
         if _snapshot_source_health_matches(
             payload,
             selected_provider=selected_provider,
@@ -462,10 +491,7 @@ def latest_retained_event_data_snapshot(
     """Return latest usable retained event snapshot regardless of trading date."""
     selected = selected_provider or provider
     normalized_tickers = _normalize_tickers(tickers)
-    for path in _snapshot_file_paths(base_dir):
-        payload = _load_snapshot(path)
-        if payload is None:
-            continue
+    for path, payload in _snapshot_candidates(base_dir):
         if _snapshot_covers_provider_tickers(
             payload,
             selected_provider=selected,
@@ -483,10 +509,7 @@ def _latest_provider_mismatch_event_data_snapshot(
     tickers: tuple[str, ...],
     base_dir: Path | None = None,
 ) -> tuple[dict[str, Any] | None, Path | None]:
-    for path in _snapshot_file_paths(base_dir):
-        payload = _load_snapshot(path)
-        if payload is None:
-            continue
+    for path, payload in _snapshot_candidates(base_dir):
         if _snapshot_provider_mismatch_matches(
             payload,
             selected_provider=selected_provider,
