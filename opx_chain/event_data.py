@@ -318,11 +318,10 @@ def _snapshot_usable_tickers(payload: dict[str, Any]) -> tuple[str, ...] | None:
             ticker = str(record.get("ticker") or "").strip().upper()
             if ticker:
                 usable.append(ticker)
-        if usable or not payload.get("tickers_succeeded"):
-            try:
-                return _normalize_tickers(usable)
-            except ValueError:
-                return None
+        try:
+            return _normalize_tickers(usable)
+        except ValueError:
+            return None
     try:
         return _normalize_tickers(payload.get("tickers_succeeded") or ())
     except ValueError:
