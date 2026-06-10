@@ -709,6 +709,8 @@ def build_ticker_volatility_features(  # pylint: disable=too-many-arguments,too-
     }
     if SOURCE_ERROR in source_statuses:
         source_status = SOURCE_ERROR
+    elif SOURCE_STALE in source_statuses:
+        source_status = SOURCE_STALE
     elif source_statuses == {SOURCE_READY}:
         source_status = SOURCE_READY
     elif source_statuses <= {SOURCE_MISSING}:

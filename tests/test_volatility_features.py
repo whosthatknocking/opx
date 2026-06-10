@@ -13,6 +13,7 @@ from opx_chain.volatility_features import (
     SOURCE_MISSING,
     SOURCE_PARTIAL,
     SOURCE_READY,
+    SOURCE_STALE,
     build_iv_features,
     build_price_volatility_features,
     build_ticker_volatility_features,
@@ -528,6 +529,32 @@ def test_build_ticker_volatility_features_combines_price_and_iv() -> None:
     assert snapshot["schema_version"] == 1
     assert snapshot["source_status"] == SOURCE_PARTIAL
     assert snapshot["price"]["source_status"] == SOURCE_READY
+    assert snapshot["iv"]["source_status"] == SOURCE_PARTIAL
+
+
+def test_build_ticker_volatility_features_stale_price_status_wins_over_partial() -> None:
+    stale_history = _history()
+    stale_history["date"] = pd.bdate_range(end="2026-05-01", periods=len(stale_history))
+    iv_history = pd.DataFrame(
+        {
+            "ticker": ["TSLA"] * 25,
+            "representative_iv": [0.20 + index * 0.002 for index in range(25)],
+            "dte_bucket": ["ALL"] * 25,
+            "observation_date": ["2026-04-01"] * 25,
+        }
+    )
+
+    snapshot = build_ticker_volatility_features(
+        ticker="TSLA",
+        chain=_chain(),
+        price_history=stale_history,
+        iv_history=iv_history,
+        provider="marketdata",
+        as_of=date(2026, 5, 22),
+    )
+
+    assert snapshot["source_status"] == SOURCE_STALE
+    assert snapshot["price"]["source_status"] == SOURCE_STALE
     assert snapshot["iv"]["source_status"] == SOURCE_PARTIAL
 
 
