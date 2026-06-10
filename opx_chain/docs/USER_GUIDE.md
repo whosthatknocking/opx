@@ -456,6 +456,7 @@ Provider availability:
   - `next_earnings_date_is_estimated`, `next_earnings_date_source`, and `next_earnings_date_confidence` preserve that upcoming Market Data `reportDate` values are estimates until the company has reported
   - `next_ex_div_date_source` and `next_ex_div_date_confidence` preserve that dividend dates came from Market Data `exDate`
   - day counts for expirations, earnings, and ex-dividend dates use the `America/New_York` market calendar so the CSV stays aligned with Market Data's documented date semantics
+  - non-quota event endpoint failures leave the affected event fields blank and log `marketdata_event_degraded`; authentication and quota/rate-limit failures still abort so operator-facing provider-limit state is not hidden
 - `yfinance`: event fields are populated on a best-effort basis from Yahoo metadata (`info`, `calendar`, and `dividends`) when future dates are available, with source/confidence metadata when a date is selected; blanks remain expected when Yahoo does not expose usable future event data
 - `massive`: all event fields are blank for this provider
 

@@ -1158,8 +1158,11 @@ def test_marketdata_provider_parses_numeric_event_dates_in_market_timezone(monke
     assert events["next_earnings_date_confidence"] == "estimated"
 
 
-def test_marketdata_provider_load_ticker_events_raises_on_earnings_api_failure(monkeypatch):
-    """Unexpected earnings API failures should surface as provider errors."""
+def test_marketdata_provider_load_ticker_events_degrades_earnings_api_failure(
+    monkeypatch,
+    caplog,
+):
+    """Unexpected earnings API failures should not block dividend event data."""
     patch_marketdata_client(monkeypatch)
     monkeypatch.setattr(
         "opx_chain.providers.marketdata.get_runtime_config",
@@ -1167,18 +1170,38 @@ def test_marketdata_provider_load_ticker_events_raises_on_earnings_api_failure(m
     )
     provider = MarketDataProvider()
     client = fake_client(provider)
+    market_tz = ZoneInfo("America/New_York")
+    ex_div_ts = int(datetime(2026, 4, 18, tzinfo=market_tz).timestamp())
+    client._dividend_payload = {  # pylint: disable=protected-access
+        "s": "ok",
+        "exDate": [ex_div_ts],
+        "amount": [0.88],
+    }
 
     def exploding_earnings(_sym, **_kw):
         raise RuntimeError("API unreachable")
 
     client.stocks = type("StocksResource", (), {"earnings": exploding_earnings})()
 
-    with pytest.raises(RuntimeError, match="MarketData earnings request failed for TSLA"):
-        provider.load_ticker_events("TSLA")
+    with caplog.at_level("WARNING", logger="opx_chain.providers.marketdata"):
+        events = provider.load_ticker_events("TSLA")
+
+    assert events["next_earnings_date"] is None
+    assert events["next_earnings_date_is_estimated"] is None
+    assert events["next_earnings_date_source"] is None
+    assert events["next_earnings_date_confidence"] is None
+    assert events["next_ex_div_date"] == "2026-04-18"
+    assert events["next_ex_div_date_source"] == "marketdata.exDate"
+    assert events["next_ex_div_date_confidence"] == "confirmed"
+    assert events["dividend_amount"] == pytest.approx(0.88)
+    assert "marketdata_event_degraded ticker=TSLA event=earnings" in caplog.text
 
 
-def test_marketdata_provider_load_ticker_events_raises_on_dividend_api_failure(monkeypatch):
-    """Unexpected dividend API failures should surface as provider errors."""
+def test_marketdata_provider_load_ticker_events_degrades_dividend_api_failure(
+    monkeypatch,
+    caplog,
+):
+    """Unexpected dividend API failures should not block earnings event data."""
 
     class ExplodingDividendClient(FakeMarketDataClient):  # pylint: disable=missing-class-docstring,too-few-public-methods
         def _make_request(self, _method, url, *_args, **_kwargs):
@@ -1199,9 +1222,31 @@ def test_marketdata_provider_load_ticker_events_raises_on_dividend_api_failure(m
         lambda: make_runtime_config(today=date(2026, 4, 16)),
     )
     provider = MarketDataProvider()
+    client = fake_client(provider)
+    client.stocks = type(
+        "StocksResource",
+        (),
+        {
+            "earnings": lambda _self, _sym, **_kw: type(
+                "StockEarnings",
+                (),
+                {"reportDate": ["2026-04-30"], "reportedEPS": [None], "s": "ok"},
+            )(),
+        },
+    )()
 
-    with pytest.raises(RuntimeError, match="MarketData dividends request failed for TSLA"):
-        provider.load_ticker_events("TSLA")
+    with caplog.at_level("WARNING", logger="opx_chain.providers.marketdata"):
+        events = provider.load_ticker_events("TSLA")
+
+    assert events["next_earnings_date"] == "2026-04-30"
+    assert events["next_earnings_date_is_estimated"] is True
+    assert events["next_earnings_date_source"] == "marketdata.reportDate"
+    assert events["next_earnings_date_confidence"] == "estimated"
+    assert events["next_ex_div_date"] is None
+    assert events["next_ex_div_date_source"] is None
+    assert events["next_ex_div_date_confidence"] is None
+    assert pd.isna(events["dividend_amount"])
+    assert "marketdata_event_degraded ticker=TSLA event=dividends" in caplog.text
 
 
 def test_base_provider_load_ticker_events_returns_blank_defaults():

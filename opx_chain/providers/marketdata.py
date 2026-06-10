@@ -1,6 +1,6 @@
 """Market Data provider implementation backed by the official SDK."""
 
-# pylint: disable=missing-kwoa
+# pylint: disable=missing-kwoa,too-many-lines
 
 from __future__ import annotations
 
@@ -49,6 +49,7 @@ from opx_chain.utils import coerce_float, finite_float_or_none, normalize_timest
 CALLER_USER_AGENT = f"opx-chain/{SCRIPT_VERSION}"
 _SDK_LOGGER_SUFFIX = "providers.marketdata.sdk"
 _SDK_LOGGER_NAME = logger_name(_SDK_LOGGER_SUFFIX)
+_LOGGER = get_logger("providers.marketdata")
 TRANSIENT_REQUEST_EXCEPTIONS = (
     *TRANSIENT_BASE_EXCEPTIONS,
     httpx.TimeoutException,
@@ -825,8 +826,29 @@ class MarketDataProvider(DataProvider):
     def load_ticker_events(self, ticker: str) -> dict:
         """Fetch upcoming earnings and dividend event data from the Market Data API."""
         today = get_runtime_config().today
-        next_earnings = self._fetch_next_earnings_event(ticker, today)
-        next_ex_div, dividend_amount = self._fetch_next_dividend(ticker, today)
+        ticker_upper = ticker.upper()
+        try:
+            next_earnings = self._fetch_next_earnings_event(ticker, today)
+        except (ProviderAuthenticationError, ProviderQuotaError):
+            raise
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            _LOGGER.warning(
+                "marketdata_event_degraded ticker=%s event=earnings reason=%s",
+                ticker_upper,
+                exc,
+            )
+            next_earnings = _BLANK_EVENT_DATE
+        try:
+            next_ex_div, dividend_amount = self._fetch_next_dividend(ticker, today)
+        except (ProviderAuthenticationError, ProviderQuotaError):
+            raise
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            _LOGGER.warning(
+                "marketdata_event_degraded ticker=%s event=dividends reason=%s",
+                ticker_upper,
+                exc,
+            )
+            next_ex_div, dividend_amount = _BLANK_EVENT_DATE, np.nan
         return {
             "next_earnings_date": next_earnings.value,
             "next_earnings_date_is_estimated": next_earnings.is_estimated,
