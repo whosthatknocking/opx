@@ -330,12 +330,13 @@ def _require_requested_ticker_identity(frame: pd.DataFrame, ticker: str) -> None
         )
 
 
-def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements,broad-exception-caught
+def fetch_ticker_option_chain(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches,too-many-statements,broad-exception-caught
     ticker,
     logger=None,
     validation_findings=None,
     filtered_row_counts=None,
     position_set: PositionSet | None = None,
+    skip_events: bool = False,
 ):
     """Fetch and normalize all near-term option chains for one ticker."""
     provider = None
@@ -413,17 +414,30 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-locals,too-many-branc
             exp_msg += f"  skipped={skipped_total}"
         _emit_fetch_info(exp_msg, logger=logger)
 
-        events_key = f"events:{cache_scope}:{ticker}"
-        events = _cache_get_json(cache, events_key)
-        if events is None:
-            events = provider.load_ticker_events(ticker)
-            _cache_put_json(cache, events_key, events, config.provider_events_ttl, logger=logger)
-        earnings = events.get("next_earnings_date") or "none"
-        ex_div = events.get("next_ex_div_date") or "none"
-        _emit_fetch_info(
-            f"{ticker}: events  earnings={earnings}  ex_div={ex_div}",
-            logger=logger,
-        )
+        if skip_events:
+            events = {}
+            _emit_fetch_info(
+                f"{ticker}: events skipped by caller",
+                logger=logger,
+            )
+        else:
+            events_key = f"events:{cache_scope}:{ticker}"
+            events = _cache_get_json(cache, events_key)
+            if events is None:
+                events = provider.load_ticker_events(ticker)
+                _cache_put_json(
+                    cache,
+                    events_key,
+                    events,
+                    config.provider_events_ttl,
+                    logger=logger,
+                )
+            earnings = events.get("next_earnings_date") or "none"
+            ex_div = events.get("next_ex_div_date") or "none"
+            _emit_fetch_info(
+                f"{ticker}: events  earnings={earnings}  ex_div={ex_div}",
+                logger=logger,
+            )
         for expiration_date in usable_expirations:
             chain_key = f"chain:{cache_scope}:{ticker}:{expiration_date}"
             chain = _cache_get_chain(cache, chain_key)

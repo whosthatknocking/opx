@@ -1,4 +1,5 @@
 """CLI entrypoint for fetching option chains and writing the export CSV."""
+# pylint: disable=too-many-lines
 
 import argparse
 from dataclasses import fields as dataclass_fields, replace
@@ -549,13 +550,14 @@ def _run_log_reference(run_id: str, log_path: Path) -> bytes:
     return dumps_strict_json(payload, sort_keys=True, indent=2).encode()
 
 
-def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-branches,too-many-locals,too-many-statements
     config,
     positions_path: Path | None,
     cli_override: str | None,
     *,
     dry_run: bool = False,
     price_context_only: bool = False,
+    skip_events: bool = False,
 ) -> None:
     """Execute the fetch pipeline. Lock must already be held by caller. Raises on failure."""
     logger = None
@@ -680,6 +682,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-branches,too-many-loca
                 validation_findings=validation_findings,
                 filtered_row_counts=filtered_row_counts,
                 position_set=position_set,
+                skip_events=skip_events,
             )
             if not ticker_df.empty:
                 ticker_frames.append(ticker_df)
@@ -844,6 +847,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     data_provider: str | None = None,
     dry_run: bool = False,
     price_context_only: bool = False,
+    skip_events: bool = False,
 ) -> None:
     """Trigger a fresh option-chain fetch and write the result to storage.
 
@@ -858,6 +862,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     data_provider: override settings.data_provider for this run only.
     dry_run: validate config, positions, and storage without API calls or writes.
     price_context_only: fetch/cache daily-OHLCV context without option-chain export.
+    skip_events: skip provider corporate-event fetches during option-chain export.
 
     Raises RuntimeError if another fetch run is already active.
     Raises RuntimeError if the fetch produces no data.
@@ -869,6 +874,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
         price_context_only,
         field_name="run_fetch.price_context_only",
     )
+    skip_events = _coerce_run_fetch_bool(skip_events, field_name="run_fetch.skip_events")
     if positions_path is not None:
         if isinstance(positions_path, str):
             positions_path = coerce_path(positions_path, field_name="run_fetch.positions_path")
@@ -901,6 +907,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
                     cli_override=None,
                     dry_run=True,
                     price_context_only=price_context_only,
+                    skip_events=skip_events,
                 )
         finally:
             set_runtime_config_override(previous_override)
@@ -919,6 +926,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
                 cli_override=None,
                 dry_run=dry_run,
                 price_context_only=price_context_only,
+                skip_events=skip_events,
             )
     finally:
         set_runtime_config_override(previous_override)

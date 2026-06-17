@@ -428,6 +428,33 @@ def test_fetch_ticker_option_chain_prepares_provider_before_loading(monkeypatch)
     assert provider.prepared_tickers == ["TEST"]
 
 
+def test_fetch_ticker_option_chain_can_skip_provider_events(monkeypatch, capsys):
+    """Downstream callers can defer corporate-event enrichment to a separate overlay."""
+
+    class EventCountingProvider(StubProvider):
+        """Provider that fails the test if option-chain fetch asks for events."""
+
+        def load_ticker_events(self, ticker):
+            raise AssertionError(f"unexpected event fetch for {ticker}")
+
+    monkeypatch.setattr(fetch, "get_data_provider", EventCountingProvider)
+    monkeypatch.setattr(
+        fetch,
+        "get_runtime_config",
+        lambda: make_runtime_config(today=pd.Timestamp("2026-03-20").date()),
+    )
+
+    result = fetch.fetch_ticker_option_chain("TEST", skip_events=True)
+
+    stdout = capsys.readouterr().out
+    assert not result.empty
+    assert "TEST: events skipped by caller" in stdout
+    assert result["next_earnings_date"].isna().all()
+    assert result["next_ex_div_date"].isna().all()
+    assert result["days_to_earnings"].isna().all()
+    assert result["days_to_ex_div"].isna().all()
+
+
 def test_fetch_ticker_option_chain_reuses_serialized_snapshot_cache(monkeypatch, tmp_path):
     """Cached snapshots should avoid repeated provider calls and remain timestamp-like."""
     class CountingProvider(StubProvider):

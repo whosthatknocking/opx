@@ -164,7 +164,7 @@ def test_main_prints_rows_written_after_saved(monkeypatch, capsys, tmp_path: Pat
         "fetch_ticker_option_chain",
         (
             lambda ticker, logger=None, validation_findings=None,
-            filtered_row_counts=None, position_set=None: frames[ticker]
+            filtered_row_counts=None, position_set=None, skip_events=False: frames[ticker]
         ),
     )
 
@@ -211,7 +211,9 @@ def test_main_uses_storage_dir_for_side_csv_and_lock(monkeypatch, tmp_path: Path
         "fetch_ticker_option_chain",
         (
             lambda ticker, logger=None, validation_findings=None,
-            filtered_row_counts=None, position_set=None: pd.DataFrame([make_export_row()])
+            filtered_row_counts=None, position_set=None, skip_events=False: pd.DataFrame(
+                [make_export_row()]
+            )
         ),
     )
 
@@ -260,7 +262,9 @@ def test_main_recovers_stale_running_runs_before_count(monkeypatch, capsys, tmp_
         "fetch_ticker_option_chain",
         (
             lambda ticker, logger=None, validation_findings=None,
-            filtered_row_counts=None, position_set=None: pd.DataFrame([make_export_row()])
+            filtered_row_counts=None, position_set=None, skip_events=False: pd.DataFrame(
+                [make_export_row()]
+            )
         ),
     )
     def stub_write_options_csv(ticker_frames, output_path):
@@ -379,7 +383,9 @@ def test_main_uses_utc_timestamp_for_side_csv_filename(monkeypatch, tmp_path: Pa
         "fetch_ticker_option_chain",
         (
             lambda ticker, logger=None, validation_findings=None,
-            filtered_row_counts=None, position_set=None: pd.DataFrame([make_export_row()])
+            filtered_row_counts=None, position_set=None, skip_events=False: pd.DataFrame(
+                [make_export_row()]
+            )
         ),
     )
 
@@ -418,7 +424,7 @@ def test_main_prints_config_fallbacks(monkeypatch, capsys, tmp_path: Path):
         "fetch_ticker_option_chain",
         (
             lambda ticker, logger=None, validation_findings=None,
-            filtered_row_counts=None, position_set=None: pd.DataFrame()
+            filtered_row_counts=None, position_set=None, skip_events=False: pd.DataFrame()
         ),
     )
 
@@ -453,11 +459,13 @@ def test_main_can_disable_filters_via_cli(monkeypatch, capsys, tmp_path: Path):
         validation_findings=None,
         filtered_row_counts=None,
         position_set=None,
+        skip_events=False,
     ):
         del logger
         del validation_findings
         del filtered_row_counts
         del position_set
+        del skip_events
         captured["config"] = get_process_runtime_config()
         return pd.DataFrame([make_export_row()])
 
@@ -502,11 +510,13 @@ def test_main_can_enable_filters_via_cli(monkeypatch, capsys, tmp_path: Path):
         validation_findings=None,
         filtered_row_counts=None,
         position_set=None,
+        skip_events=False,
     ):
         del logger
         del validation_findings
         del filtered_row_counts
         del position_set
+        del skip_events
         captured["config"] = get_process_runtime_config()
         return pd.DataFrame([make_export_row()])
 
@@ -550,10 +560,12 @@ def test_main_prints_validation_summary_before_export(monkeypatch, capsys, tmp_p
         validation_findings=None,
         filtered_row_counts=None,
         position_set=None,
+        skip_events=False,
     ):
         del logger
         del filtered_row_counts
         del position_set
+        del skip_events
         if validation_findings is not None:
             validation_findings.extend(
                 validate_option_rows(
@@ -606,7 +618,9 @@ def test_main_can_disable_validation_summary(monkeypatch, capsys, tmp_path: Path
         "fetch_ticker_option_chain",
         (
             lambda ticker, logger=None, validation_findings=None,
-            filtered_row_counts=None, position_set=None: pd.DataFrame([make_export_row()])
+            filtered_row_counts=None, position_set=None, skip_events=False: pd.DataFrame(
+                [make_export_row()]
+            )
         ),
     )
     monkeypatch.setattr(
@@ -643,7 +657,7 @@ def test_main_returns_failure_when_no_data_is_fetched(monkeypatch, tmp_path: Pat
         "fetch_ticker_option_chain",
         (
             lambda ticker, logger=None, validation_findings=None,
-            filtered_row_counts=None, position_set=None: pd.DataFrame()
+            filtered_row_counts=None, position_set=None, skip_events=False: pd.DataFrame()
         ),
     )
 
@@ -690,7 +704,9 @@ def test_main_keeps_lock_file_after_success(monkeypatch, tmp_path: Path):
         "fetch_ticker_option_chain",
         (
             lambda ticker, logger=None, validation_findings=None,
-            filtered_row_counts=None, position_set=None: pd.DataFrame([make_export_row()])
+            filtered_row_counts=None, position_set=None, skip_events=False: pd.DataFrame(
+                [make_export_row()]
+            )
         ),
     )
     monkeypatch.setattr(
@@ -726,11 +742,13 @@ def test_main_handles_ctrl_c_gracefully(monkeypatch, capsys, tmp_path: Path):
         validation_findings=None,
         filtered_row_counts=None,
         position_set=None,
+        skip_events=False,
     ):
         del logger
         del validation_findings
         del filtered_row_counts
         del position_set
+        del skip_events
         raise KeyboardInterrupt
 
     monkeypatch.setattr(main, "fetch_ticker_option_chain", interrupting_fetch)
@@ -778,6 +796,7 @@ def test_main_can_override_positions_path_via_cli(monkeypatch, capsys, tmp_path:
         validation_findings=None,
         filtered_row_counts=None,
         position_set=None,
+        **_kwargs,
     ):
         del logger
         del validation_findings
@@ -844,6 +863,7 @@ def test_main_adds_option_only_position_tickers(monkeypatch, capsys, tmp_path: P
         validation_findings=None,
         filtered_row_counts=None,
         position_set=None,
+        **_kwargs,
     ):
         del logger
         del validation_findings

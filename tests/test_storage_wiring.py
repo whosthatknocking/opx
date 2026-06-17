@@ -1173,6 +1173,7 @@ def test_run_fetch_stale_quote_seconds_rejects_malformed_values(tmp_path: Path, 
     [
         ("run_fetch.dry_run", {"dry_run": "false"}),
         ("run_fetch.price_context_only", {"price_context_only": "false"}),
+        ("run_fetch.skip_events", {"skip_events": "false"}),
     ],
 )
 def test_run_fetch_boolean_overrides_reject_false_like_strings(
@@ -1193,6 +1194,23 @@ def test_run_fetch_boolean_overrides_reject_false_like_strings(
             fetcher.run_fetch(**kwargs)
 
     mocks[3].assert_not_called()  # acquire_fetcher_lock
+
+
+def test_run_fetch_skip_events_forwards_to_ticker_fetch(tmp_path: Path):
+    """run_fetch(skip_events=True) should suppress event fetches in ticker work."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True, tickers=("AAPL",))
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in patches]
+        fetcher.run_fetch(skip_events=True)
+
+    mock_fetch = mocks[9]
+    mock_fetch.assert_called_once()
+    assert mock_fetch.call_args.kwargs["skip_events"] is True
 
 
 def test_run_fetch_dry_run_makes_no_api_calls_and_no_writes(tmp_path: Path):

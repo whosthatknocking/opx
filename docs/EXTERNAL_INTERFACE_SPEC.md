@@ -441,6 +441,7 @@ run_fetch(
 )
 run_fetch(dry_run=True)
 run_fetch(price_context_only=True)
+run_fetch(skip_events=True)
 ```
 
 `run_fetch()` is the in-process equivalent of invoking `opx-fetch` as a
@@ -483,6 +484,12 @@ artifact, and skips option-chain export. This also enables price-context fetchin
 for the run, regardless of the config default.
 The result is written as a standalone versioned JSON artifact under the runs
 directory and does not change the option-chain dataset schema.
+
+**`skip_events` (optional `bool`)** — when `True`, skips provider corporate-event
+fetches during option-chain export and leaves event-derived columns blank. This
+is for downstream orchestrators that apply a separate, authoritative Event Data
+snapshot after chain acquisition. The default is `False`, preserving normal
+`opx-fetch` behavior.
 
 **Errors:**
 
