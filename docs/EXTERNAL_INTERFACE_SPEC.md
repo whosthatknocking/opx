@@ -279,7 +279,7 @@ layer without shelling out or scanning the filesystem directly.
 The stable public surface is:
 
 ```python
-from opx_chain.fetcher import run_fetch
+from opx_chain.fetcher import fetch_ticker_option_chain, run_fetch
 from opx_chain.backup_inventory import (
     BackupDependencyRecord,
     BackupInventory,
@@ -326,7 +326,13 @@ from opx_chain.option_types import (
     option_type_label,
 )
 from opx_chain.paths import get_runs_dir
-from opx_chain.config import DEFAULT_PRICE_CONTEXT_MAX_AGE_DAYS, US_MARKET_TIMEZONE
+from opx_chain.config import (
+    DEFAULT_PRICE_CONTEXT_MAX_AGE_DAYS,
+    US_MARKET_TIMEZONE,
+    get_runtime_config,
+    get_runtime_config_override,
+    set_runtime_config_override,
+)
 from opx_chain import SCHEMA_VERSION
 ```
 
@@ -401,10 +407,19 @@ normalization vocabulary for downstream consumers that need to compare option
 rows, positions, and generated candidate identifiers using the same canonical
 `call` / `put` values as `opx-chain`.
 
-`get_runs_dir`, `DEFAULT_PRICE_CONTEXT_MAX_AGE_DAYS`, and
-`US_MARKET_TIMEZONE` are stable runtime-environment helpers for locating
-`opx-chain` run artifacts and applying the same US-market calendar boundary as
-the fetcher.
+`fetch_ticker_option_chain` is the stable single-ticker option-chain fetch
+helper for downstream consumers that need a narrow provider-owned rescue path
+without creating a full fetch run. Prefer `run_fetch` for normal dataset
+collection; use `fetch_ticker_option_chain` only when the caller already owns
+run lifecycle, storage, and any operator-facing policy.
+
+`get_runs_dir`, `DEFAULT_PRICE_CONTEXT_MAX_AGE_DAYS`,
+`US_MARKET_TIMEZONE`, `get_runtime_config`, `get_runtime_config_override`, and
+`set_runtime_config_override` are stable runtime-environment helpers for
+locating `opx-chain` run artifacts, applying the same US-market calendar
+boundary as the fetcher, and temporarily binding an in-process fetch to a
+specific runtime configuration. Downstream callers that set a runtime override
+must restore the previous override in a `finally` block.
 
 All other names within `opx_chain.fetcher`, `opx_chain.normalize`, `opx_chain.provider`,
 and other internal modules are not part of the stable interface and may change across
