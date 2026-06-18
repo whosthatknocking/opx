@@ -153,6 +153,34 @@ def test_run_event_fetch_disabled_skips_same_as_chain_resolution(tmp_path) -> No
     assert result.payload["tickers_requested"] == ["TSLA"]
 
 
+@pytest.mark.parametrize("bad_enabled", ["false", "0", 0, 1, None])
+def test_run_event_fetch_rejects_non_bool_enabled_values(
+    monkeypatch,
+    tmp_path,
+    bad_enabled,
+) -> None:
+    def fail_provider(_name):
+        raise AssertionError("provider should not be resolved for invalid enabled")
+
+    monkeypatch.setattr(
+        "opx_chain.event_data.get_data_provider_by_name",
+        fail_provider,
+    )
+
+    with pytest.raises(ValueError, match="enabled must be true or false"):
+        run_event_fetch(
+            enabled=bad_enabled,  # type: ignore[arg-type]
+            provider="same_as_chain",
+            chain_provider=None,
+            fetch_mode="auto",
+            trading_date=date(2026, 6, 1),
+            tickers=("TSLA",),
+            ticker_universe_source="new_run_portfolio_and_ticker_intents",
+            base_dir=tmp_path,
+            now=datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc),
+        )
+
+
 def test_run_event_fetch_not_supported_preserves_ticker_universe_source(tmp_path) -> None:
     result = run_event_fetch(
         provider="same_as_chain",

@@ -48,7 +48,9 @@ def _normalize_tickers(tickers: list[str] | tuple[str, ...] | set[str]) -> tuple
         raise ValueError("analyst forecast tickers must be a list, tuple, or set")
     normalized: list[str] = []
     for raw in tickers:
-        ticker = str(raw or "").strip().upper()
+        if not isinstance(raw, str):
+            raise ValueError("analyst forecast ticker members must be strings")
+        ticker = raw.strip().upper()
         if not ticker:
             continue
         if not is_valid_ticker(ticker):

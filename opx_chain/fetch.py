@@ -34,6 +34,7 @@ from opx_chain.providers.base import (
 )
 from opx_chain.providers import get_data_provider
 from opx_chain.runlog import get_logger
+from opx_chain.runtime_args import strict_bool_arg
 from opx_chain.storage.cache import get_provider_cache
 from opx_chain.timestamps import format_utc_z_seconds
 from opx_chain.utils import is_finite_positive_number
@@ -339,6 +340,7 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-arguments,too-many-po
     skip_events: bool = False,
 ):
     """Fetch and normalize all near-term option chains for one ticker."""
+    skip_events = strict_bool_arg(skip_events, name="skip_events")
     provider = None
     try:
         config = get_runtime_config()

@@ -455,6 +455,22 @@ def test_fetch_ticker_option_chain_can_skip_provider_events(monkeypatch, capsys)
     assert result["days_to_ex_div"].isna().all()
 
 
+@pytest.mark.parametrize("bad_skip_events", ["false", "0", 0, 1, None])
+def test_fetch_ticker_option_chain_rejects_non_bool_skip_events(
+    monkeypatch,
+    bad_skip_events,
+):
+    """Direct fetch helper mode flags should fail before provider work."""
+
+    def fail_provider():
+        raise AssertionError("provider should not be resolved for invalid skip_events")
+
+    monkeypatch.setattr(fetch, "get_data_provider", fail_provider)
+
+    with pytest.raises(ValueError, match="skip_events must be true or false"):
+        fetch.fetch_ticker_option_chain("TEST", skip_events=bad_skip_events)
+
+
 def test_fetch_ticker_option_chain_reuses_serialized_snapshot_cache(monkeypatch, tmp_path):
     """Cached snapshots should avoid repeated provider calls and remain timestamp-like."""
     class CountingProvider(StubProvider):

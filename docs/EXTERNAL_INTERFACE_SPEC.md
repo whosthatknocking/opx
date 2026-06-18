@@ -489,7 +489,8 @@ directory and does not change the option-chain dataset schema.
 fetches during option-chain export and leaves event-derived columns blank. This
 is for downstream orchestrators that apply a separate, authoritative Event Data
 snapshot after chain acquisition. The default is `False`, preserving normal
-`opx-fetch` behavior.
+`opx-fetch` behavior. Programmatic callers must pass a literal boolean; string
+or integer boolean-like values are rejected before provider work.
 
 **Errors:**
 
@@ -782,7 +783,9 @@ Disabled Event Data returns `status="disabled"` without resolving provider-
 specific requirements such as `same_as_chain`, without requiring a chain
 provider, and without making provider calls. Disabled payloads set `provider`
 and `resolved_provider` to `null` while still recording the requested ticker
-universe and `ticker_universe_source`.
+universe and `ticker_universe_source`. Programmatic callers must pass a literal
+boolean for `enabled`; string or integer boolean-like values are rejected before
+provider resolution.
 
 `summarize_latest_event_data(...)` is read-only source health. Same-trading-day
 usable snapshots return `freshness_label="CURRENT_TRADING_DAY"` and
@@ -832,6 +835,9 @@ payload = fetch_analyst_forecasts(
     trading_date=date(2026, 6, 4),
 )
 ```
+
+The `tickers` argument must be a list, tuple, or set of ticker strings. Non-string
+members are rejected before provider lookup.
 
 The returned payload is JSON-safe and provider-neutral:
 

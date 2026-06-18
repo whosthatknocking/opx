@@ -4,6 +4,7 @@ from __future__ import annotations
 # pylint: disable=missing-module-docstring,missing-class-docstring
 # pylint: disable=missing-function-docstring,duplicate-code
 
+import math
 from datetime import date, datetime, timezone
 
 import pytest
@@ -149,3 +150,20 @@ def test_fetch_analyst_forecasts_rejects_invalid_inputs() -> None:
             ["GOOGL"],
             trading_date=datetime(2026, 6, 4, 14, 0, tzinfo=timezone.utc),
         )
+
+
+@pytest.mark.parametrize("bad_member", [True, False, math.nan, math.inf, None, 0])
+def test_fetch_analyst_forecasts_rejects_non_string_ticker_members(
+    monkeypatch,
+    bad_member,
+) -> None:
+    def fail_provider(_name):
+        raise AssertionError("provider should not be resolved for invalid tickers")
+
+    monkeypatch.setattr(
+        "opx_chain.analyst_forecast.get_data_provider_by_name",
+        fail_provider,
+    )
+
+    with pytest.raises(ValueError, match="ticker members must be strings"):
+        fetch_analyst_forecasts([bad_member])  # type: ignore[list-item]

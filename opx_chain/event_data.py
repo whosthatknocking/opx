@@ -26,6 +26,7 @@ from opx_chain.metrics import add_event_risk_flags
 from opx_chain.paths import get_data_dir
 from opx_chain.providers import get_data_provider_by_name
 from opx_chain.providers.base import date_arg
+from opx_chain.runtime_args import strict_bool_arg
 from opx_chain.storage.atomic import atomic_write_text
 from opx_chain.tickers import is_valid_ticker
 from opx_chain.timestamps import format_utc_z_seconds, parse_iso_datetime
@@ -722,6 +723,7 @@ def run_event_fetch(
     now: datetime | None = None,
 ) -> EventDataSnapshotResult:
     """Resolve or fetch a durable event snapshot for a run."""
+    resolved_enabled = strict_bool_arg(enabled, name="enabled")
     mode = normalize_event_data_fetch_mode(fetch_mode)
     resolved_date = (
         date_arg(trading_date, name="trading_date")
@@ -733,7 +735,7 @@ def run_event_fetch(
     if now is not None and now.tzinfo is None:
         raise ValueError("now must be timezone-aware UTC")
     current_time = now or datetime.now(timezone.utc)
-    if not enabled:
+    if not resolved_enabled:
         payload = {
             "artifact_type": "event_data_snapshot",
             "schema_version": EVENT_DATA_SCHEMA_VERSION,
