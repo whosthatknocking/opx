@@ -875,6 +875,8 @@ The returned payload is JSON-safe and provider-neutral:
 ```
 
 Supported provider ids are explicit. Version 1 supports only `yfinance`.
+`tickers` must be a list, tuple, or set of ticker strings; scalar strings such
+as `"NVDA"` are rejected instead of being interpreted as character tickers.
 Unsupported provider ids, invalid tickers, naive `fetched_at` datetimes, or
 `datetime.datetime` values passed as `trading_date` raise `ValueError` before
 provider calls. Provider errors are row-scoped when possible so one failed

@@ -138,6 +138,8 @@ def test_fetch_analyst_forecasts_reports_ambiguous_recommendation_period(monkeyp
 def test_fetch_analyst_forecasts_rejects_invalid_inputs() -> None:
     with pytest.raises(ValueError, match="analyst_forecast_provider"):
         fetch_analyst_forecasts(["GOOGL"], provider="factset")
+    with pytest.raises(ValueError, match="tickers must be a list, tuple, or set"):
+        fetch_analyst_forecasts("NVDA")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="invalid analyst forecast ticker"):
         fetch_analyst_forecasts(["bad ticker"])
     with pytest.raises(ValueError, match="timezone-aware"):

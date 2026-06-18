@@ -44,6 +44,8 @@ def normalize_analyst_forecast_provider(provider: str | None, *, default: str = 
 
 
 def _normalize_tickers(tickers: list[str] | tuple[str, ...] | set[str]) -> tuple[str, ...]:
+    if not isinstance(tickers, (list, tuple, set)):
+        raise ValueError("analyst forecast tickers must be a list, tuple, or set")
     normalized: list[str] = []
     for raw in tickers:
         ticker = str(raw or "").strip().upper()
