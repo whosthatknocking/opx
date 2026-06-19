@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 # pylint: disable=missing-module-docstring,missing-class-docstring
-# pylint: disable=missing-function-docstring,duplicate-code
+# pylint: disable=missing-function-docstring,duplicate-code,too-many-lines
 
 import json
+import math
 import os
 from dataclasses import replace
 from datetime import date, datetime, timezone
@@ -175,6 +176,33 @@ def test_run_event_fetch_rejects_non_bool_enabled_values(
             fetch_mode="auto",
             trading_date=date(2026, 6, 1),
             tickers=("TSLA",),
+            ticker_universe_source="new_run_portfolio_and_ticker_intents",
+            base_dir=tmp_path,
+            now=datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc),
+        )
+
+
+@pytest.mark.parametrize("bad_member", [True, False, math.nan, math.inf, None, 0])
+def test_run_event_fetch_rejects_non_string_ticker_members(
+    monkeypatch,
+    tmp_path,
+    bad_member,
+) -> None:
+    def fail_provider(_name):
+        raise AssertionError("provider should not be resolved for invalid tickers")
+
+    monkeypatch.setattr(
+        "opx_chain.event_data.get_data_provider_by_name",
+        fail_provider,
+    )
+
+    with pytest.raises(ValueError, match="ticker members must be strings"):
+        run_event_fetch(
+            provider="yfinance",
+            chain_provider="marketdata",
+            fetch_mode="fetch_latest",
+            trading_date=date(2026, 6, 1),
+            tickers=(bad_member,),  # type: ignore[arg-type]
             ticker_universe_source="new_run_portfolio_and_ticker_intents",
             base_dir=tmp_path,
             now=datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc),

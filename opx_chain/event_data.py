@@ -127,9 +127,13 @@ def event_data_latest_path(base_dir: Path | None = None) -> Path:
 
 
 def _normalize_tickers(tickers: tuple[str, ...] | list[str] | set[str]) -> tuple[str, ...]:
+    if not isinstance(tickers, (list, tuple, set)):
+        raise ValueError("event-data tickers must be a list, tuple, or set")
     normalized: list[str] = []
     for raw in tickers:
-        ticker = str(raw or "").strip().upper()
+        if not isinstance(raw, str):
+            raise ValueError("event-data ticker members must be strings")
+        ticker = raw.strip().upper()
         if not ticker:
             continue
         if not is_valid_ticker(ticker):
