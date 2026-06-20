@@ -661,6 +661,45 @@ def test_price_history_read_helpers_validate_dates(tmp_path) -> None:
         )
 
 
+def test_price_history_store_rejects_datetime_date_boundaries(tmp_path) -> None:
+    """Date-only read/write helper arguments must not truncate datetimes."""
+    store = PriceHistoryStore(tmp_path / "price-history.db")
+    timestamp = datetime(2026, 3, 20, 15, 30, tzinfo=timezone.utc)
+
+    with pytest.raises(ValueError, match="end_date must be a date"):
+        store.load_recent_bars(
+            provider="stub",
+            ticker="AAA",
+            lookback_days=30,
+            end_date=timestamp,
+        )
+    with pytest.raises(ValueError, match="start_date must be a date"):
+        store.load_bars(
+            provider="stub",
+            ticker="AAA",
+            start_date=timestamp,
+            end_date=date(2026, 3, 20),
+        )
+    with pytest.raises(ValueError, match="end_date must be a date"):
+        store.load_bars(
+            provider="stub",
+            ticker="AAA",
+            start_date=date(2026, 3, 1),
+            end_date=timestamp,
+        )
+    with pytest.raises(ValueError, match="latest_trading_date must be a date"):
+        store.record_sync(
+            provider="stub",
+            ticker="AAA",
+            lookback_days=30,
+            status="ok",
+            requested_lookback_days=30,
+            latest_trading_date=timestamp,
+            fetched_rows=3,
+            stored_rows=3,
+        )
+
+
 def test_price_history_store_normalizes_provider_case(tmp_path) -> None:
     """Provider-scoped writes should remain visible through normalized provider keys."""
     store = PriceHistoryStore(tmp_path / "price-history.db")

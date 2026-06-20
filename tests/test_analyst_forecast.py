@@ -152,6 +152,23 @@ def test_fetch_analyst_forecasts_rejects_invalid_inputs() -> None:
         )
 
 
+@pytest.mark.parametrize("bad_provider", [False, 0])
+def test_fetch_analyst_forecasts_rejects_falsey_non_string_provider(
+    monkeypatch,
+    bad_provider,
+) -> None:
+    def fail_provider(_name):
+        raise AssertionError("provider should not be resolved for invalid provider")
+
+    monkeypatch.setattr(
+        "opx_chain.analyst_forecast.get_data_provider_by_name",
+        fail_provider,
+    )
+
+    with pytest.raises(ValueError, match="analyst_forecast_provider must be a string"):
+        fetch_analyst_forecasts(["GOOGL"], provider=bad_provider)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("bad_member", [True, False, math.nan, math.inf, None, 0])
 def test_fetch_analyst_forecasts_rejects_non_string_ticker_members(
     monkeypatch,

@@ -677,6 +677,27 @@ def test_iv_history_historical_sessions_roll_weekend_end_date(tmp_path):
     assert result.estimated_requests == 2
 
 
+def test_iv_history_historical_backfill_rejects_datetime_end_date(tmp_path):
+    """Historical request boundaries are date-only and must not truncate datetimes."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    config = make_runtime_config(
+        data_provider="marketdata",
+        tickers=("TSLA",),
+        today=date(2026, 5, 24),
+    )
+
+    with pytest.raises(ValueError, match="end_date must be YYYY-MM-DD"):
+        run_iv_history_backfill(
+            providers=("marketdata",),
+            fetch_historical=True,
+            sessions=2,
+            end_date=datetime(2026, 5, 22, 15, 30, tzinfo=timezone.utc),
+            config=config,
+            store=store,
+            dry_run=True,
+        )
+
+
 def test_iv_history_historical_fetch_ingests_marketdata_snapshots(tmp_path):
     """Historical fetch should write provider/ticker/date IV aggregates."""
     store = IVHistoryStore(tmp_path / "iv-history.db")

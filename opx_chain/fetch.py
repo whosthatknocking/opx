@@ -36,6 +36,7 @@ from opx_chain.providers import get_data_provider
 from opx_chain.runlog import get_logger
 from opx_chain.runtime_args import strict_bool_arg
 from opx_chain.storage.cache import get_provider_cache
+from opx_chain.tickers import is_valid_ticker
 from opx_chain.timestamps import format_utc_z_seconds
 from opx_chain.utils import is_finite_positive_number
 from opx_chain.validate import validate_option_rows
@@ -331,6 +332,17 @@ def _require_requested_ticker_identity(frame: pd.DataFrame, ticker: str) -> None
         )
 
 
+def _normalize_requested_ticker(value) -> str:
+    if not isinstance(value, str):
+        raise ValueError("ticker must be a non-empty string")
+    ticker = value.strip().upper()
+    if not ticker:
+        raise ValueError("ticker must be a non-empty string")
+    if not is_valid_ticker(ticker):
+        raise ValueError("ticker must be a valid stock ticker symbol")
+    return ticker
+
+
 def fetch_ticker_option_chain(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches,too-many-statements,broad-exception-caught
     ticker,
     logger=None,
@@ -340,6 +352,7 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-arguments,too-many-po
     skip_events: bool = False,
 ):
     """Fetch and normalize all near-term option chains for one ticker."""
+    ticker = _normalize_requested_ticker(ticker)
     skip_events = strict_bool_arg(skip_events, name="skip_events")
     provider = None
     try:

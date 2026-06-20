@@ -91,7 +91,9 @@ def normalize_event_data_provider(
     default: str = "yfinance",
 ) -> tuple[str, str]:
     """Return `(selected_provider, resolved_provider)` for event data."""
-    selected = str(provider or default).strip().lower()
+    if provider is not None and not isinstance(provider, str):
+        raise ValueError("event_data_provider must be a string")
+    selected = (provider or default).strip().lower()
     if selected not in EVENT_DATA_PROVIDER_CHOICES:
         allowed = ", ".join(sorted(EVENT_DATA_PROVIDER_CHOICES))
         raise ValueError(f"event_data_provider must be one of: {allowed}")
@@ -109,7 +111,9 @@ def normalize_event_data_provider(
 
 def normalize_event_data_fetch_mode(value: str | None, *, default: str = "auto") -> str:
     """Return a supported event-data fetch mode."""
-    mode = str(value or default).strip().lower()
+    if value is not None and not isinstance(value, str):
+        raise ValueError("event_data_fetch_mode must be a string")
+    mode = (value or default).strip().lower()
     if mode not in EVENT_DATA_FETCH_MODES:
         allowed = ", ".join(sorted(EVENT_DATA_FETCH_MODES))
         raise ValueError(f"event_data_fetch_mode must be one of: {allowed}")

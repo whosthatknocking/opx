@@ -471,6 +471,22 @@ def test_fetch_ticker_option_chain_rejects_non_bool_skip_events(
         fetch.fetch_ticker_option_chain("TEST", skip_events=bad_skip_events)
 
 
+@pytest.mark.parametrize("bad_ticker", [None, False, 0, "", "bad ticker", "AAA1"])
+def test_fetch_ticker_option_chain_rejects_invalid_ticker_before_provider(
+    monkeypatch,
+    bad_ticker,
+):
+    """Direct ticker helper input should fail before provider/cache work."""
+
+    def fail_provider():
+        raise AssertionError("provider should not be resolved for invalid ticker")
+
+    monkeypatch.setattr(fetch, "get_data_provider", fail_provider)
+
+    with pytest.raises(ValueError, match="ticker must be"):
+        fetch.fetch_ticker_option_chain(bad_ticker)  # type: ignore[arg-type]
+
+
 def test_fetch_ticker_option_chain_reuses_serialized_snapshot_cache(monkeypatch, tmp_path):
     """Cached snapshots should avoid repeated provider calls and remain timestamp-like."""
     class CountingProvider(StubProvider):

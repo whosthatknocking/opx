@@ -167,6 +167,8 @@ def _normalize_ticker_value(value: object) -> str:
 def _parse_end_date(value: str | date | None, default_end_date: date) -> date:
     if value is None:
         return default_end_date
+    if isinstance(value, datetime):
+        raise ValueError("end_date must be YYYY-MM-DD")
     if isinstance(value, date):
         return value
     try:

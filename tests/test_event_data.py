@@ -182,6 +182,60 @@ def test_run_event_fetch_rejects_non_bool_enabled_values(
         )
 
 
+@pytest.mark.parametrize("bad_provider", [False, 0])
+def test_run_event_fetch_rejects_falsey_non_string_provider(
+    monkeypatch,
+    tmp_path,
+    bad_provider,
+) -> None:
+    def fail_provider(_name):
+        raise AssertionError("provider should not be resolved for invalid provider")
+
+    monkeypatch.setattr(
+        "opx_chain.event_data.get_data_provider_by_name",
+        fail_provider,
+    )
+
+    with pytest.raises(ValueError, match="event_data_provider must be a string"):
+        run_event_fetch(
+            provider=bad_provider,  # type: ignore[arg-type]
+            chain_provider="marketdata",
+            fetch_mode="auto",
+            trading_date=date(2026, 6, 1),
+            tickers=("TSLA",),
+            ticker_universe_source="new_run_portfolio_and_ticker_intents",
+            base_dir=tmp_path,
+            now=datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc),
+        )
+
+
+@pytest.mark.parametrize("bad_fetch_mode", [False, 0])
+def test_run_event_fetch_rejects_falsey_non_string_fetch_mode(
+    monkeypatch,
+    tmp_path,
+    bad_fetch_mode,
+) -> None:
+    def fail_provider(_name):
+        raise AssertionError("provider should not be resolved for invalid fetch mode")
+
+    monkeypatch.setattr(
+        "opx_chain.event_data.get_data_provider_by_name",
+        fail_provider,
+    )
+
+    with pytest.raises(ValueError, match="event_data_fetch_mode must be a string"):
+        run_event_fetch(
+            provider="yfinance",
+            chain_provider="marketdata",
+            fetch_mode=bad_fetch_mode,  # type: ignore[arg-type]
+            trading_date=date(2026, 6, 1),
+            tickers=("TSLA",),
+            ticker_universe_source="new_run_portfolio_and_ticker_intents",
+            base_dir=tmp_path,
+            now=datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc),
+        )
+
+
 @pytest.mark.parametrize("bad_member", [True, False, math.nan, math.inf, None, 0])
 def test_run_event_fetch_rejects_non_string_ticker_members(
     monkeypatch,

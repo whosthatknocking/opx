@@ -36,7 +36,9 @@ _PERIOD_ORDER = ("0m", "-1m", "-2m", "-3m")
 
 def normalize_analyst_forecast_provider(provider: str | None, *, default: str = "yfinance") -> str:
     """Return a supported analyst-forecast provider id."""
-    resolved = str(provider or default).strip().lower()
+    if provider is not None and not isinstance(provider, str):
+        raise ValueError("analyst_forecast_provider must be a string")
+    resolved = (provider or default).strip().lower()
     if resolved not in ANALYST_FORECAST_SUPPORTED_PROVIDERS:
         allowed = ", ".join(sorted(ANALYST_FORECAST_SUPPORTED_PROVIDERS))
         raise ValueError(f"analyst_forecast_provider must be one of: {allowed}")

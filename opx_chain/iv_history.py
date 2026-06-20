@@ -150,7 +150,7 @@ def _non_negative_int(value: object, *, name: str) -> int:
 
 def _date_arg(value: object, *, name: str) -> date:
     if isinstance(value, datetime):
-        return value.date()
+        raise ValueError(f"{name} must be a date")
     if isinstance(value, date):
         return value
     raise ValueError(f"{name} must be a date")

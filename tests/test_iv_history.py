@@ -1,6 +1,6 @@
 """Tests for the durable implied-volatility history store."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
@@ -143,6 +143,36 @@ def test_iv_history_store_has_observation_date_validates_date(tmp_path) -> None:
             provider="marketdata",
             ticker="TSLA",
             observation_date="2026-05-22",
+        )
+
+
+def test_iv_history_store_rejects_datetime_date_boundaries(tmp_path) -> None:
+    """Date-only read/write helper arguments must not truncate datetimes."""
+    store = IVHistoryStore(tmp_path / "iv-history.db")
+    timestamp = datetime(2026, 5, 22, 15, 30, tzinfo=timezone.utc)
+
+    with pytest.raises(ValueError, match="end_date must be a date"):
+        store.load_history(
+            provider="marketdata",
+            ticker="TSLA",
+            lookback_days=365,
+            end_date=timestamp,
+        )
+    with pytest.raises(ValueError, match="observation_date must be a date"):
+        store.has_observation_date(
+            provider="marketdata",
+            ticker="TSLA",
+            observation_date=timestamp,
+        )
+    with pytest.raises(ValueError, match="observation_date must be a date"):
+        store.record_sync(
+            dataset_id="dataset-1",
+            provider="marketdata",
+            run_id=None,
+            status="INGESTED",
+            observation_date=timestamp,
+            source_rows=3,
+            stored_rows=8,
         )
 
 
