@@ -310,7 +310,30 @@ from opx_chain.iv_history import (
     build_iv_observation_frame,
     get_iv_history_store,
 )
+from opx_chain.event_data import (
+    EVENT_DATA_FETCH_MODES,
+    EVENT_DATA_FRESHNESS_POLICY,
+    EVENT_DATA_PROVIDER_CHOICES,
+    EVENT_DATA_SCHEMA_VERSION,
+    EVENT_DATA_SUPPORTED_PROVIDERS,
+    clear_event_columns,
+    normalize_event_data_fetch_mode,
+    normalize_event_data_provider,
+    overlay_event_snapshot,
+    run_event_fetch,
+    summarize_latest_event_data,
+)
+from opx_chain.price_history import get_price_history_store
 from opx_chain.volatility_features import (
+    DTE_BUCKETS,
+    MIN_IV_HISTORY_OBSERVATIONS,
+    SOURCE_ERROR,
+    SOURCE_INSUFFICIENT_HISTORY,
+    SOURCE_MISSING,
+    SOURCE_PARTIAL,
+    SOURCE_READY,
+    SOURCE_STALE,
+    VOLATILITY_FEATURE_METHOD,
     VOLATILITY_FEATURE_SCHEMA_VERSION,
     build_iv_features,
     build_price_volatility_features,
@@ -320,12 +343,14 @@ from opx_chain.volatility_features import (
 )
 from opx_chain.option_types import (
     OPTION_TYPE_CALL,
+    OPTION_TYPE_CALL_LABEL,
     OPTION_TYPE_PUT,
+    OPTION_TYPE_PUT_LABEL,
     OPTION_TYPES,
     normalize_option_type,
     option_type_label,
 )
-from opx_chain.paths import get_runs_dir
+from opx_chain.paths import get_data_dir, get_runs_dir
 from opx_chain.config import (
     DEFAULT_PRICE_CONTEXT_MAX_AGE_DAYS,
     US_MARKET_TIMEZONE,
@@ -356,13 +381,23 @@ names. The payload is context-only market-data metadata; downstream strategy
 packages own run lifecycle, artifact reuse, rendering, validation, and any
 operator-facing advisory policy.
 
-`VOLATILITY_FEATURE_SCHEMA_VERSION`, `build_price_volatility_features`,
-`load_price_volatility_features`, `build_iv_features`,
-`build_ticker_volatility_features`, and `dte_bucket` are the stable volatility
-feature surface for downstream advisory consumers. These helpers expose
-stored daily-price realized-volatility features, current-chain IV context, and
-optional IV-history percentiles without requiring consumers to inspect
-`price-history.db` or option-chain internals directly.
+`get_price_history_store` is the stable durable daily-OHLCV history-store
+factory for downstream consumers that need to pass provider-scoped price
+history into public volatility feature builders. Consumers should still prefer
+feature-builder inputs over direct table queries.
+
+`VOLATILITY_FEATURE_SCHEMA_VERSION`, `VOLATILITY_FEATURE_METHOD`,
+`build_price_volatility_features`, `load_price_volatility_features`,
+`build_iv_features`, `build_ticker_volatility_features`, `dte_bucket`,
+`DTE_BUCKETS`, and `MIN_IV_HISTORY_OBSERVATIONS` are the stable volatility
+feature surface for downstream advisory consumers. These helpers and constants
+expose stored daily-price realized-volatility features, current-chain IV
+context, optional IV-history percentiles, DTE-bucket vocabulary, and minimum
+history thresholds without requiring consumers to inspect `price-history.db` or
+option-chain internals directly. `SOURCE_READY`, `SOURCE_PARTIAL`,
+`SOURCE_INSUFFICIENT_HISTORY`, `SOURCE_STALE`, `SOURCE_MISSING`, and
+`SOURCE_ERROR` are the stable source-health vocabulary emitted by these feature
+builders.
 
 `IVHistoryStore`, `build_iv_observation_frame`, and `get_iv_history_store` are
 the stable durable-IV history surface for downstream consumers that need to
@@ -401,11 +436,22 @@ summarizes every `records[].price_context_staleness_status` value; mixed
 artifacts use `MIXED:<sorted statuses>` such as `MIXED:ERROR,FRESH,STALE`
 rather than reporting only the first record.
 
-`OPTION_TYPE_CALL`, `OPTION_TYPE_PUT`, `OPTION_TYPES`,
-`normalize_option_type`, and `option_type_label` are the stable option-type
-normalization vocabulary for downstream consumers that need to compare option
-rows, positions, and generated candidate identifiers using the same canonical
-`call` / `put` values as `opx-chain`.
+`EVENT_DATA_SCHEMA_VERSION`, `EVENT_DATA_SUPPORTED_PROVIDERS`,
+`EVENT_DATA_PROVIDER_CHOICES`, `EVENT_DATA_FETCH_MODES`,
+`EVENT_DATA_FRESHNESS_POLICY`, `normalize_event_data_provider`,
+`normalize_event_data_fetch_mode`, `run_event_fetch`,
+`summarize_latest_event_data`, `overlay_event_snapshot`, and
+`clear_event_columns` are the stable Event Data snapshot and overlay surface.
+Downstream consumers may use them to configure provider/fetch-mode selection,
+inspect retained source health, and apply a dedicated Event Data snapshot onto
+an already-fetched option chain without depending on provider-native fields.
+
+`OPTION_TYPE_CALL`, `OPTION_TYPE_PUT`, `OPTION_TYPE_CALL_LABEL`,
+`OPTION_TYPE_PUT_LABEL`, `OPTION_TYPES`, `normalize_option_type`, and
+`option_type_label` are the stable option-type normalization vocabulary for
+downstream consumers that need to compare option rows, positions, and generated
+candidate identifiers using the same canonical `call` / `put` values and
+uppercase display/storage labels as `opx-chain`.
 
 `fetch_ticker_option_chain` is the stable single-ticker option-chain fetch
 helper for downstream consumers that need a narrow provider-owned rescue path
@@ -413,13 +459,13 @@ without creating a full fetch run. Prefer `run_fetch` for normal dataset
 collection; use `fetch_ticker_option_chain` only when the caller already owns
 run lifecycle, storage, and any operator-facing policy.
 
-`get_runs_dir`, `DEFAULT_PRICE_CONTEXT_MAX_AGE_DAYS`,
+`get_data_dir`, `get_runs_dir`, `DEFAULT_PRICE_CONTEXT_MAX_AGE_DAYS`,
 `US_MARKET_TIMEZONE`, `get_runtime_config`, `get_runtime_config_override`, and
 `set_runtime_config_override` are stable runtime-environment helpers for
-locating `opx-chain` run artifacts, applying the same US-market calendar
-boundary as the fetcher, and temporarily binding an in-process fetch to a
-specific runtime configuration. Downstream callers that set a runtime override
-must restore the previous override in a `finally` block.
+locating `opx-chain` data and run artifacts, applying the same US-market
+calendar boundary as the fetcher, and temporarily binding an in-process fetch
+to a specific runtime configuration. Downstream callers that set a runtime
+override must restore the previous override in a `finally` block.
 
 All other names within `opx_chain.fetcher`, `opx_chain.normalize`, `opx_chain.provider`,
 and other internal modules are not part of the stable interface and may change across
@@ -744,7 +790,12 @@ option-chain CSV schema. Downstream consumers call `opx_chain.event_data`
 helpers directly:
 
 ```python
-from opx_chain.event_data import run_event_fetch, summarize_latest_event_data
+from opx_chain.event_data import (
+    normalize_event_data_fetch_mode,
+    normalize_event_data_provider,
+    run_event_fetch,
+    summarize_latest_event_data,
+)
 
 result = run_event_fetch(
     enabled=True,
@@ -965,7 +1016,9 @@ integers, and stale-day windows must be non-negative integers. When IV-history
 frames carry `observation_date` or `date`, minimum-history readiness is based on
 distinct observation dates, not duplicate rows for the same date.
 
-`source_status` uses the stable vocabulary `READY`, `PARTIAL`,
+`source_status` uses the stable source-health constants `SOURCE_READY`,
+`SOURCE_PARTIAL`, `SOURCE_INSUFFICIENT_HISTORY`, `SOURCE_STALE`,
+`SOURCE_MISSING`, and `SOURCE_ERROR`, whose values are `READY`, `PARTIAL`,
 `INSUFFICIENT_HISTORY`, `STALE`, `MISSING`, and `ERROR`. Strategy-layer policy
 decides whether these features are advisory, affect ranking, or are ignored;
 `opx-chain` only supplies data facts and readiness metadata.
