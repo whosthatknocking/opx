@@ -474,7 +474,7 @@ releases.
 ### 3.2 Triggering a fresh fetch programmatically
 
 ```python
-from opx_chain.fetcher import run_fetch
+from opx_chain.fetcher import TickerFetchProgress, run_fetch
 
 run_fetch(positions_path=Path("/path/to/runs/<run_id>/positions.csv"))
 run_fetch(tickers=("TSLA", "NVDA"))
@@ -488,6 +488,11 @@ run_fetch(
 run_fetch(dry_run=True)
 run_fetch(price_context_only=True)
 run_fetch(skip_events=True)
+
+def report_progress(progress: TickerFetchProgress) -> None:
+    print(progress.ticker, progress.current, progress.total, progress.status)
+
+run_fetch(tickers=("TSLA", "NVDA"), progress_callback=report_progress)
 ```
 
 `run_fetch()` is the in-process equivalent of invoking `opx-fetch` as a
@@ -537,6 +542,14 @@ is for downstream orchestrators that apply a separate, authoritative Event Data
 snapshot after chain acquisition. The default is `False`, preserving normal
 `opx-fetch` behavior. Programmatic callers must pass a literal boolean; string
 or integer boolean-like values are rejected before provider work.
+
+**`progress_callback` (optional callable)** — receives immutable
+`TickerFetchProgress(ticker, current, total, status)` events immediately before
+and after each ticker fetch. `status` is `starting` or `completed`; `current`
+counts completed tickers, so the starting event for the first ticker is `0`.
+Callback exceptions are logged and ignored because progress telemetry must not
+abort or invalidate a provider fetch. Dry-run and price-context-only modes do
+not emit ticker progress.
 
 **Errors:**
 

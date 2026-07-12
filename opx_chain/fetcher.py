@@ -2,7 +2,8 @@
 # pylint: disable=too-many-lines
 
 import argparse
-from dataclasses import fields as dataclass_fields, replace
+from collections.abc import Callable
+from dataclasses import dataclass, fields as dataclass_fields, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
@@ -72,6 +73,40 @@ _CONFIG_FINGERPRINT_EXCLUDED_FIELDS = frozenset(
         "viewer_port",
     }
 )
+
+
+@dataclass(frozen=True)
+class TickerFetchProgress:
+    """Structured progress emitted around each ticker in a normal fetch run."""
+
+    ticker: str
+    current: int
+    total: int
+    status: str
+
+
+TickerFetchProgressCallback = Callable[[TickerFetchProgress], None]
+
+
+def _emit_ticker_fetch_progress(
+    callback: TickerFetchProgressCallback | None,
+    progress: TickerFetchProgress,
+    logger,
+) -> None:
+    if callback is None:
+        return
+    try:
+        callback(progress)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        if logger is not None:
+            logger.warning(
+                "ticker_progress_callback_failed ticker=%s current=%s total=%s status=%s error=%s",
+                progress.ticker,
+                progress.current,
+                progress.total,
+                progress.status,
+                compact_exception_summary(exc),
+            )
 
 
 def parse_args(argv=None):
@@ -558,6 +593,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
     dry_run: bool = False,
     price_context_only: bool = False,
     skip_events: bool = False,
+    progress_callback: TickerFetchProgressCallback | None = None,
 ) -> None:
     """Execute the fetch pipeline. Lock must already be held by caller. Raises on failure."""
     logger = None
@@ -674,7 +710,13 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
         ticker_frames = []
         validation_findings = []
         filtered_row_counts = []
-        for ticker in effective_tickers:
+        total_tickers = len(effective_tickers)
+        for ticker_index, ticker in enumerate(effective_tickers, start=1):
+            _emit_ticker_fetch_progress(
+                progress_callback,
+                TickerFetchProgress(ticker, ticker_index - 1, total_tickers, "starting"),
+                logger,
+            )
             counts_before = len(filtered_row_counts)
             ticker_df = fetch_ticker_option_chain(
                 ticker,
@@ -715,6 +757,11 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
                     status=str(fetch_status),
                     error_summary=attrs.get("fetch_error_summary"),
                 ))
+            _emit_ticker_fetch_progress(
+                progress_callback,
+                TickerFetchProgress(ticker, ticker_index, total_tickers, "completed"),
+                logger,
+            )
 
         filtered_out_rows = sum(filtered_row_counts)
         if logger:
@@ -839,7 +886,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
         raise
 
 
-def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-branches
     positions_path: Path | str | None = None,
     tickers: tuple[str, ...] | None = None,
     max_expiration_weeks: int | None = None,
@@ -848,6 +895,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     dry_run: bool = False,
     price_context_only: bool = False,
     skip_events: bool = False,
+    progress_callback: TickerFetchProgressCallback | None = None,
 ) -> None:
     """Trigger a fresh option-chain fetch and write the result to storage.
 
@@ -863,6 +911,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     dry_run: validate config, positions, and storage without API calls or writes.
     price_context_only: fetch/cache daily-OHLCV context without option-chain export.
     skip_events: skip provider corporate-event fetches during option-chain export.
+    progress_callback: receive non-blocking structured per-ticker progress events.
 
     Raises RuntimeError if another fetch run is already active.
     Raises RuntimeError if the fetch produces no data.
@@ -875,6 +924,8 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
         field_name="run_fetch.price_context_only",
     )
     skip_events = _coerce_run_fetch_bool(skip_events, field_name="run_fetch.skip_events")
+    if progress_callback is not None and not callable(progress_callback):
+        raise ConfigError("Config field 'run_fetch.progress_callback' must be callable.")
     if positions_path is not None:
         if isinstance(positions_path, str):
             positions_path = coerce_path(positions_path, field_name="run_fetch.positions_path")
@@ -908,6 +959,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
                     dry_run=True,
                     price_context_only=price_context_only,
                     skip_events=skip_events,
+                    progress_callback=progress_callback,
                 )
         finally:
             set_runtime_config_override(previous_override)
@@ -927,6 +979,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
                 dry_run=dry_run,
                 price_context_only=price_context_only,
                 skip_events=skip_events,
+                progress_callback=progress_callback,
             )
     finally:
         set_runtime_config_override(previous_override)

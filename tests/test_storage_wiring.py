@@ -949,6 +949,63 @@ def test_run_fetch_accepts_string_positions_path(tmp_path: Path):
     assert called_path == positions_file.expanduser()
 
 
+def test_run_fetch_emits_non_blocking_ticker_progress(tmp_path: Path):
+    """Programmatic callers receive truthful completed/total ticker counts."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True, tickers=("AAPL", "MSFT"))
+    patches = _fetcher_patches(tmp_path, config, backend)
+    events = []
+
+    with ExitStack() as stack:
+        for fetcher_patch in patches:
+            stack.enter_context(fetcher_patch)
+        fetcher.run_fetch(progress_callback=events.append)
+
+    assert events == [
+        fetcher.TickerFetchProgress("AAPL", 0, 2, "starting"),
+        fetcher.TickerFetchProgress("AAPL", 1, 2, "completed"),
+        fetcher.TickerFetchProgress("MSFT", 1, 2, "starting"),
+        fetcher.TickerFetchProgress("MSFT", 2, 2, "completed"),
+    ]
+
+
+def test_run_fetch_ignores_progress_callback_failures(tmp_path: Path):
+    """Progress instrumentation cannot abort a successful provider fetch."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True, tickers=("AAPL",))
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    def fail_progress(_progress):
+        raise RuntimeError("progress sink unavailable")
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(fetcher_patch) for fetcher_patch in patches]
+        fetcher.run_fetch(progress_callback=fail_progress)
+
+    logger = mocks[7].return_value[0]
+    assert logger.warning.call_count == 2
+    assert "ticker_progress_callback_failed" in logger.warning.call_args_list[0].args[0]
+
+
+def test_run_fetch_rejects_non_callable_progress_callback(tmp_path: Path):
+    """Malformed callback values fail before provider or storage work."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True)
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        for fetcher_patch in patches:
+            stack.enter_context(fetcher_patch)
+        with pytest.raises(ConfigError, match="run_fetch.progress_callback"):
+            fetcher.run_fetch(progress_callback=1)
+
+
 def test_run_fetch_tickers_override_replaces_config_tickers(tmp_path: Path):
     """run_fetch(tickers=...) must use the supplied tickers, not config.tickers."""
     from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
