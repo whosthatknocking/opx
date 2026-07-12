@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 from importlib import import_module
+import inspect
 from pathlib import Path
+
+from opx_chain.fetcher import run_fetch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +26,11 @@ PUBLIC_NAMES: dict[str, set[str]] = {
         "overlay_event_snapshot",
         "run_event_fetch",
         "summarize_latest_event_data",
+    },
+    "opx_chain.fetcher": {
+        "TickerFetchProgress",
+        "fetch_ticker_option_chain",
+        "run_fetch",
     },
     "opx_chain.option_types": {
         "OPTION_TYPE_CALL",
@@ -77,3 +85,11 @@ def test_external_interface_spec_lists_public_import_names() -> None:
             missing.append(module_name)
         missing.extend(sorted(name for name in names if name not in text))
     assert not missing
+
+
+def test_run_fetch_public_signature_includes_progress_callback() -> None:
+    """Downstream orchestrators require the structured progress callback."""
+    parameter = inspect.signature(run_fetch).parameters["progress_callback"]
+
+    assert parameter.default is None
+    assert parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
