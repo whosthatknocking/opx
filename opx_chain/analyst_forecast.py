@@ -10,6 +10,7 @@ import pandas as pd
 
 from opx_chain.providers import get_data_provider_by_name
 from opx_chain.providers.base import date_arg
+from opx_chain.runtime_args import timezone_aware_datetime_arg
 from opx_chain.tickers import is_valid_ticker
 from opx_chain.timestamps import format_utc_z_seconds
 from opx_chain.utils import finite_float_or_none
@@ -248,9 +249,11 @@ def fetch_analyst_forecasts(
 ) -> dict[str, Any]:
     """Fetch provider-neutral analyst forecast facts for ticker symbols."""
     provider_id = normalize_analyst_forecast_provider(provider)
-    if fetched_at is not None and fetched_at.tzinfo is None:
-        raise ValueError("fetched_at must be timezone-aware UTC")
-    generated_dt = fetched_at or datetime.now(timezone.utc)
+    generated_dt = (
+        timezone_aware_datetime_arg(fetched_at, name="fetched_at")
+        if fetched_at is not None
+        else datetime.now(timezone.utc)
+    )
     generated_at = format_utc_z_seconds(generated_dt)
     resolved_trading_date = (
         date_arg(trading_date, name="trading_date")

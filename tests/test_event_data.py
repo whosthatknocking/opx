@@ -330,6 +330,32 @@ def test_run_event_fetch_rejects_datetime_trading_date_before_provider_calls(
     assert not calls
 
 
+def test_run_event_fetch_rejects_non_datetime_now_before_provider_calls(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_provider(name: str):
+        calls.append(name)
+        return FakeEventProvider()
+
+    monkeypatch.setattr("opx_chain.event_data.get_data_provider_by_name", fake_provider)
+
+    with pytest.raises(ValueError, match="now must be a datetime"):
+        run_event_fetch(
+            provider="yfinance",
+            chain_provider="marketdata",
+            fetch_mode="fetch_latest",
+            trading_date=date(2026, 6, 1),
+            tickers=("TSLA",),
+            base_dir=tmp_path,
+            now="2026-06-01T14:00:00Z",  # type: ignore[arg-type]
+        )
+
+    assert not calls
+
+
 def test_run_event_fetch_payload_preserves_selected_and_resolved_provider(
     tmp_path,
     monkeypatch,
@@ -841,6 +867,25 @@ def test_overlay_event_snapshot_recomputes_event_flags(tmp_path, monkeypatch) ->
     assert overlaid.loc[0, "event_data_provider"] == "yfinance"
     assert overlaid.loc[0, "event_data_snapshot_id"] == result.snapshot_id
     assert overlaid.loc[0, "event_data_status"] == "ready"
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"disabled": "false"}, "disabled must be true or false"),
+        ({"trading_date": "2026-06-01"}, "trading_date must be a date"),
+        (
+            {"trading_date": datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc)},
+            "trading_date must be a date, not a datetime",
+        ),
+    ],
+)
+def test_overlay_event_snapshot_rejects_malformed_controls_before_early_return(
+    kwargs,
+    message,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        overlay_event_snapshot(pd.DataFrame(), None, **kwargs)
 
 
 def test_clear_event_columns_marks_disabled() -> None:

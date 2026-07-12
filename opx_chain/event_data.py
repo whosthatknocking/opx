@@ -26,7 +26,7 @@ from opx_chain.metrics import add_event_risk_flags
 from opx_chain.paths import get_data_dir
 from opx_chain.providers import get_data_provider_by_name
 from opx_chain.providers.base import date_arg
-from opx_chain.runtime_args import strict_bool_arg
+from opx_chain.runtime_args import strict_bool_arg, timezone_aware_datetime_arg
 from opx_chain.storage.atomic import atomic_write_text
 from opx_chain.tickers import is_valid_ticker
 from opx_chain.timestamps import format_utc_z_seconds, parse_iso_datetime
@@ -740,9 +740,11 @@ def run_event_fetch(
     )
     normalized_tickers = _normalize_tickers(tickers)
     universe_source = _normalize_ticker_universe_source(ticker_universe_source)
-    if now is not None and now.tzinfo is None:
-        raise ValueError("now must be timezone-aware UTC")
-    current_time = now or datetime.now(timezone.utc)
+    current_time = (
+        timezone_aware_datetime_arg(now, name="now")
+        if now is not None
+        else datetime.now(timezone.utc)
+    )
     if not resolved_enabled:
         payload = {
             "artifact_type": "event_data_snapshot",
@@ -859,10 +861,15 @@ def overlay_event_snapshot(
     disabled: bool = False,
 ) -> pd.DataFrame:
     """Overlay snapshot event fields onto canonical option-chain rows."""
+    resolved_disabled = strict_bool_arg(disabled, name="disabled")
+    today = (
+        date_arg(trading_date, name="trading_date")
+        if trading_date is not None
+        else get_runtime_config().today
+    )
     result = df.copy()
     if result.empty or "underlying_symbol" not in result.columns:
         return result
-    today = trading_date or get_runtime_config().today
     if isinstance(snapshot, EventDataSnapshotResult):
         payload = snapshot.payload
     else:
@@ -870,9 +877,9 @@ def overlay_event_snapshot(
     provider = payload.get("provider")
     snapshot_id = payload.get("event_snapshot_id")
     fetched_at = payload.get("fetched_at")
-    status = payload.get("status") or ("disabled" if disabled else "missing")
-    by_ticker = {} if disabled else _event_fields_from_snapshot(payload)
-    status_by_ticker = {} if disabled else _event_status_from_snapshot(payload)
+    status = payload.get("status") or ("disabled" if resolved_disabled else "missing")
+    by_ticker = {} if resolved_disabled else _event_fields_from_snapshot(payload)
+    status_by_ticker = {} if resolved_disabled else _event_status_from_snapshot(payload)
 
     parts: list[pd.DataFrame] = []
     for ticker, ticker_frame in result.groupby(result["underlying_symbol"].astype(str).str.upper()):
