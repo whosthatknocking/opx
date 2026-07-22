@@ -18,6 +18,7 @@ from opx_chain.iv_history import (
 from opx_chain.iv_history_backfill import (
     format_backfill_result,
     format_recovery_result,
+    main,
     recover_iv_history_store,
     run_iv_history_backfill,
 )
@@ -1022,3 +1023,46 @@ def test_iv_history_recovery_rolls_back_failed_atomic_install(tmp_path, monkeypa
     assert calls == 3
     assert database_path.read_bytes() == corrupt_payload
     assert not list(tmp_path.glob("iv-history.corrupt-*.db"))
+
+
+def test_iv_history_recovery_cli_honors_shared_writer_lock(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    """Write-mode recovery must stop before work when the shared lock is busy."""
+    config = make_runtime_config(storage_dir=tmp_path)
+    monkeypatch.setattr(backfill_module, "get_runtime_config", lambda: config)
+    monkeypatch.setattr(
+        backfill_module,
+        "acquire_nonblocking_file_lock",
+        lambda _path: None,
+    )
+    monkeypatch.setattr(
+        backfill_module,
+        "recover_iv_history_store",
+        lambda **_kwargs: pytest.fail("recovery must not start without the lock"),
+    )
+
+    assert main(["--recover-corrupt"]) == 1
+    assert "Another fetcher/backfill run is already active" in capsys.readouterr().out
+
+
+def test_iv_history_recovery_cli_rejects_historical_provider_fetch(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    """Corrupt-store recovery must remain separate from provider-backed seeding."""
+    config = make_runtime_config(storage_dir=tmp_path)
+    monkeypatch.setattr(backfill_module, "get_runtime_config", lambda: config)
+    monkeypatch.setattr(
+        backfill_module,
+        "recover_iv_history_store",
+        lambda **_kwargs: pytest.fail("invalid recovery mode must not execute"),
+    )
+
+    assert main(["--recover-corrupt", "--fetch-historical", "--dry-run"]) == 1
+    output = capsys.readouterr().out
+    assert "cannot be combined with --fetch-historical" in output
+    assert "retained datasets only" in output
