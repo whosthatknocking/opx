@@ -238,6 +238,28 @@ Reingests datasets even when an `iv_history_syncs` record already exists. In
 historical-fetch mode, refetches provider/ticker/date rows even when local
 coverage already exists.
 
+**`--recover-corrupt` (optional)**
+
+Checks `iv-history.db` read-only before constructing a store. When the database
+is missing or fails SQLite integrity/schema validation, this mode builds a
+fresh temporary database exclusively from retained option-chain datasets. A
+successful write-mode recovery validates the rebuilt database, renames the
+original to `iv-history.corrupt-<UTC timestamp>.db`, and atomically installs the
+replacement. An empty replay, an invalid replacement, an active SQLite sidecar,
+or an install failure leaves or restores the original database in place.
+
+Recovery never calls a provider and cannot be combined with
+`--fetch-historical`. Use `--dry-run` to prove that retained datasets can
+produce rows without changing or opening the active database for writes. The
+summary pins this boundary as `provider requests: 0`:
+
+```bash
+opx-iv-history-backfill --recover-corrupt --providers marketdata --dry-run
+```
+
+After reviewing the candidate row count, omit `--dry-run` to quarantine and
+replace the unusable store. Write mode uses the shared fetch/backfill lock.
+
 **`--dry-run` (optional)**
 
 For retained-dataset replay, reads matching datasets and reports derived
@@ -306,8 +328,11 @@ from opx_chain.analyst_forecast import (
     fetch_analyst_forecasts,
 )
 from opx_chain.iv_history import (
+    IVHistoryIntegrity,
     IVHistoryStore,
     build_iv_observation_frame,
+    check_iv_history_integrity,
+    get_iv_history_db_path,
     get_iv_history_store,
 )
 from opx_chain.event_data import (
@@ -401,8 +426,12 @@ builders.
 
 `IVHistoryStore`, `build_iv_observation_frame`, and `get_iv_history_store` are
 the stable durable-IV history surface for downstream consumers that need to
-populate or inspect provider-scoped historical IV percentiles. Consumers should
-prefer `build_ticker_volatility_features(..., iv_history_store=...)` instead of
+populate or inspect provider-scoped historical IV percentiles.
+`get_iv_history_db_path`, `check_iv_history_integrity`, and
+`IVHistoryIntegrity` expose the producer-owned path and read-only
+`OK`/`ERROR`/`MISSING` health result without constructing the writable store.
+Consumers should prefer
+`build_ticker_volatility_features(..., iv_history_store=...)` instead of
 querying `iv-history.db` directly. Store read/write helpers validate provider,
 ticker, date, positive-window, sync-status, and row-count inputs at the public
 boundary and raise `ValueError` for malformed direct calls rather than returning

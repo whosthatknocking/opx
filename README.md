@@ -35,6 +35,10 @@ with `opx-fetch --price-context-only`.
 
 Use `opx-price-history-backfill` to refresh the durable daily-OHLCV history
 store without writing option-chain output, and `opx-iv-history-backfill` to
+replay or safely recover the durable implied-volatility history store from
+retained datasets. Use
+`opx-iv-history-backfill --recover-corrupt --dry-run` before replacing a
+malformed IV store; recovery performs no provider requests. The command can also
 replay retained datasets or explicitly seed MarketData historical IV aggregates.
 
 After a fetch run, `opx-check` verifies that every option contract in the default positions file appears in the latest output dataset and reports coverage gaps:

@@ -217,9 +217,12 @@ def test_external_interface_documents_iv_history_backfill_cli():
     assert "--limit" in section
     assert "--dataset-id" in section
     assert "--refresh" in section
+    assert "--recover-corrupt" in section
     assert "--dry-run" in section
     assert "(provider, ticker, observation_date, option_type, dte_bucket, delta_bucket)" in section
     assert "does not call provider APIs" in section
+    assert "provider requests: 0" in section
+    assert "iv-history.corrupt-<UTC timestamp>.db" in section
 
 
 def test_agents_architecture_map_lists_load_bearing_modules():

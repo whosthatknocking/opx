@@ -285,6 +285,22 @@ price before storing aggregate IV observations.
 Existing yfinance IV history can still coexist in the same store when replayed
 from retained yfinance datasets.
 
+If the command or a downstream Analytics view reports that `iv-history.db` is
+malformed, first run retained-only recovery planning:
+
+```bash
+opx-iv-history-backfill --recover-corrupt --providers marketdata --dry-run
+```
+
+The output explicitly reports zero provider requests and the candidate row
+count. If rows are available, repeat without `--dry-run`. The command builds and
+validates a separate database, preserves the malformed file as
+`iv-history.corrupt-<UTC timestamp>.db`, and atomically installs the rebuilt
+store. It refuses to replace the active file when retained data yields no rows,
+the candidate fails validation, or SQLite sidecars indicate an active writer.
+Do not add `--fetch-historical`: corrupt-store recovery intentionally uses only
+already-retained datasets.
+
 #### Shared Viewer Defaults
 
 - `viewer_host = "127.0.0.1"`: default bind host used by `opx-view`.

@@ -1,14 +1,16 @@
 """Backfill durable IV history from retained option-chain datasets."""
 
-# pylint: disable=duplicate-code,too-many-instance-attributes
+# pylint: disable=duplicate-code,too-many-instance-attributes,too-many-lines
 
 from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
+import os
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
+from uuid import uuid4
 
 import pandas as pd
 
@@ -23,6 +25,8 @@ from opx_chain.error_summary import compact_exception_summary
 from opx_chain.iv_history import (
     IVHistoryStore,
     build_iv_observation_frame,
+    check_iv_history_integrity,
+    get_iv_history_db_path,
     get_iv_history_store,
 )
 from opx_chain.locks import acquire_nonblocking_file_lock, release_file_lock
@@ -32,6 +36,7 @@ from opx_chain.storage._disk import retained_path_under_roots
 from opx_chain.storage.factory import get_storage_backend
 from opx_chain.storage.models import DatasetHandle, DatasetRecord
 from opx_chain.tickers import is_valid_ticker
+from opx_chain.timestamps import format_utc_compact, utc_now
 from opx_chain.utils import read_dataset_file
 
 _IV_HISTORY_COLUMNS = (
@@ -82,6 +87,20 @@ class IVHistoryBackfillResult:
     sessions: int | None = None
     end_date: str | None = None
     estimated_requests: int = 0
+
+
+@dataclass(frozen=True)
+class IVHistoryRecoveryResult:
+    """Outcome of rebuilding an unusable IV-history store from retained data."""
+
+    database_path: Path
+    original_status: str
+    original_error_summary: str | None
+    dry_run: bool
+    candidate_rows: int
+    recovered: bool
+    quarantine_path: Path | None
+    backfill: IVHistoryBackfillResult | None
 
 
 def _normalize_csv_values(
@@ -761,6 +780,161 @@ def run_iv_history_backfill(
     )
 
 
+def _temporary_recovery_path(database_path: Path) -> Path:
+    return database_path.with_name(
+        f".{database_path.name}.rebuild-{uuid4().hex}.tmp"
+    )
+
+
+def _quarantine_path(database_path: Path) -> Path:
+    timestamp = format_utc_compact(utc_now())
+    base = database_path.with_name(
+        f"{database_path.stem}.corrupt-{timestamp}{database_path.suffix}"
+    )
+    candidate = base
+    sequence = 2
+    while candidate.exists():
+        candidate = base.with_name(f"{base.stem}-{sequence}{base.suffix}")
+        sequence += 1
+    return candidate
+
+
+def _atomic_replace(source: Path, destination: Path) -> None:
+    source.replace(destination)
+
+
+def _fsync_directory(directory: Path) -> None:
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _active_sqlite_sidecars(database_path: Path) -> tuple[Path, ...]:
+    return tuple(
+        path
+        for path in (
+            Path(f"{database_path}-journal"),
+            Path(f"{database_path}-wal"),
+            Path(f"{database_path}-shm"),
+        )
+        if path.exists()
+    )
+
+
+# pylint: disable-next=too-many-arguments,too-many-locals
+def recover_iv_history_store(
+    *,
+    providers: Iterable[str] | None = None,
+    tickers: Iterable[str] | None = None,
+    lookback_days: int = 365,
+    limit: int = 200,
+    dataset_ids: Iterable[str] | None = None,
+    dry_run: bool = False,
+    config: RuntimeConfig | None = None,
+    storage=None,
+) -> IVHistoryRecoveryResult:
+    """Rebuild an unusable IV-history database from retained datasets only."""
+    base_config = config or get_runtime_config()
+    resolved_dry_run = _strict_bool(dry_run, name="dry_run")
+    database_path = get_iv_history_db_path(base_config)
+    original = check_iv_history_integrity(database_path)
+    if original.healthy:
+        return IVHistoryRecoveryResult(
+            database_path=database_path,
+            original_status=original.status,
+            original_error_summary=None,
+            dry_run=resolved_dry_run,
+            candidate_rows=0,
+            recovered=False,
+            quarantine_path=None,
+            backfill=None,
+        )
+
+    temporary_path = _temporary_recovery_path(database_path)
+    temporary_store: IVHistoryStore | None = None
+    backfill: IVHistoryBackfillResult | None = None
+    quarantine_path: Path | None = None
+    try:
+        temporary_store = IVHistoryStore(temporary_path)
+        backfill = run_iv_history_backfill(
+            providers=providers,
+            tickers=tickers,
+            lookback_days=lookback_days,
+            limit=limit,
+            refresh=True,
+            dry_run=resolved_dry_run,
+            dataset_ids=dataset_ids,
+            fetch_historical=False,
+            config=base_config,
+            store=temporary_store,
+            storage=storage,
+        )
+        candidate_rows = sum(
+            row.stored_rows for row in backfill.rows if row.status != BACKFILL_STATUS_ERROR
+        )
+        if candidate_rows <= 0:
+            raise RuntimeError(
+                "retained datasets produced no usable IV history rows; "
+                "the active database was not changed"
+            )
+        if resolved_dry_run:
+            return IVHistoryRecoveryResult(
+                database_path=database_path,
+                original_status=original.status,
+                original_error_summary=original.error_summary,
+                dry_run=True,
+                candidate_rows=candidate_rows,
+                recovered=False,
+                quarantine_path=None,
+                backfill=backfill,
+            )
+
+        temporary_store.close()
+        temporary_store = None
+        candidate_integrity = check_iv_history_integrity(temporary_path)
+        if not candidate_integrity.healthy:
+            raise RuntimeError(
+                "rebuilt IV history database failed integrity validation: "
+                f"{candidate_integrity.error_summary or candidate_integrity.status}"
+            )
+        sidecars = _active_sqlite_sidecars(database_path)
+        if sidecars:
+            names = ", ".join(path.name for path in sidecars)
+            raise RuntimeError(
+                "active IV history SQLite sidecar files are present; stop writers "
+                f"and retry recovery: {names}"
+            )
+
+        database_path.parent.mkdir(parents=True, exist_ok=True)
+        if database_path.exists():
+            quarantine_path = _quarantine_path(database_path)
+            _atomic_replace(database_path, quarantine_path)
+        try:
+            _atomic_replace(temporary_path, database_path)
+            _fsync_directory(database_path.parent)
+        except Exception:
+            if quarantine_path is not None and not database_path.exists():
+                _atomic_replace(quarantine_path, database_path)
+                _fsync_directory(database_path.parent)
+            raise
+        return IVHistoryRecoveryResult(
+            database_path=database_path,
+            original_status=original.status,
+            original_error_summary=original.error_summary,
+            dry_run=False,
+            candidate_rows=candidate_rows,
+            recovered=True,
+            quarantine_path=quarantine_path,
+            backfill=backfill,
+        )
+    finally:
+        if temporary_store is not None:
+            temporary_store.close()
+        temporary_path.unlink(missing_ok=True)
+
+
 def _format_tickers(tickers: tuple[str, ...]) -> str:
     return ",".join(tickers) if tickers else "-"
 
@@ -800,6 +974,28 @@ def format_backfill_result(result: IVHistoryBackfillResult) -> str:
         )
         if row.error_summary:
             lines.append(f"  error: {row.error_summary}")
+    return "\n".join(lines)
+
+
+def format_recovery_result(result: IVHistoryRecoveryResult) -> str:
+    """Return a compact operator-readable IV-history recovery summary."""
+    lines = [
+        "IV history recovery",
+        f"database: {result.database_path}",
+        f"original_status: {result.original_status}",
+        f"mode: {'dry-run' if result.dry_run else 'write'}",
+        "source: retained datasets (provider requests: 0)",
+        f"candidate_rows: {result.candidate_rows}",
+        f"recovered: {'yes' if result.recovered else 'no'}",
+    ]
+    if result.original_error_summary:
+        lines.append(f"original_error: {result.original_error_summary}")
+    if result.quarantine_path is not None:
+        lines.append(f"quarantine: {result.quarantine_path}")
+    if result.backfill is None:
+        lines.append("result: database is already healthy; no recovery needed")
+    else:
+        lines.extend(("", format_backfill_result(result.backfill)))
     return "\n".join(lines)
 
 
@@ -862,6 +1058,14 @@ def parse_args(argv=None):
         ),
     )
     parser.add_argument(
+        "--recover-corrupt",
+        action="store_true",
+        help=(
+            "Rebuild an unusable iv-history.db from retained datasets, quarantine "
+            "the original, and atomically install the validated replacement."
+        ),
+    )
+    parser.add_argument(
         "--sessions",
         type=int,
         default=20,
@@ -890,24 +1094,43 @@ def main(argv=None) -> int:
             print(f"Another fetcher/backfill run is already active: {lock_path}")
             return 1
     try:
-        result = run_iv_history_backfill(
-            providers=args.providers,
-            tickers=args.tickers,
-            lookback_days=args.lookback_days,
-            limit=args.limit,
-            dataset_ids=args.dataset_id,
-            fetch_historical=args.fetch_historical,
-            sessions=args.sessions,
-            end_date=args.end_date,
-            refresh=args.refresh,
-            dry_run=args.dry_run,
-            config=config,
-        )
+        if args.recover_corrupt:
+            if args.fetch_historical:
+                raise ValueError(
+                    "--recover-corrupt cannot be combined with --fetch-historical; "
+                    "recovery uses retained datasets only"
+                )
+            recovery = recover_iv_history_store(
+                providers=args.providers,
+                tickers=args.tickers,
+                lookback_days=args.lookback_days,
+                limit=args.limit,
+                dataset_ids=args.dataset_id,
+                dry_run=args.dry_run,
+                config=config,
+            )
+        else:
+            result = run_iv_history_backfill(
+                providers=args.providers,
+                tickers=args.tickers,
+                lookback_days=args.lookback_days,
+                limit=args.limit,
+                dataset_ids=args.dataset_id,
+                fetch_historical=args.fetch_historical,
+                sessions=args.sessions,
+                end_date=args.end_date,
+                refresh=args.refresh,
+                dry_run=args.dry_run,
+                config=config,
+            )
     except Exception as exc:  # pylint: disable=broad-exception-caught
         print(f"ERROR: {exc}")
         return 1
     finally:
         if lock_handle is not None:
             release_file_lock(lock_handle)
-    print(format_backfill_result(result))
+    if args.recover_corrupt:
+        print(format_recovery_result(recovery))
+    else:
+        print(format_backfill_result(result))
     return 0

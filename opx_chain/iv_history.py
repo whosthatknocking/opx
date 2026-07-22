@@ -24,6 +24,9 @@ from opx_chain.volatility_features import dte_bucket
 
 IV_HISTORY_SCHEMA_VERSION = 1
 IV_HISTORY_SCHEMA_MIGRATIONS: dict[int, str] = {}
+IV_HISTORY_INTEGRITY_ERROR = "ERROR"
+IV_HISTORY_INTEGRITY_MISSING = "MISSING"
+IV_HISTORY_INTEGRITY_OK = "OK"
 
 DELTA_BUCKET_ALL = "ALL"
 OPTION_TYPE_ALL = "ALL"
@@ -234,6 +237,20 @@ class IVHistorySync:
     source_rows: int
     stored_rows: int
     error_summary: str | None
+
+
+@dataclass(frozen=True)
+class IVHistoryIntegrity:
+    """Read-only integrity result for one durable IV-history database."""
+
+    path: Path
+    status: str
+    error_summary: str | None = None
+
+    @property
+    def healthy(self) -> bool:
+        """Return whether the database passed integrity and schema checks."""
+        return self.status == IV_HISTORY_INTEGRITY_OK
 
 
 class IVHistoryStore:
@@ -816,14 +833,84 @@ def get_iv_history_store(config=None) -> IVHistoryStore:
     return IVHistoryStore(_history_db_path(config))
 
 
+def get_iv_history_db_path(config=None) -> Path:
+    """Return the configured durable IV-history database path."""
+    return _history_db_path(config)
+
+
+def check_iv_history_integrity(db_path: Path) -> IVHistoryIntegrity:
+    """Validate an IV-history database without opening it for writes."""
+    path = Path(db_path)
+    if not path.is_file():
+        return IVHistoryIntegrity(
+            path=path,
+            status=IV_HISTORY_INTEGRITY_MISSING,
+            error_summary="IV history database does not exist",
+        )
+    try:
+        uri = path.resolve(strict=True).as_uri() + "?mode=ro&immutable=1"
+        with sqlite3.connect(uri, uri=True) as conn:
+            rows = conn.execute("PRAGMA quick_check").fetchall()
+            messages = tuple(str(row[0]) for row in rows)
+            if messages != ("ok",):
+                return IVHistoryIntegrity(
+                    path=path,
+                    status=IV_HISTORY_INTEGRITY_ERROR,
+                    error_summary="; ".join(messages) or "SQLite quick_check failed",
+                )
+            tables = {
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            required_tables = {
+                "_schema_meta",
+                "iv_observations",
+                "iv_history_syncs",
+            }
+            missing = sorted(required_tables - tables)
+            if missing:
+                return IVHistoryIntegrity(
+                    path=path,
+                    status=IV_HISTORY_INTEGRITY_ERROR,
+                    error_summary=(
+                        "missing IV history table(s): " + ", ".join(missing)
+                    ),
+                )
+            row = conn.execute(
+                "SELECT value FROM _schema_meta WHERE key = 'schema_version'"
+            ).fetchone()
+            if row is None or str(row[0]) != str(IV_HISTORY_SCHEMA_VERSION):
+                value = None if row is None else row[0]
+                return IVHistoryIntegrity(
+                    path=path,
+                    status=IV_HISTORY_INTEGRITY_ERROR,
+                    error_summary=f"unsupported IV history schema version: {value!r}",
+                )
+    except (OSError, sqlite3.Error) as exc:
+        return IVHistoryIntegrity(
+            path=path,
+            status=IV_HISTORY_INTEGRITY_ERROR,
+            error_summary=str(exc).strip() or type(exc).__name__,
+        )
+    return IVHistoryIntegrity(path=path, status=IV_HISTORY_INTEGRITY_OK)
+
+
 __all__ = [
     "DELTA_BUCKET_ALL",
     "DTE_BUCKET_ALL",
     "IV_HISTORY_SCHEMA_VERSION",
+    "IV_HISTORY_INTEGRITY_ERROR",
+    "IV_HISTORY_INTEGRITY_MISSING",
+    "IV_HISTORY_INTEGRITY_OK",
+    "IVHistoryIntegrity",
     "IVHistoryStats",
     "IVHistoryStore",
     "IVHistorySync",
     "OPTION_TYPE_ALL",
     "build_iv_observation_frame",
+    "check_iv_history_integrity",
+    "get_iv_history_db_path",
     "get_iv_history_store",
 ]

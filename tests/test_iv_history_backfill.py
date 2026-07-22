@@ -1,15 +1,24 @@
 """Tests for durable IV-history backfill from retained and historical data."""
 
+# pylint: disable=too-many-lines
+
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from conftest import make_runtime_config
+import opx_chain.iv_history_backfill as backfill_module
 from opx_chain.config import get_runtime_config, set_runtime_config_override
-from opx_chain.iv_history import IVHistoryStore
+from opx_chain.iv_history import (
+    IVHistoryStore,
+    check_iv_history_integrity,
+)
 from opx_chain.iv_history_backfill import (
     format_backfill_result,
+    format_recovery_result,
+    recover_iv_history_store,
     run_iv_history_backfill,
 )
 from opx_chain.storage.models import DatasetRecord
@@ -905,3 +914,111 @@ def test_iv_history_historical_fetch_rejects_unsupported_provider(tmp_path):
             store=store,
             dry_run=True,
         )
+
+
+def _corrupt_recovery_fixture(tmp_path):
+    chain_path = tmp_path / "chain.csv"
+    _dataset(chain_path)
+    database_path = tmp_path / "iv-history.db"
+    corrupt_payload = b"SQLite format 3\x00truncated"
+    database_path.write_bytes(corrupt_payload)
+    config = make_runtime_config(
+        data_provider="marketdata",
+        tickers=("TSLA",),
+        storage_dir=tmp_path,
+        today=date(2026, 5, 22),
+    )
+    storage = FakeStorage([_record(chain_path)], runs_dir=tmp_path)
+    return database_path, corrupt_payload, config, storage
+
+
+def test_iv_history_recovery_dry_run_never_changes_corrupt_store(tmp_path):
+    """Recovery planning should derive rows in a disposable database only."""
+    database_path, corrupt_payload, config, storage = _corrupt_recovery_fixture(
+        tmp_path
+    )
+
+    result = recover_iv_history_store(
+        providers=("marketdata",),
+        tickers=("TSLA",),
+        dry_run=True,
+        config=config,
+        storage=storage,
+    )
+
+    assert result.original_status == "ERROR"
+    assert result.candidate_rows > 0
+    assert result.recovered is False
+    assert database_path.read_bytes() == corrupt_payload
+    assert not list(tmp_path.glob("iv-history.corrupt-*.db"))
+    assert "provider requests: 0" in format_recovery_result(result)
+
+
+def test_iv_history_recovery_quarantines_and_atomically_rebuilds(tmp_path):
+    """A usable retained replay should replace, not mutate, the corrupt store."""
+    database_path, corrupt_payload, config, storage = _corrupt_recovery_fixture(
+        tmp_path
+    )
+
+    result = recover_iv_history_store(
+        providers=("marketdata",),
+        tickers=("TSLA",),
+        config=config,
+        storage=storage,
+    )
+
+    assert result.recovered is True
+    assert result.quarantine_path is not None
+    assert result.quarantine_path.read_bytes() == corrupt_payload
+    assert check_iv_history_integrity(database_path).healthy
+    store = IVHistoryStore(database_path)
+    assert store.stats(provider="marketdata", ticker="TSLA").observation_dates == 1
+    store.close()
+
+
+def test_iv_history_recovery_preserves_active_store_when_replay_is_empty(tmp_path):
+    """An empty retained replay must not displace the original database."""
+    database_path, corrupt_payload, config, _storage = _corrupt_recovery_fixture(
+        tmp_path
+    )
+
+    with pytest.raises(RuntimeError, match="no usable IV history rows"):
+        recover_iv_history_store(
+            providers=("marketdata",),
+            tickers=("TSLA",),
+            config=config,
+            storage=FakeStorage([], runs_dir=tmp_path),
+        )
+
+    assert database_path.read_bytes() == corrupt_payload
+    assert not list(tmp_path.glob("iv-history.corrupt-*.db"))
+
+
+def test_iv_history_recovery_rolls_back_failed_atomic_install(tmp_path, monkeypatch):
+    """An install failure should restore the quarantined database in place."""
+    database_path, corrupt_payload, config, storage = _corrupt_recovery_fixture(
+        tmp_path
+    )
+    real_replace = Path.replace
+    calls = 0
+
+    def fail_candidate_install(source, destination):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated install failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(backfill_module, "_atomic_replace", fail_candidate_install)
+
+    with pytest.raises(OSError, match="simulated install failure"):
+        recover_iv_history_store(
+            providers=("marketdata",),
+            tickers=("TSLA",),
+            config=config,
+            storage=storage,
+        )
+
+    assert calls == 3
+    assert database_path.read_bytes() == corrupt_payload
+    assert not list(tmp_path.glob("iv-history.corrupt-*.db"))
