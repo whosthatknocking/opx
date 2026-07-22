@@ -32,6 +32,11 @@ PUBLIC_NAMES: dict[str, set[str]] = {
         "fetch_ticker_option_chain",
         "run_fetch",
     },
+    "opx_chain.iv_history_backfill": {
+        "IVHistoryRecoveryBusyError",
+        "IVHistoryRecoveryResult",
+        "recover_iv_history_store",
+    },
     "opx_chain.option_types": {
         "OPTION_TYPE_CALL",
         "OPTION_TYPE_CALL_LABEL",

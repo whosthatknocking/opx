@@ -103,6 +103,10 @@ class IVHistoryRecoveryResult:
     backfill: IVHistoryBackfillResult | None
 
 
+class IVHistoryRecoveryBusyError(RuntimeError):
+    """Raised when another fetcher or backfill owns the shared writer lock."""
+
+
 def _normalize_csv_values(
     values: Iterable[str] | str | None,
     *,
@@ -823,7 +827,7 @@ def _active_sqlite_sidecars(database_path: Path) -> tuple[Path, ...]:
     )
 
 
-# pylint: disable-next=too-many-arguments,too-many-locals
+# pylint: disable-next=too-many-arguments
 def recover_iv_history_store(
     *,
     providers: Iterable[str] | None = None,
@@ -835,17 +839,53 @@ def recover_iv_history_store(
     config: RuntimeConfig | None = None,
     storage=None,
 ) -> IVHistoryRecoveryResult:
-    """Rebuild an unusable IV-history database from retained datasets only."""
+    """Lock and rebuild an unusable IV-history database from retained data."""
     base_config = config or get_runtime_config()
     resolved_dry_run = _strict_bool(dry_run, name="dry_run")
-    database_path = get_iv_history_db_path(base_config)
+    lock_handle = None
+    lock_path = _lock_path(base_config)
+    if not resolved_dry_run:
+        lock_handle = acquire_nonblocking_file_lock(lock_path)
+        if lock_handle is None:
+            raise IVHistoryRecoveryBusyError(
+                f"Another fetcher/backfill run is already active: {lock_path}"
+            )
+    try:
+        return _recover_iv_history_store_unlocked(
+            providers=providers,
+            tickers=tickers,
+            lookback_days=lookback_days,
+            limit=limit,
+            dataset_ids=dataset_ids,
+            dry_run=resolved_dry_run,
+            config=base_config,
+            storage=storage,
+        )
+    finally:
+        if lock_handle is not None:
+            release_file_lock(lock_handle)
+
+
+# pylint: disable-next=too-many-arguments,too-many-locals
+def _recover_iv_history_store_unlocked(
+    *,
+    providers: Iterable[str] | None,
+    tickers: Iterable[str] | None,
+    lookback_days: int,
+    limit: int,
+    dataset_ids: Iterable[str] | None,
+    dry_run: bool,
+    config: RuntimeConfig,
+    storage,
+) -> IVHistoryRecoveryResult:
+    database_path = get_iv_history_db_path(config)
     original = check_iv_history_integrity(database_path)
     if original.healthy:
         return IVHistoryRecoveryResult(
             database_path=database_path,
             original_status=original.status,
             original_error_summary=None,
-            dry_run=resolved_dry_run,
+            dry_run=dry_run,
             candidate_rows=0,
             recovered=False,
             quarantine_path=None,
@@ -864,10 +904,10 @@ def recover_iv_history_store(
             lookback_days=lookback_days,
             limit=limit,
             refresh=True,
-            dry_run=resolved_dry_run,
+            dry_run=dry_run,
             dataset_ids=dataset_ids,
             fetch_historical=False,
-            config=base_config,
+            config=config,
             store=temporary_store,
             storage=storage,
         )
@@ -879,7 +919,7 @@ def recover_iv_history_store(
                 "retained datasets produced no usable IV history rows; "
                 "the active database was not changed"
             )
-        if resolved_dry_run:
+        if dry_run:
             return IVHistoryRecoveryResult(
                 database_path=database_path,
                 original_status=original.status,
@@ -1088,7 +1128,7 @@ def main(argv=None) -> int:
     config = get_runtime_config()
     lock_handle = None
     lock_path = _lock_path(config)
-    if not args.dry_run:
+    if not args.dry_run and not args.recover_corrupt:
         lock_handle = acquire_nonblocking_file_lock(lock_path)
         if lock_handle is None:
             print(f"Another fetcher/backfill run is already active: {lock_path}")

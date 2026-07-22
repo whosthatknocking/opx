@@ -258,7 +258,8 @@ opx-iv-history-backfill --recover-corrupt --providers marketdata --dry-run
 ```
 
 After reviewing the candidate row count, omit `--dry-run` to quarantine and
-replace the unusable store. Write mode uses the shared fetch/backfill lock.
+replace the unusable store. Write mode uses the shared fetch/backfill lock,
+which is owned by the public recovery function as well as the CLI path.
 
 **`--dry-run` (optional)**
 
@@ -334,6 +335,11 @@ from opx_chain.iv_history import (
     check_iv_history_integrity,
     get_iv_history_db_path,
     get_iv_history_store,
+)
+from opx_chain.iv_history_backfill import (
+    IVHistoryRecoveryBusyError,
+    IVHistoryRecoveryResult,
+    recover_iv_history_store,
 )
 from opx_chain.event_data import (
     EVENT_DATA_FETCH_MODES,
@@ -430,6 +436,13 @@ populate or inspect provider-scoped historical IV percentiles.
 `get_iv_history_db_path`, `check_iv_history_integrity`, and
 `IVHistoryIntegrity` expose the producer-owned path and read-only
 `OK`/`ERROR`/`MISSING` health result without constructing the writable store.
+`recover_iv_history_store` and `IVHistoryRecoveryResult` are the stable
+retained-data-only rebuild surface. Write-mode calls acquire and release the
+shared fetch/backfill writer lock inside the public function and raise
+`IVHistoryRecoveryBusyError` before candidate construction when another writer
+is active; callers cannot bypass locking by invoking the Python API instead of
+the CLI. Dry-run calls do not acquire the writer lock because they never change
+the active store.
 Consumers should prefer
 `build_ticker_volatility_features(..., iv_history_store=...)` instead of
 querying `iv-history.db` directly. Store read/write helpers validate provider,

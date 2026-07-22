@@ -4,6 +4,7 @@
 
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+import sqlite3
 
 import pandas as pd
 import pytest
@@ -16,6 +17,7 @@ from opx_chain.iv_history import (
     check_iv_history_integrity,
 )
 from opx_chain.iv_history_backfill import (
+    IVHistoryRecoveryBusyError,
     format_backfill_result,
     format_recovery_result,
     main,
@@ -921,7 +923,15 @@ def _corrupt_recovery_fixture(tmp_path):
     chain_path = tmp_path / "chain.csv"
     _dataset(chain_path)
     database_path = tmp_path / "iv-history.db"
-    corrupt_payload = b"SQLite format 3\x00truncated"
+    store = IVHistoryStore(database_path)
+    store.close()
+    valid_payload = database_path.read_bytes()
+    encoded_page_size = int.from_bytes(valid_payload[16:18], "big")
+    page_size = 65536 if encoded_page_size == 1 else encoded_page_size
+    declared_pages = int.from_bytes(valid_payload[28:32], "big")
+    assert declared_pages > 1
+    assert len(valid_payload) == page_size * declared_pages
+    corrupt_payload = valid_payload[:-page_size]
     database_path.write_bytes(corrupt_payload)
     config = make_runtime_config(
         data_provider="marketdata",
@@ -931,6 +941,25 @@ def _corrupt_recovery_fixture(tmp_path):
     )
     storage = FakeStorage([_record(chain_path)], runs_dir=tmp_path)
     return database_path, corrupt_payload, config, storage
+
+
+def test_iv_history_truncated_page_fails_integrity_and_constructor(tmp_path):
+    """A valid-header database missing a declared page must fail closed."""
+    database_path, corrupt_payload, _config, _storage = _corrupt_recovery_fixture(
+        tmp_path
+    )
+    page_size = int.from_bytes(corrupt_payload[16:18], "big")
+    if page_size == 1:
+        page_size = 65536
+    declared_pages = int.from_bytes(corrupt_payload[28:32], "big")
+
+    assert corrupt_payload.startswith(b"SQLite format 3\x00")
+    assert len(corrupt_payload) == page_size * (declared_pages - 1)
+    integrity = check_iv_history_integrity(database_path)
+    assert integrity.status == "ERROR"
+    assert "malformed" in (integrity.error_summary or "").lower()
+    with pytest.raises(sqlite3.DatabaseError, match="malformed"):
+        IVHistoryStore(database_path)
 
 
 def test_iv_history_recovery_dry_run_never_changes_corrupt_store(tmp_path):
@@ -1040,12 +1069,33 @@ def test_iv_history_recovery_cli_honors_shared_writer_lock(
     )
     monkeypatch.setattr(
         backfill_module,
-        "recover_iv_history_store",
+        "_recover_iv_history_store_unlocked",
         lambda **_kwargs: pytest.fail("recovery must not start without the lock"),
     )
 
     assert main(["--recover-corrupt"]) == 1
     assert "Another fetcher/backfill run is already active" in capsys.readouterr().out
+
+
+def test_iv_history_recovery_public_api_honors_shared_writer_lock(
+    tmp_path,
+    monkeypatch,
+):
+    """Programmatic write-mode recovery must own the shared writer lock."""
+    config = make_runtime_config(storage_dir=tmp_path)
+    monkeypatch.setattr(
+        backfill_module,
+        "acquire_nonblocking_file_lock",
+        lambda _path: None,
+    )
+    monkeypatch.setattr(
+        backfill_module,
+        "_recover_iv_history_store_unlocked",
+        lambda **_kwargs: pytest.fail("recovery must not start without the lock"),
+    )
+
+    with pytest.raises(IVHistoryRecoveryBusyError, match="already active"):
+        recover_iv_history_store(config=config)
 
 
 def test_iv_history_recovery_cli_rejects_historical_provider_fetch(
