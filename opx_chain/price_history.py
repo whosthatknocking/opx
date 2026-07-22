@@ -26,6 +26,9 @@ from opx_chain.utils import finite_float_or_none
 PRICE_HISTORY_SCHEMA_VERSION = 1
 PRICE_HISTORY_SCHEMA_MIGRATIONS: dict[int, str] = {}
 PRICE_HISTORY_TAIL_REFRESH_DAYS = 7
+PRICE_HISTORY_INTEGRITY_ERROR = "ERROR"
+PRICE_HISTORY_INTEGRITY_MISSING = "MISSING"
+PRICE_HISTORY_INTEGRITY_OK = "OK"
 _SYNC_STATUSES = frozenset({"ok", "error"})
 _EMPTY_PROVIDER_RESPONSE = "provider returned no usable price history rows"
 
@@ -207,6 +210,20 @@ class PriceHistoryReconcileResult:
     fetched_rows: int = 0
     stored_rows: int = 0
     error_summary: str | None = None
+
+
+@dataclass(frozen=True)
+class PriceHistoryIntegrity:
+    """Read-only integrity result for one durable price-history database."""
+
+    path: Path
+    status: str
+    error_summary: str | None = None
+
+    @property
+    def healthy(self) -> bool:
+        """Return whether the database passed integrity and schema checks."""
+        return self.status == PRICE_HISTORY_INTEGRITY_OK
 
 
 class PriceHistoryStore:
@@ -594,6 +611,70 @@ class PriceHistoryStore:
 def get_price_history_store(config=None) -> PriceHistoryStore:
     """Return the durable local daily-bar store for price context."""
     return PriceHistoryStore(_history_db_path(config))
+
+
+def get_price_history_db_path(config=None) -> Path:
+    """Return the configured durable price-history database path."""
+    return _history_db_path(config)
+
+
+def check_price_history_integrity(db_path: Path) -> PriceHistoryIntegrity:
+    """Validate a price-history database without opening it for writes."""
+    path = Path(db_path)
+    if not path.is_file():
+        return PriceHistoryIntegrity(
+            path=path,
+            status=PRICE_HISTORY_INTEGRITY_MISSING,
+            error_summary="price history database does not exist",
+        )
+    try:
+        uri = path.resolve(strict=True).as_uri() + "?mode=ro"
+        with sqlite3.connect(uri, uri=True) as conn:
+            rows = conn.execute("PRAGMA quick_check").fetchall()
+            messages = tuple(str(row[0]) for row in rows)
+            if messages != ("ok",):
+                return PriceHistoryIntegrity(
+                    path=path,
+                    status=PRICE_HISTORY_INTEGRITY_ERROR,
+                    error_summary="; ".join(messages) or "SQLite quick_check failed",
+                )
+            tables = {
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            required_tables = {
+                "_schema_meta",
+                "daily_price_bars",
+                "price_history_syncs",
+            }
+            missing = sorted(required_tables - tables)
+            if missing:
+                return PriceHistoryIntegrity(
+                    path=path,
+                    status=PRICE_HISTORY_INTEGRITY_ERROR,
+                    error_summary=(
+                        "missing price history table(s): " + ", ".join(missing)
+                    ),
+                )
+            row = conn.execute(
+                "SELECT value FROM _schema_meta WHERE key = 'schema_version'"
+            ).fetchone()
+            if row is None or str(row[0]) != str(PRICE_HISTORY_SCHEMA_VERSION):
+                value = None if row is None else row[0]
+                return PriceHistoryIntegrity(
+                    path=path,
+                    status=PRICE_HISTORY_INTEGRITY_ERROR,
+                    error_summary=f"unsupported price history schema version: {value!r}",
+                )
+    except (OSError, sqlite3.Error) as exc:
+        return PriceHistoryIntegrity(
+            path=path,
+            status=PRICE_HISTORY_INTEGRITY_ERROR,
+            error_summary=str(exc).strip() or type(exc).__name__,
+        )
+    return PriceHistoryIntegrity(path=path, status=PRICE_HISTORY_INTEGRITY_OK)
 
 
 def _sync_recent(sync: PriceHistorySync | None, *, ttl_seconds: int, now: datetime) -> bool:

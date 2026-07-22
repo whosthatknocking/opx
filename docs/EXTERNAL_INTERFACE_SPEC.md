@@ -354,7 +354,15 @@ from opx_chain.event_data import (
     run_event_fetch,
     summarize_latest_event_data,
 )
-from opx_chain.price_history import get_price_history_store
+from opx_chain.price_history import (
+    PRICE_HISTORY_INTEGRITY_ERROR,
+    PRICE_HISTORY_INTEGRITY_MISSING,
+    PRICE_HISTORY_INTEGRITY_OK,
+    PriceHistoryIntegrity,
+    check_price_history_integrity,
+    get_price_history_db_path,
+    get_price_history_store,
+)
 from opx_chain.volatility_features import (
     DTE_BUCKETS,
     MIN_IV_HISTORY_OBSERVATIONS,
@@ -416,6 +424,14 @@ operator-facing advisory policy.
 factory for downstream consumers that need to pass provider-scoped price
 history into public volatility feature builders. Consumers should still prefer
 feature-builder inputs over direct table queries.
+
+`get_price_history_db_path` exposes the configured durable price-history path.
+`check_price_history_integrity` is the producer-owned, read-only backup and
+recovery validation boundary: it applies SQLite integrity checks, required-table
+checks, and the exact producer schema-version check, returning a
+`PriceHistoryIntegrity` with `OK`, `ERROR`, or `MISSING` status. Downstream
+consumers must use this API instead of inferring compatibility from
+`PRAGMA quick_check` alone.
 
 `VOLATILITY_FEATURE_SCHEMA_VERSION`, `VOLATILITY_FEATURE_METHOD`,
 `build_price_volatility_features`, `load_price_volatility_features`,

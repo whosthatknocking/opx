@@ -848,7 +848,7 @@ def check_iv_history_integrity(db_path: Path) -> IVHistoryIntegrity:
             error_summary="IV history database does not exist",
         )
     try:
-        uri = path.resolve(strict=True).as_uri() + "?mode=ro&immutable=1"
+        uri = path.resolve(strict=True).as_uri() + "?mode=ro"
         with sqlite3.connect(uri, uri=True) as conn:
             rows = conn.execute("PRAGMA quick_check").fetchall()
             messages = tuple(str(row[0]) for row in rows)

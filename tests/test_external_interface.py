@@ -51,6 +51,12 @@ PUBLIC_NAMES: dict[str, set[str]] = {
         "get_runs_dir",
     },
     "opx_chain.price_history": {
+        "PRICE_HISTORY_INTEGRITY_ERROR",
+        "PRICE_HISTORY_INTEGRITY_MISSING",
+        "PRICE_HISTORY_INTEGRITY_OK",
+        "PriceHistoryIntegrity",
+        "check_price_history_integrity",
+        "get_price_history_db_path",
         "get_price_history_store",
     },
     "opx_chain.volatility_features": {

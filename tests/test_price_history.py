@@ -8,7 +8,14 @@ import pytest
 
 from conftest import make_runtime_config
 import opx_chain.price_history as price_history_mod
-from opx_chain.price_history import PriceHistoryStore, reconcile_price_history
+from opx_chain.price_history import (
+    PRICE_HISTORY_INTEGRITY_ERROR,
+    PRICE_HISTORY_INTEGRITY_MISSING,
+    PRICE_HISTORY_INTEGRITY_OK,
+    PriceHistoryStore,
+    check_price_history_integrity,
+    reconcile_price_history,
+)
 
 
 def _history(end: str = "2026-03-20", periods: int = 20) -> pd.DataFrame:
@@ -161,6 +168,57 @@ def test_price_history_store_detaches_finalizer_on_close(tmp_path):
     assert store._connection_finalizer is None  # pylint: disable=protected-access
     assert not finalizer.alive
 
+
+def test_price_history_integrity_accepts_current_schema(tmp_path) -> None:
+    """The producer checker should accept its complete current schema."""
+    db_path = tmp_path / "price-history.db"
+    PriceHistoryStore(db_path).close()
+
+    result = check_price_history_integrity(db_path)
+
+    assert result.status == PRICE_HISTORY_INTEGRITY_OK
+    assert result.healthy is True
+    assert result.error_summary is None
+
+
+def test_price_history_integrity_reports_missing_database(tmp_path) -> None:
+    """A missing database should be distinct from an invalid database."""
+    result = check_price_history_integrity(tmp_path / "missing.db")
+
+    assert result.status == PRICE_HISTORY_INTEGRITY_MISSING
+    assert result.healthy is False
+    assert result.error_summary == "price history database does not exist"
+
+
+def test_price_history_integrity_rejects_schema_incomplete_database(tmp_path) -> None:
+    """SQLite readability alone must not imply producer-schema compatibility."""
+    db_path = tmp_path / "price-history.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE daily_price_bars (ticker TEXT)")
+
+    result = check_price_history_integrity(db_path)
+
+    assert result.status == PRICE_HISTORY_INTEGRITY_ERROR
+    assert result.healthy is False
+    assert result.error_summary == (
+        "missing price history table(s): _schema_meta, price_history_syncs"
+    )
+
+
+def test_price_history_integrity_rejects_wrong_schema_version(tmp_path) -> None:
+    """A structurally complete database with another version is incompatible."""
+    db_path = tmp_path / "price-history.db"
+    PriceHistoryStore(db_path).close()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE _schema_meta SET value = '999' WHERE key = 'schema_version'"
+        )
+
+    result = check_price_history_integrity(db_path)
+
+    assert result.status == PRICE_HISTORY_INTEGRITY_ERROR
+    assert result.healthy is False
+    assert result.error_summary == "unsupported price history schema version: '999'"
 
 def test_price_history_store_rolls_back_failed_write(tmp_path, monkeypatch):
     """Failed price-history writes must not leave dirty pooled transactions."""
