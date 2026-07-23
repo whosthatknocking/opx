@@ -106,8 +106,8 @@ def enrich_option_frame(df, underlying_price, fetched_at):
     return df
 
 
-def _matches_any_position(df, option_keys):
-    """Return a boolean mask for rows matching any portfolio option position."""
+def _matches_any_position_corridor(df, option_keys):
+    """Return rows at a held strike from its held expiration forward."""
     mask = pd.Series(False, index=df.index)
     if not option_keys:
         return mask
@@ -115,12 +115,16 @@ def _matches_any_position(df, option_keys):
     if not required.issubset(df.columns):
         return mask
     tickers = set(df["underlying_symbol"].dropna().unique())
+    expirations = pd.to_datetime(df["expiration_date"], errors="coerce")
     for key in (key for key in option_keys if key.ticker in tickers):
+        held_expiration = pd.to_datetime(key.expiration_date, errors="coerce")
+        if pd.isna(held_expiration):
+            continue
         row_mask = (
             (df["underlying_symbol"] == key.ticker)
-            & (df["expiration_date"] == key.expiration_date)
             & (df["option_type"] == key.option_type)
             & ((df["strike"] - key.strike).abs() < STRIKE_MATCH_TOLERANCE)
+            & expirations.ge(held_expiration)
         )
         mask |= row_mask
     return mask
@@ -132,9 +136,11 @@ def apply_post_download_filters(df, underlying_price, position_keys=None):
     if not config.enable_filters:
         return df
 
-    # Portfolio position rows bypass all quality filters.
+    # Exact portfolio rows and future contracts at each held strike bypass all
+    # quality filters. The finite provider expiration window bounds this
+    # position-related corridor for downstream maintenance comparisons.
     if position_keys:
-        position_mask = _matches_any_position(df, position_keys)
+        position_mask = _matches_any_position_corridor(df, position_keys)
         position_rows = df[position_mask]
         to_filter = df[~position_mask]
     else:

@@ -68,7 +68,10 @@ The orchestrator must:
 Overrides the default positions file path (`$XDG_DATA_HOME/opx-chain/positions.csv`,
 default `~/.local/share/opx-chain/positions.csv`). When provided,
 `opx-fetch` uses this file to determine which option contracts must survive hard
-filters regardless of screening criteria. When absent, behaviour is unchanged.
+filters regardless of screening criteria. Each exact held contract and fetched
+contract with the same ticker, option type, and strike from the held expiration
+forward is retained; the configured provider expiration window remains the
+outer bound. When the positions file is absent, behaviour is unchanged.
 
 A downstream orchestrator that manages a per-run positions file passes the
 run-specific path here:

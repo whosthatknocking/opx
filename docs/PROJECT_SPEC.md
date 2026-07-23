@@ -465,7 +465,10 @@ Current behavior:
 - the file is treated as user-managed input, not generated output
 - stock tickers and option-underlying tickers found in the file are added to the effective fetch list for the run
 - today's expiration is kept for any ticker with stock or option exposure in the positions file
-- matching option contracts bypass post-download quality filters when filters are enabled
+- matching option contracts and same-ticker/type/strike contracts from each
+  held expiration forward bypass post-download quality filters when filters are
+  enabled; the configured provider expiration window still bounds this
+  position-related corridor
 - if the file is absent or cannot be parsed, the run continues without position-aware behavior
 - the resolved positions path is logged at startup for run auditability
 - `--positions` and `--enable-filters` / `--disable-filters` are independent; supplying a positions path does not change the filter toggle

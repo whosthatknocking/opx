@@ -173,6 +173,84 @@ def test_apply_post_download_filters_position_keys_bypass_all_filters(monkeypatc
     assert "FILTERED" not in result["contract_symbol"].values
 
 
+def test_position_bypass_keeps_future_contracts_at_held_strike(monkeypatch):
+    """A later held-strike expiration must bypass every normal quality filter."""
+    def make_config():
+        return type("Config", (), {
+            "enable_filters": True,
+            "max_strike_distance_pct": 0.35,
+            "max_spread_pct_of_mid": 0.25,
+        })()
+
+    monkeypatch.setattr("opx_chain.normalize.get_runtime_config", make_config)
+    frame = pd.DataFrame([
+        {
+            "contract_symbol": "ORCL_HELD_SEP",
+            "underlying_symbol": "ORCL",
+            "expiration_date": "2026-09-18",
+            "option_type": "put",
+            "strike": 200.0,
+            "bid": 78.0,
+            "bid_ask_spread_pct_of_mid": 0.10,
+        },
+        {
+            "contract_symbol": "ORCL_FORWARD_DEC",
+            "underlying_symbol": "ORCL",
+            "expiration_date": "2026-12-18",
+            "option_type": "put",
+            "strike": 200.0,
+            "bid": 0.0,
+            "bid_ask_spread_pct_of_mid": 0.90,
+        },
+        {
+            "contract_symbol": "ORCL_EARLIER_AUG",
+            "underlying_symbol": "ORCL",
+            "expiration_date": "2026-08-21",
+            "option_type": "put",
+            "strike": 200.0,
+            "bid": 0.0,
+            "bid_ask_spread_pct_of_mid": 0.90,
+        },
+        {
+            "contract_symbol": "ORCL_FORWARD_OTHER_STRIKE",
+            "underlying_symbol": "ORCL",
+            "expiration_date": "2026-12-18",
+            "option_type": "put",
+            "strike": 195.0,
+            "bid": 0.0,
+            "bid_ask_spread_pct_of_mid": 0.90,
+        },
+        {
+            "contract_symbol": "ORCL_FORWARD_CALL",
+            "underlying_symbol": "ORCL",
+            "expiration_date": "2026-12-18",
+            "option_type": "call",
+            "strike": 200.0,
+            "bid": 0.0,
+            "bid_ask_spread_pct_of_mid": 0.90,
+        },
+    ])
+    held = frozenset([
+        OptionPositionKey(
+            ticker="ORCL",
+            expiration_date="2026-09-18",
+            option_type="put",
+            strike=200.0,
+        )
+    ])
+
+    result = apply_post_download_filters(
+        frame,
+        underlying_price=120.855,
+        position_keys=held,
+    )
+
+    assert result["contract_symbol"].tolist() == [
+        "ORCL_HELD_SEP",
+        "ORCL_FORWARD_DEC",
+    ]
+
+
 def test_apply_post_download_filters_no_position_keys_behaves_normally(monkeypatch):
     """Without position keys the zero-bid filter must still drop bid==0 rows."""
     def make_config():
