@@ -1231,6 +1231,9 @@ def test_sqlite_connections_are_closed_after_operations(tmp_path: Path):
         status="ok",
     )
 
+    # Flush objects left by earlier tests before this test starts attributing
+    # ResourceWarnings to the backend operations below.
+    gc.collect()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", ResourceWarning)
         backend = _make_backend(tmp_path)
