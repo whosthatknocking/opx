@@ -867,6 +867,8 @@ def test_overlay_event_snapshot_recomputes_event_flags(tmp_path, monkeypatch) ->
     assert overlaid.loc[0, "event_data_provider"] == "yfinance"
     assert overlaid.loc[0, "event_data_snapshot_id"] == result.snapshot_id
     assert overlaid.loc[0, "event_data_status"] == "ready"
+    assert overlaid.loc[0, "next_earnings_canonical_event_key"] == "TSLA|earnings|next"
+    assert overlaid.loc[0, "next_ex_div_canonical_event_key"] == "TSLA|ex_dividend|next"
 
 
 @pytest.mark.parametrize(

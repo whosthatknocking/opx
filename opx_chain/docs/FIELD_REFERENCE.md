@@ -130,12 +130,14 @@ For Market Data, numeric event dates are interpreted on the `America/New_York` m
 - `next_earnings_date_is_estimated`: True when the active provider marks `next_earnings_date` as an estimate rather than a confirmed company-announced date. Use it to avoid treating provisional earnings-calendar data as settled fact. Blank when no future earnings date is available or the provider does not expose estimate status.
 - `next_earnings_date_source`: Provider field or source family used for the selected earnings date. Use it to audit whether the date came from a confirmed provider event field or an estimate fallback.
 - `next_earnings_date_confidence`: Provider-derived confidence for the selected earnings date: `confirmed`, `estimated`, or `unknown`. Use it to mark provisional event dates without recomputing event windows downstream.
+- `next_earnings_canonical_event_key`: Exact canonical event identity retained from a dedicated Event Data snapshot, for example `MSFT|earnings|next`. Blank for legacy snapshots without canonical event records.
 - `days_to_earnings`: Whole calendar days until `next_earnings_date`. Use it to filter or down-rank option positions that span an earnings announcement. Lower values mean more immediate event exposure.
 - `earnings_within_5d`: True when an earnings report falls within the next 5 calendar days and before the contract expires. Use it as a hard exclusion filter for strategies that cannot tolerate binary earnings risk.
 - `earnings_within_10d`: True when an earnings report falls within the next 10 calendar days and before the contract expires. Use it to flag positions that enter an earnings window before expiration.
 - `next_ex_div_date`: Next upcoming ex-dividend date in `YYYY-MM-DD` format. Use it to detect contracts that will experience dividend-related price adjustments before expiration.
 - `next_ex_div_date_source`: Provider field or source family used for the selected ex-dividend date.
 - `next_ex_div_date_confidence`: Provider-derived confidence for the selected ex-dividend date: `confirmed`, `estimated`, or `unknown`.
+- `next_ex_div_canonical_event_key`: Exact canonical event identity retained from a dedicated Event Data snapshot, for example `MSFT|ex_dividend|next`. Blank for legacy snapshots without canonical event records.
 - `days_to_ex_div`: Whole calendar days until `next_ex_div_date`. Use it to find contracts at risk of early assignment on dividend-paying underlyings. Lower values mean the ex-dividend date is approaching.
 - `ex_div_within_3d`: True when an ex-dividend date falls within the next 3 calendar days and before the contract expires. Use it as a short-dated warning flag for early-assignment or price-gap risk on dividend underlyings.
 - `dividend_amount`: Per-share cash dividend amount associated with `next_ex_div_date`. Use it to assess the scale of the expected price adjustment at ex-date.

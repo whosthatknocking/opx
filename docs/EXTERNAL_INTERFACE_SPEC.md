@@ -904,6 +904,14 @@ Every snapshot payload is JSON-safe and includes ticker coverage provenance:
 }
 ```
 
+`overlay_event_snapshot(...)` broadcasts the selected snapshot records onto
+each matching option-chain row. In addition to standardized date/source fields,
+the overlay preserves the exact snapshot-owned
+`next_earnings_canonical_event_key` and
+`next_ex_div_canonical_event_key`. Downstream consumers must retain these keys
+as provenance; they must not reconstruct them from dates. Legacy snapshots
+without canonical records leave the fields blank.
+
 Disabled Event Data returns `status="disabled"` without resolving provider-
 specific requirements such as `same_as_chain`, without requiring a chain
 provider, and without making provider calls. Disabled payloads set `provider`

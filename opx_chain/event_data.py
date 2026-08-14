@@ -54,8 +54,13 @@ _EVENT_FIELD_DEFAULTS: dict[str, Any] = {
     "next_ex_div_date_confidence": None,
     "dividend_amount": np.nan,
 }
+_EVENT_CANONICAL_KEY_DEFAULTS: dict[str, Any] = {
+    "next_earnings_canonical_event_key": None,
+    "next_ex_div_canonical_event_key": None,
+}
 EVENT_OVERLAY_COLUMNS = (
     *tuple(_EVENT_FIELD_DEFAULTS),
+    *tuple(_EVENT_CANONICAL_KEY_DEFAULTS),
     "days_to_earnings",
     "earnings_within_5d",
     "earnings_within_10d",
@@ -224,6 +229,28 @@ def _event_status_from_snapshot(payload: dict[str, Any]) -> dict[str, str]:
         if ticker and status:
             result[ticker] = status
     return result
+
+
+def _canonical_event_keys_from_snapshot(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    records = payload.get("canonical_events")
+    if not isinstance(records, list):
+        return {}
+    by_ticker: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        ticker = str(record.get("ticker") or "").strip().upper()
+        event_type = str(record.get("event_type") or "").strip().lower()
+        canonical_key = record.get("canonical_event_key")
+        if not ticker or not isinstance(canonical_key, str) or not canonical_key.strip():
+            continue
+        field = {
+            "earnings": "next_earnings_canonical_event_key",
+            "ex_dividend": "next_ex_div_canonical_event_key",
+        }.get(event_type)
+        if field is not None:
+            by_ticker.setdefault(ticker, dict(_EVENT_CANONICAL_KEY_DEFAULTS))[field] = canonical_key.strip()
+    return by_ticker
 
 
 def _snapshot_file_paths(base_dir: Path | None = None) -> list[Path]:
@@ -880,11 +907,15 @@ def overlay_event_snapshot(
     status = payload.get("status") or ("disabled" if resolved_disabled else "missing")
     by_ticker = {} if resolved_disabled else _event_fields_from_snapshot(payload)
     status_by_ticker = {} if resolved_disabled else _event_status_from_snapshot(payload)
+    canonical_keys_by_ticker = {} if resolved_disabled else _canonical_event_keys_from_snapshot(payload)
 
     parts: list[pd.DataFrame] = []
     for ticker, ticker_frame in result.groupby(result["underlying_symbol"].astype(str).str.upper()):
         events = by_ticker.get(ticker, dict(_EVENT_FIELD_DEFAULTS))
         enriched = append_ticker_event_fields(ticker_frame.copy(), events, today)
+        canonical_keys = canonical_keys_by_ticker.get(ticker, _EVENT_CANONICAL_KEY_DEFAULTS)
+        for field, value in canonical_keys.items():
+            enriched[field] = value
         enriched = add_event_risk_flags(enriched)
         enriched["event_data_provider"] = provider
         enriched["event_data_snapshot_id"] = snapshot_id
@@ -900,7 +931,12 @@ def clear_event_columns(df: pd.DataFrame) -> pd.DataFrame:
     for column in EVENT_OVERLAY_COLUMNS:
         if column in {"event_data_status"}:
             result[column] = "disabled"
-        elif column in {"event_data_provider", "event_data_snapshot_id", "event_data_fetched_at"}:
+        elif column in {
+            "event_data_provider",
+            "event_data_snapshot_id",
+            "event_data_fetched_at",
+            *tuple(_EVENT_CANONICAL_KEY_DEFAULTS),
+        }:
             result[column] = None
         elif column == "dividend_amount":
             result[column] = np.nan
