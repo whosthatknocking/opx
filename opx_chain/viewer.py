@@ -28,6 +28,10 @@ from opx_chain.json_utils import (
     dumps_sanitized_json,
     to_python_scalar,
 )
+from opx_chain.integrity import (
+    evaluate_option_chain_dataset_facts_status,
+    evaluate_option_chain_integrity_status,
+)
 from opx_chain.option_types import OPTION_TYPE_CALL, OPTION_TYPE_PUT
 from opx_chain.paths import get_runs_dir
 from opx_chain.positions import (
@@ -222,6 +226,54 @@ def resolve_csv_path(csv_name: str | None = None) -> Path:
             return candidate
 
     raise FileNotFoundError(f"Dataset file not found: {csv_name}")
+
+
+def _dataset_integrity_metadata(dataset_path: Path) -> dict[str, str | None]:
+    """Return disclosed metadata state without promoting raw viewer reads."""
+    default = {
+        "dataset_id": None,
+        "integrity_status": "unknown",
+        "dataset_facts_status": "unknown",
+    }
+    if _DATA_DIR_OVERRIDE is not None or _CSV_MODE:
+        return default
+    storage = get_storage_backend()
+    if storage is None:
+        return default
+    selected = dataset_path.expanduser().absolute()
+    for record in storage.list_datasets(limit=VIEWER_DATASET_DISCOVERY_LIMIT):
+        path = Path(record.location).expanduser().absolute()
+        if path != selected:
+            continue
+        return {
+            "dataset_id": record.dataset_id,
+            "integrity_status": evaluate_option_chain_integrity_status(record).value,
+            "dataset_facts_status": evaluate_option_chain_dataset_facts_status(record).value,
+        }
+    return default
+
+
+def _integrity_dataset_cards(dataset_path: Path) -> list[DatasetCard]:
+    """Build explicit integrity-state disclosure for non-authoritative raw views."""
+    metadata = _dataset_integrity_metadata(dataset_path)
+    return [
+        {
+            "name": "Integrity Status",
+            "value": str(metadata["integrity_status"]),
+            "description": (
+                "Effective storage integrity metadata for this artifact. The viewer "
+                "reads raw rows for inspection and does not validate or promote them."
+            ),
+        },
+        {
+            "name": "Dataset Facts Status",
+            "value": str(metadata["dataset_facts_status"]),
+            "description": (
+                "Availability of content-bound neutral facts in storage metadata; "
+                "unknown means they must not be treated as verified."
+            ),
+        },
+    ]
 
 
 def _positions_sidecar_for_dataset(dataset_path: Path) -> Path | None:
@@ -911,6 +963,7 @@ def load_csv_payload(csv_name: str | None = None) -> CsvPayload:
     freshness_summary = build_freshness_summary(frame, csv_path)
     descriptions = extract_field_descriptions()
     dataset_cards = [
+        *_integrity_dataset_cards(csv_path),
         *build_dataset_cards(frame, descriptions),
         *build_positions_dataset_cards(frame, csv_path),
     ]
@@ -939,6 +992,7 @@ def make_file_listing() -> list[dict[str, Any]]:
             "name": path.name,
             "size_bytes": stat_result.st_size,
             "modified_at": stat_result.st_mtime,
+            **_dataset_integrity_metadata(path),
         })
     return listings
 

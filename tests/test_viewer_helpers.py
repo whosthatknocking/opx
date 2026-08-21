@@ -11,9 +11,17 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from conftest import make_option_chain_frame
+from opx_chain import SCHEMA_VERSION
 from opx_chain import viewer
 from opx_chain.export import CANONICAL_EXPORT_COLUMNS
-from opx_chain.storage.models import DatasetRecord
+from opx_chain.storage.filesystem import FilesystemBackend
+from opx_chain.storage.models import (
+    DatasetRecord,
+    DatasetWrite,
+    RunContext,
+    RunSummary,
+)
 
 
 def build_config(viewer_host: str, viewer_port: int):
@@ -348,7 +356,49 @@ def test_load_csv_payload_includes_run_positions_summary_cards(
     payload = viewer.load_csv_payload(dataset_path.name)
     card_names = {card["name"] for card in payload["dataset_cards"]}
 
-    assert {"Positions", "Position Fingerprint", "Position Coverage"} <= card_names
+    assert {
+        "Integrity Status",
+        "Dataset Facts Status",
+        "Positions",
+        "Position Fingerprint",
+        "Position Coverage",
+    } <= card_names
+
+
+def test_viewer_discloses_valid_registered_integrity_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Raw viewer inspection labels the effective registered metadata state."""
+    backend = FilesystemBackend(tmp_path / "runs", tmp_path / "debug")
+    run_id = backend.create_run(RunContext("synthetic", ("SYNTH",), "cfg", "pos"))
+    record = backend.write_dataset(
+        run_id,
+        DatasetWrite(
+            make_option_chain_frame(
+                rows=1,
+                ticker="SYNTH",
+                provider="synthetic",
+            ),
+            "synthetic",
+            SCHEMA_VERSION,
+        ),
+    )
+    backend.finalize_run(run_id, RunSummary("complete"))
+    dataset_path = Path(record.location)
+    monkeypatch.setattr(viewer, "_DATA_DIR_OVERRIDE", None)
+    monkeypatch.setattr(viewer, "_CSV_MODE", False)
+    monkeypatch.setattr(viewer, "get_storage_backend", lambda: backend)
+    monkeypatch.setattr(viewer, "discover_dataset_paths", lambda: [dataset_path])
+
+    payload = viewer.load_csv_payload(dataset_path.name)
+    cards = {card["name"]: card["value"] for card in payload["dataset_cards"]}
+    listing = viewer.make_file_listing()[0]
+
+    assert cards["Integrity Status"] == "valid"
+    assert cards["Dataset Facts Status"] == "available"
+    assert listing["dataset_id"] == record.dataset_id
+    assert listing["integrity_status"] == "valid"
 
 
 def test_load_csv_payload_treats_malformed_integer_fields_as_missing(
@@ -526,12 +576,21 @@ def test_make_file_listing_stats_each_file_once(tmp_path: Path, monkeypatch):
     stat_count = 0
     original_stat = Path.stat
 
-    def counting_stat(path: Path):
+    def counting_stat(path: Path, *args, **kwargs):
         nonlocal stat_count
         stat_count += 1
-        return original_stat(path)
+        return original_stat(path, *args, **kwargs)
 
     monkeypatch.setattr(viewer, "discover_dataset_paths", lambda: [dataset])
+    monkeypatch.setattr(
+        viewer,
+        "_dataset_integrity_metadata",
+        lambda _path: {
+            "dataset_id": None,
+            "integrity_status": "unknown",
+            "dataset_facts_status": "unknown",
+        },
+    )
     monkeypatch.setattr(Path, "stat", counting_stat)
 
     listing = viewer.make_file_listing()
@@ -540,6 +599,9 @@ def test_make_file_listing_stats_each_file_once(tmp_path: Path, monkeypatch):
         "name": dataset.name,
         "size_bytes": expected_stat.st_size,
         "modified_at": expected_stat.st_mtime,
+        "dataset_id": None,
+        "integrity_status": "unknown",
+        "dataset_facts_status": "unknown",
     }]
     assert stat_count == 1
 
