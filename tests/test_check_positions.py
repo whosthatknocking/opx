@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import os
 from pathlib import Path
 import time
+from types import SimpleNamespace
 
 import pandas as pd
 
@@ -128,6 +129,14 @@ def test_check_positions_direct_uses_storage_latest_dataset(tmp_path, monkeypatc
             """Return retained dataset records."""
             assert limit == 100
             return [record]
+
+        def load_validated_option_chain_dataset(self, dataset_id):
+            """Return the configured fake dataset through the validated surface."""
+            assert dataset_id == record.dataset_id
+            return SimpleNamespace(
+                handle=SimpleNamespace(location=record.location),
+                frame=pd.read_csv(record.location),
+            )
 
     pos_path = _write_positions(
         tmp_path,
@@ -297,12 +306,12 @@ def test_main_ignores_pytest_argv_when_called_without_args(monkeypatch, tmp_path
     assert main() == 0
 
 
-def test_main_storage_default_skips_retained_dataset_outside_runs_root(
+def test_main_storage_default_fails_closed_on_outside_dataset_location(
     tmp_path,
     monkeypatch,
     capsys,
 ):
-    """Storage-backed default output selection should ignore retained outside paths."""
+    """Storage-backed selection must not fall back around corrupt latest metadata."""
 
     class FakeStorage:  # pylint: disable=too-few-public-methods
         """Storage stub exposing retained dataset records and a runs root."""
@@ -314,6 +323,19 @@ def test_main_storage_default_skips_retained_dataset_outside_runs_root(
         def list_datasets(self, limit=100):
             """Return retained dataset records."""
             return self.records[:limit]
+
+        def load_validated_option_chain_dataset(self, dataset_id):
+            """Enforce the same path-containment behavior as a real backend."""
+            record = next(item for item in self.records if item.dataset_id == dataset_id)
+            path = Path(record.location).resolve()
+            if not path.is_relative_to(Path(self._runs_dir).resolve()):
+                raise ValueError(
+                    f"dataset location escapes storage root: {dataset_id}"
+                )
+            return SimpleNamespace(
+                handle=SimpleNamespace(location=record.location),
+                frame=pd.read_csv(record.location),
+            )
 
     pos_path = _write_positions(tmp_path, [
         {"Symbol": " -AAPL260620C200"},
@@ -381,9 +403,10 @@ def test_main_storage_default_skips_retained_dataset_outside_runs_root(
     result = main(["--positions", str(pos_path)])
 
     captured = capsys.readouterr()
-    assert result == 0
-    assert f"Output:    {inside}" in captured.out
-    assert str(outside) not in captured.out
+    assert result == 1
+    assert "Stored output dataset is unusable" in captured.out
+    assert "dataset location escapes storage root: outside" in captured.out
+    assert f"Output:    {inside}" not in captured.out
 
 
 def test_main_exits_1_some_missing(tmp_path):

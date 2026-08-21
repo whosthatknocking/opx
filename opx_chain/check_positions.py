@@ -16,9 +16,7 @@ from opx_chain.positions import (
     load_positions,
     resolve_positions_path,
 )
-from opx_chain.storage._disk import retained_path_under_roots
 from opx_chain.storage.factory import get_data_dir, get_storage_backend
-from opx_chain.storage.models import DatasetRecord
 from opx_chain.timestamps import format_utc_z_seconds, utc_now_timestamp
 from opx_chain.utils import read_dataset_file
 
@@ -57,19 +55,35 @@ def _format_file_mtime_utc(path: Path) -> str:
     return format_utc_z_seconds(modified_at)
 
 
-def _resolve_output_path(output_path: Path | None = None) -> Path | None:
-    """Resolve explicit, storage-backed, or legacy latest dataset paths."""
+def _load_latest_storage_dataset(storage) -> tuple[Path, pd.DataFrame] | None:
+    """Return the newest retained dataset through the validated storage loader."""
+    records = storage.list_datasets(limit=100)
+    if not records:
+        return None
+    validated = storage.load_validated_option_chain_dataset(records[0].dataset_id)
+    return Path(validated.handle.location), validated.frame
+
+
+def _resolve_output_source(
+    output_path: Path | None = None,
+) -> tuple[Path | None, pd.DataFrame | None]:
+    """Resolve an explicit raw path or one exact validated storage snapshot."""
     if output_path is not None:
-        return output_path
+        return output_path, None
     storage = get_storage_backend()
     if storage is not None:
-        storage_output = _pick_storage_record(storage)
-        if storage_output is not None:
-            return storage_output
-    return find_latest_output()
+        loaded = _load_latest_storage_dataset(storage)
+        if loaded is not None:
+            return loaded
+    return find_latest_output(), None
 
 
-def check_positions(positions_path: Path | None = None, output_path: Path | None = None):
+def check_positions(
+    positions_path: Path | None = None,
+    output_path: Path | None = None,
+    *,
+    frame: pd.DataFrame | None = None,
+):
     """Check every option position against the given (or latest) output CSV.
 
     Returns a tuple of (found, missing) lists where each element is an OptionPositionKey.
@@ -83,11 +97,13 @@ def check_positions(positions_path: Path | None = None, output_path: Path | None
     if position_set.empty:
         return [], []
 
-    resolved_output = _resolve_output_path(output_path)
+    resolved_output, storage_frame = _resolve_output_source(output_path)
     if resolved_output is None or not resolved_output.exists():
         return [], list(position_set.option_keys)
 
-    df = read_dataset_file(resolved_output)
+    df = frame if frame is not None else storage_frame
+    if df is None:
+        df = read_dataset_file(resolved_output)
     required_columns = {"underlying_symbol", "expiration_date", "option_type", "strike"}
     if not required_columns.issubset(df.columns):
         return [], list(position_set.option_keys)
@@ -404,30 +420,6 @@ def _format_found_position_lines(key, row: pd.Series) -> list[str]:
     return lines
 
 
-def _pick_csv_record(records: list[DatasetRecord], *, runs_dir: Path | None = None) -> Path | None:
-    """Return the newest existing CSV artifact; fall back to the newest existing of any format."""
-    roots = (runs_dir or _runtime_runs_dir(),)
-    fallback: Path | None = None
-    for record in records:
-        path = retained_path_under_roots(record.location, roots)
-        if path is None:
-            continue
-        if not path.exists():
-            continue
-        if record.format == "csv":
-            return path
-        if fallback is None:
-            fallback = path
-    return fallback
-
-
-def _pick_storage_record(storage) -> Path | None:
-    """Return the newest retained dataset path from a storage backend."""
-    records = storage.list_datasets(limit=100)
-    runs_dir = getattr(storage, "_runs_dir", None) or _runtime_runs_dir()
-    return _pick_csv_record(records, runs_dir=runs_dir)
-
-
 def main(argv=None):
     """Print a position coverage report for the latest output dataset."""
     import argparse  # pylint: disable=import-outside-toplevel
@@ -464,14 +456,11 @@ def main(argv=None):
         print(f"Positions file not found: {positions_path}")
         return 1
 
-    if output_path is not None:
-        resolved_output = output_path
-    else:
-        storage = get_storage_backend()
-        if storage is not None:
-            resolved_output = _pick_storage_record(storage) or find_latest_output()
-        else:
-            resolved_output = find_latest_output()
+    try:
+        resolved_output, storage_frame = _resolve_output_source(output_path)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        print(f"Stored output dataset is unusable: {exc}")
+        return 1
     if resolved_output is None:
         print(f"No output dataset found in {_runtime_runs_dir()}/")
         return 1
@@ -484,11 +473,18 @@ def main(argv=None):
     print()
 
     if args.freshness:
-        for line in format_freshness_summary_lines(resolved_output):
+        for line in format_freshness_summary_lines(
+            resolved_output,
+            frame=storage_frame,
+        ):
             print(line)
         print()
 
-    found, missing = check_positions(positions_path, resolved_output)
+    found, missing = check_positions(
+        positions_path,
+        resolved_output,
+        frame=storage_frame,
+    )
     total = len(found) + len(missing)
 
     if total == 0:

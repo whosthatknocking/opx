@@ -804,6 +804,10 @@ def test_check_positions_uses_storage_when_enabled(tmp_path: Path):
     mock_backend = MagicMock()
     setattr(mock_backend, "_runs_dir", runs_dir)
     mock_backend.list_datasets.return_value = [record]
+    mock_backend.load_validated_option_chain_dataset.return_value = SimpleNamespace(
+        handle=SimpleNamespace(location=record.location),
+        frame=pd.read_csv(artifact),
+    )
 
     positions_file = tmp_path / "positions.csv"
     positions_file.write_text(
@@ -819,12 +823,16 @@ def test_check_positions_uses_storage_when_enabled(tmp_path: Path):
     assert result == 0
 
 
-def test_check_positions_prefers_csv_over_parquet_dataset(tmp_path: Path):
-    """opx-check must skip parquet records and use the newest CSV dataset."""
+def test_check_positions_uses_validated_loader_for_newest_format(tmp_path: Path):
+    """opx-check is format-neutral because storage returns a validated frame."""
     from datetime import datetime, timezone  # pylint: disable=import-outside-toplevel
     from opx_chain import check_positions as cp  # pylint: disable=import-outside-toplevel
     from opx_chain.storage.models import DatasetRecord  # pylint: disable=import-outside-toplevel
 
+    runs_dir = tmp_path / "runs"
+    parquet_path = runs_dir / "run-1" / "output" / "parquet-id.parquet"
+    parquet_path.parent.mkdir(parents=True)
+    parquet_path.write_bytes(b"fake-parquet")
     parquet_record = DatasetRecord(
         dataset_id="parquet-id",
         run_id="run-1",
@@ -833,12 +841,11 @@ def test_check_positions_prefers_csv_over_parquet_dataset(tmp_path: Path):
         schema_version=1,
         row_count=5,
         format="parquet",
-        location="/fake/output/parquet-id.parquet",
+        location=str(parquet_path),
         content_hash="a" * 64,
     )
-    runs_dir = tmp_path / "runs"
     csv_path = runs_dir / "run-1" / "output" / "csv-id.csv"
-    csv_path.parent.mkdir(parents=True)
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
     csv_record = DatasetRecord(
         dataset_id="csv-id",
         run_id="run-1",
@@ -859,6 +866,10 @@ def test_check_positions_prefers_csv_over_parquet_dataset(tmp_path: Path):
     mock_backend = MagicMock()
     setattr(mock_backend, "_runs_dir", runs_dir)
     mock_backend.list_datasets.return_value = [parquet_record, csv_record]
+    mock_backend.load_validated_option_chain_dataset.return_value = SimpleNamespace(
+        handle=SimpleNamespace(location=parquet_record.location),
+        frame=pd.DataFrame(),
+    )
 
     positions_file = tmp_path / "positions.csv"
     positions_file.write_text("Symbol,Expiration Date,Option Type,Strike\n", encoding="utf-8")
@@ -871,10 +882,11 @@ def test_check_positions_prefers_csv_over_parquet_dataset(tmp_path: Path):
 
     assert result == 0
     mock_backend.list_datasets.assert_called_once_with(limit=100)
+    mock_backend.load_validated_option_chain_dataset.assert_called_once_with("parquet-id")
 
 
-def test_check_positions_skips_records_with_missing_artifact(tmp_path: Path):
-    """opx-check must skip storage records whose artifact file no longer exists."""
+def test_check_positions_fails_closed_on_missing_latest_artifact(tmp_path: Path):
+    """opx-check must not silently substitute an older artifact after load failure."""
     from datetime import datetime, timezone  # pylint: disable=import-outside-toplevel
     from opx_chain import check_positions as cp  # pylint: disable=import-outside-toplevel
     from opx_chain.storage.models import DatasetRecord  # pylint: disable=import-outside-toplevel
@@ -913,6 +925,9 @@ def test_check_positions_skips_records_with_missing_artifact(tmp_path: Path):
     mock_backend = MagicMock()
     setattr(mock_backend, "_runs_dir", runs_dir)
     mock_backend.list_datasets.return_value = [stale_record, current_record]
+    mock_backend.load_validated_option_chain_dataset.side_effect = FileNotFoundError(
+        stale_record.location
+    )
 
     positions_file = tmp_path / "positions.csv"
     positions_file.write_text("Symbol,Expiration Date,Option Type,Strike\n", encoding="utf-8")
@@ -923,7 +938,8 @@ def test_check_positions_skips_records_with_missing_artifact(tmp_path: Path):
     ):
         result = cp.main(["--positions", str(positions_file)])
 
-    assert result == 0
+    assert result == 1
+    mock_backend.load_validated_option_chain_dataset.assert_called_once_with("stale-id")
 
 
 # ---------------------------------------------------------------------------
