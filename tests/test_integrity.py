@@ -1,5 +1,5 @@
 """Public and package-private option-chain integrity contract tests."""
-# pylint: disable=line-too-long,missing-function-docstring
+# pylint: disable=duplicate-code,line-too-long,missing-function-docstring
 
 from datetime import date, datetime, timezone
 from decimal import Decimal

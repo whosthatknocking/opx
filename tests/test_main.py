@@ -265,7 +265,7 @@ def test_storage_disabled_integrity_failure_preserves_previous_latest(
 
     assert main.main() == 1
     assert latest.read_text(encoding="utf-8") == "previous"
-    assert list(runs_dir.glob("options_engine_output_20*.csv")) == []
+    assert not list(runs_dir.glob("options_engine_output_20*.csv"))
 
 
 def test_main_recovers_stale_running_runs_before_count(monkeypatch, capsys, tmp_path: Path):
