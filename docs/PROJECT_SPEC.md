@@ -384,6 +384,33 @@ Provider-specific field availability and mapping behavior are documented in:
 
 - `docs/FIELD_REFERENCE.md`
 
+### 6.1.1 Option-chain integrity and publication
+
+Option-chain integrity is a provider-neutral data contract, separate from the
+older advisory validation summary. Fatal integrity failures stop the affected
+fetch path; they are never downgraded to ordinary per-ticker provider errors or
+silently coerced to nulls.
+
+The same shared contract is enforced at four material boundaries:
+
+- raw provider response, before lossy canonical coercion
+- complete canonical ticker frame, before filtering can remove bad rows
+- combined export frame and exact serialized bytes
+- storage-backed semantic read, including content-hash and schema checks
+
+Required contract identity, required numeric/time fields, finite nonnegative
+market values, `bid <= ask`, unique contract symbols, unique canonical contract
+keys, and symbol/column identity agreement are fatal invariants. Findings use
+bounded provider-neutral codes and samples. Provider names and upstream error
+text may be recorded as provenance, but they do not alter the validation rules.
+
+With storage enabled, `write_dataset` only stages a checked artifact. The
+dataset becomes discoverable after its exact run is finalized `complete` with
+`integrity_status=valid` and `dataset_facts_status=available`. Semantic readers
+must call `load_validated_option_chain_dataset(dataset_id)` and use the returned
+exact handle, frame, summary, and facts together. Strategy thresholds and
+portfolio meaning remain consumer responsibilities.
+
 ### 6.2 Logging and Progress Output
 
 Runtime output is provider-neutral and intended to make fetch progress visible.
@@ -487,6 +514,10 @@ Current behavior:
 - validation findings use `warning` and `error` severities
 - validation errors do not stop the run or block CSV export
 - when validation is enabled, the run prints a validation summary before the CSV write
+
+This configurable validation surface is advisory and remains useful for broad
+quality reporting. It does not waive or replace the always-on option-chain
+integrity contract in §6.1.1.
 
 ### 7.5 Read-Time Freshness Check
 

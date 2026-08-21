@@ -51,6 +51,16 @@ opx-strategy.
 - `Positions`: Parsed count of stock tickers and held option contracts from the selected run sidecar. When no sidecar exists, the card reports `not captured` instead of falling back to the mutable default positions file.
 - `Position Fingerprint`: Short display form of the SHA-256 fingerprint over parsed stock tickers and held option contract keys. The card tooltip includes the full fingerprint. Cosmetic CSV rewrites do not change it; semantic position changes do.
 - `Position Coverage`: Counts how many parsed stock tickers and exact held option contracts are present in the selected chain artifact. This is a coverage check only; it does not show portfolio rows, quantities, cost basis, P/L, or account-level data.
+- `Integrity`: Storage-backed datasets show the effective integrity state and
+  bounded fatal/warning counts. Raw filesystem artifacts are explicitly labeled
+  `raw read; integrity unknown` rather than implied to be validated.
+- `Dataset Facts`: Shows whether the neutral content-bound facts projection is
+  available. The projection contains only sorted tickers, per-ticker minimum and
+  maximum `underlying_price_time`, and sorted expiration dates; it contains no
+  strategy or portfolio policy.
+
+These metadata values are not CSV columns. Their versions and content hash bind
+them to the exact serialized dataset bytes.
 
 ## Contract and Expiration Fields
 

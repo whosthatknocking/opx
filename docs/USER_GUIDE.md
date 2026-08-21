@@ -89,6 +89,12 @@ opx-check --positions ~/my-positions.csv --output /path/to/artifact.csv
 ```
 
 `opx-check` exits with code `0` when all positions are found and `1` when any are missing, so it can be used in scripts.
+When storage is enabled, the command uses only a complete published dataset and
+revalidates its exact stored bytes before checking coverage. A missing,
+tampered, schema-incompatible, legacy-unknown, or invalid dataset stops the
+check with a clear integrity error. CSV and parquet datasets follow the same
+validated path. Supplying `--output` selects an explicit inspection artifact
+and validates that artifact before use.
 For found contracts, it also prints `passes_primary_screen=true|false`; when the value is `false`, the output prints a short indented `failed_filters:` list with the exact failed filter names such as `filters_max_spread_pct_of_mid` or `filters_min_open_interest`.
 
 Use `--freshness` when you want `opx-check` to recompute current option-chain age from the saved quote timestamps in the CSV:
@@ -543,6 +549,13 @@ by `ticker` / `underlying_symbol`.
 - Secret values are redacted in that output. For example, the Massive API key and Market Data token are shown as `set` or `not set`, never in plaintext.
 - When a config value is invalid and a code default is used instead, the fetcher prints a `Config fallbacks:` block so the override is visible.
 - When validation is enabled, the fetcher prints a validation summary after combining ticker frames and before writing the CSV.
+- Always-on option-chain integrity checks run before lossy provider coercion,
+  before filtering, at export serialization, and on storage-backed semantic
+  reads. Fatal failures stop publication and include bounded finding codes and
+  samples; they do not depend on `settings.enable_validation`.
+- Storage-managed datasets remain hidden while a run is `running`, `failed`, or
+  `interrupted`. A dataset is listed only after the owning run reaches
+  `complete` with valid integrity metadata and available neutral dataset facts.
 - During each ticker fetch, the fetcher prints provider progress, expiration counts, raw provider row counts, normalized-versus-kept row counts, and final kept rows so empty runs can be traced to a specific stage.
 - The fetcher exits with status `0` after a successful CSV write, `1` when the run finishes with `No data fetched.`, and `130` when interrupted with `Ctrl+C`.
 

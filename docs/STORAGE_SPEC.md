@@ -122,10 +122,9 @@ Behavior:
   `options_engine_output_latest.csv`, not a symlink; it remains readable even
   if the original timestamped CSV artifact is later removed
 - when `enable = true`, `fetcher.py` writes through the configured
-  `StorageBackend`, `opx-check` uses `list_datasets(limit=100)` and selects the
-  newest existing CSV artifact when one is available, otherwise the newest
-  existing readable dataset artifact of any supported format, and the Python
-  package interface becomes available to downstream consumers
+  `StorageBackend`; `opx-check` discovers complete, valid datasets and loads the
+  selected identifier through `load_validated_option_chain_dataset(...)`, and
+  the Python package interface becomes available to downstream consumers
 - `get_storage_backend()` memoizes backend instances within the process, keyed
   by backend type, storage dir, debug dir, retention limit, and dataset format,
   so repeated viewer requests do not rebuild SQLite schema state on every call
@@ -536,8 +535,8 @@ Run status transitions:
 acquire lock → create_run (status=running)
   → per-ticker work
   → write_artifact for run sidecars required before dataset publication
-  → write_dataset
-  → finalize_run (status=complete)
+  → write_dataset (staged, non-discoverable)
+  → finalize_run (status=complete, atomically publish exact dataset id)
   → release lock
 
 on unexpected exception:
@@ -556,13 +555,26 @@ terminal status, `finished_at`, and `error_summary` unchanged. This prevents
 late print/log/storage cleanup errors from demoting an already published
 successful run.
 
-`write_dataset` is the storage publication point for downstream consumers:
-`list_datasets` only exposes datasets after this call succeeds. Run sidecars
-that are part of the successful fetch artifact set, such as the positions
-snapshot and run-log reference, are written before `write_dataset`. If those
-artifact writes fail, `delete_run_artifacts` removes any earlier sidecar,
-run-log, or pre-publication output artifacts for that run, then `fail_run`
-records the failure and no dataset is published for that run.
+`write_dataset` stages an exact immutable artifact and its validation metadata;
+it is not the publication point. `list_datasets` and `get_dataset` expose a
+dataset only when its owning run is `complete`, the run points to that exact
+dataset id, `integrity_status=valid`, and `dataset_facts_status=available`.
+`finalize_run` validates that state and performs the terminal publication
+transition. Run sidecars that are part of the successful fetch artifact set,
+such as the positions snapshot and run-log reference, are written before the
+transition. If those artifact writes fail, `delete_run_artifacts` removes any
+earlier sidecar, run-log, or pre-publication output artifacts for that run,
+then `fail_run` records the failure and no dataset is discoverable.
+
+All semantic readers use
+`load_validated_option_chain_dataset(dataset_id)`. The loader resolves the
+exact stored record, verifies supported schema and validator versions, checks
+the artifact content hash, parses the declared format, revalidates the frame,
+and returns one `ValidatedOptionChainDataset` containing the exact handle,
+deep-copied frame, integrity summary, and neutral dataset facts. Missing,
+tampered, schema-incompatible, incomplete, legacy-unknown, or otherwise invalid
+datasets fail closed through provider-neutral typed errors. Raw artifact access
+remains available only for inspection and explicit export/download surfaces.
 
 The `pending` status value is reserved for future use; `create_run` sets
 `status=running` immediately.
@@ -684,14 +696,16 @@ the SQLite backend orders the dataset table by `created_at`.
 ## 13. `opx-check` Integration
 
 When storage is disabled, `opx-check` scans the output directory for the latest
-CSV by filename timestamp. When storage is enabled, `opx-check` calls
-`list_datasets(limit=100)`, skips records whose artifact no longer exists, and
-uses the newest existing CSV artifact when one is available. If no CSV artifact
-is present, it falls back to the newest existing readable dataset artifact of any
-supported format, including parquet.
+CSV by filename timestamp. That compatibility path validates the selected CSV
+bytes before using them. When storage is enabled, `opx-check` discovers the
+newest published dataset and calls
+`load_validated_option_chain_dataset(dataset_id)` before checking position
+coverage. Dataset selection is format-neutral; CSV and parquet use the same
+validated loader and neither receives semantic preference.
 
 This decouples `opx-check` from the output directory naming convention while
-preserving CSV preference for compatibility with older output workflows.
+preventing coverage checks from consuming incomplete, unknown-integrity, or
+tampered storage artifacts.
 
 ## 14. Testing Strategy
 
@@ -757,8 +771,8 @@ All seven steps are complete and shipped.
   `record_validation` / `write_dataset` / `finalize_run` / `fail_run` when
   storage is enabled
 - `opx-check` uses `list_datasets(limit=100)` when storage is enabled and
-  prefers the newest existing CSV artifact, with fallback to the newest existing
-  readable dataset artifact of any supported format
+  loads the selected published identifier through
+  `load_validated_option_chain_dataset(...)`; selection is format-neutral
 - `also_write_csv` config key (default `true`) controls whether the timestamped
   `runs/options_engine_output_<ts>.csv` is also written alongside the storage artifact
 - `storage.dir` controls the fetcher lock, timestamped CSV side write, `_latest`

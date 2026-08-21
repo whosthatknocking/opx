@@ -73,7 +73,9 @@ def test_recommended_dataset_reader_is_stable_public_surface():
     reader_section = spec.split("### 3.7 Reading the chain artifact", maxsplit=1)[1]
 
     assert "from opx_chain.utils import read_dataset_file" in public_surface
-    assert "from opx_chain.utils import read_dataset_file" in reader_section
+    assert "ValidatedOptionChainDataset" in public_surface
+    assert "load_validated_option_chain_dataset(handle.dataset_id)" in reader_section
+    assert "`read_dataset_file` remains a stable raw inspection/export helper" in reader_section
     assert "only stable public import from `opx_chain.utils`" in public_surface
 
 

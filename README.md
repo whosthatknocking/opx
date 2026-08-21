@@ -78,6 +78,9 @@ The local viewer is organized around four primary tabs: `Dataset`, `Overview`, `
 - Writes a timestamped CSV plus an append-only run log
 - Includes a local browser for exploring the output interactively, including dataset inspection, lightweight positions counts/fingerprint/coverage metadata for the selected run snapshot, per-ticker overview cards, `Most Profitable`, `Moderate Risk`, `High Conviction Call`, and `High Conviction Put` highlights, plus chain visualizations with chart tooltips and click-through row details
 - Produces normalized option-chain output for inspection, comparison, and archival
+- Rejects malformed provider responses before lossy normalization and publishes
+  storage-backed datasets only after exact-byte integrity validation and clean
+  run finalization
 
 Generated datasets and data artifacts are written under `$XDG_DATA_HOME/opx-chain/` (default `~/.local/share/opx-chain/`):
 

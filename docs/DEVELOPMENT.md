@@ -81,6 +81,31 @@ Provider rules:
 - derived app values should be used only when the provider does not supply the canonical field or cannot be mapped safely
 - provider-specific scratch or debug fields should not expand the CSV schema implicitly
 - mixed-provider rows should not appear in the same output file
+- preserve raw provider values until the shared provider-response integrity
+  validator has inspected them; do not coerce malformed present values into
+  ordinary nulls before that boundary
+- run the shared complete-frame integrity validator before post-download
+  filtering so invalid rows cannot disappear into filter loss
+
+## Option-chain integrity boundary
+
+Public, provider-neutral contracts live in `opx_chain.integrity`. Validation
+implementation details live in the package-private
+`opx_chain._integrity_validation` module. Provider adapters may expose only the
+minimal raw-value preservation needed by that shared validator; they must not
+define provider-specific copies of integrity policy.
+
+Every output path validates the exact serialized bytes that it will publish.
+Storage backends stage those bytes and metadata during `write_dataset`, then
+make the exact dataset id discoverable only when `finalize_run` completes.
+Semantic storage consumers call
+`load_validated_option_chain_dataset(dataset_id)` instead of reading
+`DatasetHandle.location` directly. Direct reads are limited to raw inspection,
+download/export surfaces, and explicit compatibility paths that perform their
+own validation.
+
+Integrity checks must remain independent of strategy concepts such as DTE
+limits, portfolio exposure, recommendation eligibility, or candidate ranking.
 
 ## Local Style Contracts
 

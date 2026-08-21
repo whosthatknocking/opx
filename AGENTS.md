@@ -73,6 +73,11 @@ Keep those files aligned with the implementation. If you change canonical fields
   - canonical export column handling and CSV writing
 - `opx_chain/validate.py`
   - row-level and export-level validation
+- `opx_chain/integrity.py`
+  - public provider-neutral option-chain integrity enums, findings, summaries,
+    neutral dataset facts, canonical contract-key helpers, and typed errors
+- `opx_chain/_integrity_validation.py`
+  - package-private provider-response and canonical-frame integrity validators
 - `opx_chain/schema.py`
   - shared canonical schema constants, quality flags, and boolean-field vocabulary
 - `opx_chain/storage/`
@@ -98,6 +103,15 @@ Keep those files aligned with the implementation. If you change canonical fields
 - Keep shared metrics provider-agnostic once rows have been normalized.
 - Do not add secrets to tracked files, logs, docs, or debug dumps.
 - Do not silently reinterpret provider data when semantics do not match. Leave fields blank rather than map misleading values.
+- Validate provider responses before lossy coercion, validate canonical frames
+  before filtering, and validate the exact serialized bytes before publication.
+- Treat only complete fetch runs with valid integrity metadata and available
+  neutral dataset facts as discoverable option-chain datasets.
+- Semantic consumers must load storage-backed chains through
+  `load_validated_option_chain_dataset(dataset_id)`; raw artifact reads are
+  reserved for inspection and explicit export/download behavior.
+- Keep integrity checks and dataset facts provider-neutral. Strategy policy,
+  portfolio decisions, and recommendation rules remain outside this package.
 - Keep the viewer as an inspection tool, not a trading terminal or decision engine.
 - Maintain stable output and behavior across fetch, export, validation, and viewer layers together.
 

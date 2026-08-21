@@ -315,6 +315,26 @@ from opx_chain.storage.base import StorageBackend
 from opx_chain.storage.models import DatasetHandle, DatasetRecord, RunRecord
 from opx_chain.storage.factory import get_storage_backend
 from opx_chain.utils import read_dataset_file
+from opx_chain.integrity import (
+    OPTION_CHAIN_DATASET_FACTS_SCHEMA_VERSION,
+    OPTION_CHAIN_INTEGRITY_SUMMARY_SCHEMA_VERSION,
+    OPTION_CHAIN_INTEGRITY_VALIDATOR_VERSION,
+    OptionChainDataIntegrityError,
+    OptionChainDatasetFacts,
+    OptionChainDatasetFactsStatus,
+    OptionChainIntegrityBoundary,
+    OptionChainIntegrityCode,
+    OptionChainIntegrityFinding,
+    OptionChainIntegritySeverity,
+    OptionChainIntegrityStatus,
+    OptionChainIntegritySummary,
+    OptionChainSchemaCompatibilityError,
+    OptionChainTickerTimeBounds,
+    ValidatedOptionChainDataset,
+    canonical_contract_key,
+    evaluate_option_chain_dataset_facts_status,
+    evaluate_option_chain_integrity_status,
+)
 from opx_chain.positions import (
     OptionPositionKey,
     PositionSet,
@@ -642,7 +662,10 @@ backend directly.
 records: list[DatasetRecord] = backend.list_datasets(limit=1)
 ```
 
-Returns the most recent successfully written dataset. Returns an empty list if no
+Returns the most recent published dataset. Publication requires a `complete`
+owning run, exact run-to-dataset identity, effective `valid` integrity, and
+`available` dataset facts. Staged, failed, interrupted, invalid, unknown, and
+legacy-unvalidated datasets are excluded. Returns an empty list if no published
 datasets exist.
 
 The consumer should validate:
@@ -656,8 +679,8 @@ The consumer should validate:
 handle: DatasetHandle = backend.get_dataset(dataset_id)
 ```
 
-Returns a `DatasetHandle` for the given `dataset_id`. The consumer reads the chain
-artifact at `handle.location`.
+Returns a `DatasetHandle` for the given published `dataset_id`. This is an
+identity/provenance lookup, not a semantic read. Semantic consumers use §3.7.
 
 ### 3.6 Retrieving a run record
 
@@ -691,17 +714,24 @@ assert run.positions_fingerprint == pipeline_positions_fingerprint
 ### 3.7 Reading the chain artifact
 
 ```python
-from opx_chain.utils import read_dataset_file
-df = read_dataset_file(handle.location)  # dispatches on .csv / .parquet extension
+validated: ValidatedOptionChainDataset = (
+    backend.load_validated_option_chain_dataset(handle.dataset_id)
+)
+df = validated.frame
 ```
 
-`read_dataset_file` is the recommended reader. It selects `pd.read_parquet` or
-`pd.read_csv` based on the file extension, matching `handle.format`, then
-normalizes format-sensitive canonical dtypes. Whole-number fields such as
-`days_to_expiration` read back as nullable `Int64`, boolean fields read back as
-nullable `boolean`, and quote timestamp fields read back as UTC
-`datetime64[ns, UTC]` for both CSV and parquet artifacts. Parquet requires the
-optional `pyarrow` dependency (`pip install 'opx-chain[parquet]'`).
+`load_validated_option_chain_dataset` is the required semantic read boundary.
+It verifies publication state, supported schema/validator versions, exact
+content hash, declared format, row/schema integrity, and content-bound dataset
+facts before returning a deep-copied frame with the exact handle and summaries.
+It raises `OptionChainDataIntegrityError` for invalid/tampered bytes and
+`OptionChainSchemaCompatibilityError` for unsupported row schemas.
+
+`read_dataset_file` remains a stable raw inspection/export helper. It dispatches
+on CSV/parquet and normalizes format-sensitive dtypes, but it does not establish
+storage publication state or bind bytes to metadata. Do not use it as a
+replacement for the validated loader in calculations, retained-history replay,
+position checks, or downstream decision systems.
 
 ### 3.8 Parsing positions consistently
 
@@ -753,6 +783,14 @@ class DatasetHandle:
     format: str           # "csv" | "parquet"
     content_hash: str     # SHA-256 of artifact bytes; use for integrity checks
     created_at: datetime  # UTC timestamp when the dataset was written
+    integrity_status: OptionChainIntegrityStatus
+    integrity_schema_version: int | None
+    integrity_validator_version: int | None
+    integrity_checked_at: datetime | None
+    integrity_content_hash: str | None
+    integrity_summary: OptionChainIntegritySummary | None
+    dataset_facts_status: OptionChainDatasetFactsStatus
+    dataset_facts: OptionChainDatasetFacts | None
 ```
 
 **Change from STORAGE_SPEC §6:** `run_id`, `provider`, `content_hash`,
@@ -765,6 +803,29 @@ scan a paginated dataset listing.
 `location` is an absolute path when the filesystem backend is active. Downstream
 consumers must not construct or infer artifact paths independently — always use the
 `location` field from the handle.
+
+Effective status is evaluated from the versioned metadata rather than trusting
+the stored status label alone. `valid` requires matching supported versions,
+matching content hashes, and a valid summary. `available` facts require their
+supported schema and the exact dataset content hash. Missing or stale metadata
+evaluates to `unknown`.
+
+### 4.1 Integrity summary and dataset facts
+
+`OptionChainIntegritySummary` contains `schema_version`, `validator_version`,
+`status`, `checked_at`, exact dataset/provider/hash provenance, aggregate row
+and finding counts, `counts_by_code`, and at most five bounded samples (at most
+two per code). Finding codes and boundaries are stable provider-neutral enums.
+
+`OptionChainDatasetFacts` is deliberately neutral and contains only its schema
+version, exact content hash, sorted ticker universe, sorted per-ticker minimum
+and maximum underlying-price timestamps, and sorted expiration dates. It does
+not express freshness thresholds, candidate eligibility, DTE policy, ranking,
+or portfolio decisions.
+
+`canonical_contract_key(...)` returns the shared normalized identity tuple used
+for duplicate detection and downstream joins. Consumers must not redefine
+strike rounding or option-type normalization locally.
 
 ---
 
@@ -1145,7 +1206,11 @@ writer's schema value for downstream compatibility checks.
 and `script_version` in addition to artifact location, format, row count, and
 schema version. `get_dataset()` populates those fields from the persisted
 `DatasetRecord` so consumers do not need to scan paginated dataset listings for
-basic provenance and integrity checks.
+basic provenance and integrity checks. It also carries effective integrity and
+dataset-facts status plus the versioned, content-bound projections described in
+§4.1. Semantic consumers still call
+`load_validated_option_chain_dataset(dataset_id)`; handle metadata alone does
+not replace exact-byte read validation.
 
 ### 7.3 Add `--positions` argument to `opx-fetch`
 
@@ -1214,7 +1279,7 @@ run-level provenance such as effective tickers and positions fingerprint.
 
 - CSV output format and column order (governed by `SCHEMA_VERSION`)
 - output directory layout
-- `opx-fetch` fetch logic, provider adapters, scoring, or normalization
+- provider selection, scoring, and strategy-neutral normalization semantics
 - `StorageBackend` write interface — consumers are read-only; they never call
   `create_run`, `write_dataset`, or any write method
 - `opx-chain` config file format

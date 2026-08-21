@@ -61,12 +61,25 @@ and reference.
 | `format` | `str` | NO | 2 | `csv` (default) / `parquet`; tells the consumer which reader to use |
 | `location` | `str` | NO | 2 | Absolute path to the artifact file; consumers must use this field — never construct or infer the path independently |
 | `content_hash` | `str` | NO | 2 | SHA-256 of artifact bytes, computed after write completes; used by the downstream consumer for integrity verification and deduplication |
+| `integrity_status` | `OptionChainIntegrityStatus` | NO | integrity | Effective state: `valid`, `invalid`, or `unknown`; only `valid` is publishable |
+| `integrity_schema_version` | `int` | YES | integrity | Serialized integrity-summary schema version |
+| `integrity_validator_version` | `int` | YES | integrity | Validator semantic version used for the exact bytes |
+| `integrity_checked_at` | `datetime` | YES | integrity | UTC time the exact artifact bytes were validated |
+| `integrity_content_hash` | `str` | YES | integrity | Hash the integrity summary covers; must equal `content_hash` when valid |
+| `integrity_summary` | `OptionChainIntegritySummary` | YES | integrity | Bounded aggregate and sample findings for the exact bytes |
+| `dataset_facts_status` | `OptionChainDatasetFactsStatus` | NO | integrity | `available` or `unknown`; only `available` is publishable |
+| `dataset_facts` | `OptionChainDatasetFacts` | YES | integrity | Versioned, content-bound neutral ticker/time/expiration projection |
 
 **All fields are required by the downstream consumer.** The pipeline
 reads every field from `DatasetRecord` when resolving a chain to consume.
 `schema_version` and `content_hash` are the two fields most critical for
 correctness — schema drift or a corrupt artifact are fatal errors in the
 pipeline.
+
+Legacy metadata defaults the two status fields to `unknown` and leaves the
+versioned projections null. It remains readable for raw inspection but is not
+discoverable or loadable by semantic consumers until it is revalidated and
+republished.
 
 ---
 
@@ -89,6 +102,14 @@ public contract — these fields may not be removed or renamed without a
 | `format` | `str` | NO | `DatasetRecord.format` |
 | `content_hash` | `str` | NO | `DatasetRecord.content_hash` |
 | `created_at` | `datetime` | NO | `DatasetRecord.created_at` |
+| `integrity_status` | `OptionChainIntegrityStatus` | NO | `DatasetRecord.integrity_status` |
+| `integrity_schema_version` | `int` | YES | `DatasetRecord.integrity_schema_version` |
+| `integrity_validator_version` | `int` | YES | `DatasetRecord.integrity_validator_version` |
+| `integrity_checked_at` | `datetime` | YES | `DatasetRecord.integrity_checked_at` |
+| `integrity_content_hash` | `str` | YES | `DatasetRecord.integrity_content_hash` |
+| `integrity_summary` | `OptionChainIntegritySummary` | YES | `DatasetRecord.integrity_summary` |
+| `dataset_facts_status` | `OptionChainDatasetFactsStatus` | NO | `DatasetRecord.dataset_facts_status` |
+| `dataset_facts` | `OptionChainDatasetFacts` | YES | `DatasetRecord.dataset_facts` |
 
 `run_id`, `provider`, `content_hash`, and `created_at` are required additions to
 `DatasetHandle` (they were previously only on `DatasetRecord`). Downstream
@@ -202,7 +223,15 @@ CREATE TABLE datasets (
     row_count       INTEGER NOT NULL,
     format          TEXT NOT NULL,   -- 'csv' | 'parquet'
     location        TEXT NOT NULL,
-    content_hash    TEXT NOT NULL
+    content_hash    TEXT NOT NULL,
+    integrity_status            TEXT NOT NULL DEFAULT 'unknown',
+    integrity_schema_version    INTEGER,
+    integrity_validator_version INTEGER,
+    integrity_checked_at        TEXT,
+    integrity_content_hash      TEXT,
+    integrity_summary_json      TEXT,
+    dataset_facts_status        TEXT NOT NULL DEFAULT 'unknown',
+    dataset_facts_json          TEXT
 );
 
 CREATE TABLE ticker_results (
