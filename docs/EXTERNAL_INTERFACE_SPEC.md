@@ -331,7 +331,7 @@ from opx_chain.integrity import (
     OptionChainSchemaCompatibilityError,
     OptionChainTickerTimeBounds,
     ValidatedOptionChainDataset,
-    canonical_contract_key,
+    canonical_option_contract_key,
     evaluate_option_chain_dataset_facts_status,
     evaluate_option_chain_integrity_status,
 )
@@ -823,7 +823,7 @@ and maximum underlying-price timestamps, and sorted expiration dates. It does
 not express freshness thresholds, candidate eligibility, DTE policy, ranking,
 or portfolio decisions.
 
-`canonical_contract_key(...)` returns the shared normalized identity tuple used
+`canonical_option_contract_key(...)` returns the shared normalized identity tuple used
 for duplicate detection and downstream joins. Consumers must not redefine
 strike rounding or option-type normalization locally.
 
