@@ -12,6 +12,7 @@ import pytest
 from conftest import make_runtime_config
 from opx_chain import fetch
 from opx_chain.fetch import append_ticker_event_fields
+from opx_chain.integrity import OptionChainDataIntegrityError, OptionChainIntegrityCode
 import opx_chain.metrics
 import opx_chain.normalize
 from opx_chain.price_context import PriceContextStatus
@@ -60,7 +61,7 @@ class StubProvider:
         calls = make_vendor_frame(
             [
                 {
-                    "contract_symbol": "TESTC1",
+                    "contract_symbol": "TEST260417C00100000",
                     "option_quote_time": "2026-03-20T13:40:00Z",
                     "bid": 1.0,
                     "ask": 1.1,
@@ -75,7 +76,7 @@ class StubProvider:
                     "contract_size": "REGULAR",
                 },
                 {
-                    "contract_symbol": "TESTC2",
+                    "contract_symbol": "TEST260417C00140000",
                     "option_quote_time": "2026-03-20T13:40:00Z",
                     "bid": 0.0,
                     "ask": 0.2,
@@ -94,7 +95,7 @@ class StubProvider:
         puts = make_vendor_frame(
             [
                 {
-                    "contract_symbol": "TESTP1",
+                    "contract_symbol": "TEST260417P00095000",
                     "option_quote_time": "2026-03-20T13:40:00Z",
                     "bid": 0.5,
                     "ask": 0.7,
@@ -763,11 +764,15 @@ def test_fetch_ticker_option_chain_can_disable_post_download_filters(monkeypatch
     result = fetch.fetch_ticker_option_chain("TEST")
 
     assert len(result) == 3
-    assert set(result["contract_symbol"]) == {"TESTC1", "TESTC2", "TESTP1"}
+    assert set(result["contract_symbol"]) == {
+        "TEST260417C00100000",
+        "TEST260417C00140000",
+        "TEST260417P00095000",
+    }
 
 
-def test_fetch_ticker_option_chain_validates_rows_before_filtering(monkeypatch):
-    """Validation should see invalid rows even when post-download filters later remove them."""
+def test_fetch_ticker_option_chain_rejects_invalid_rows_before_filtering(monkeypatch):
+    """The hard gate rejects corrupt rows before filters could hide them."""
     class InvalidBeforeFilterProvider(StubProvider):
         """Provider variant with one invalid quote that still gets filtered after validation."""
 
@@ -787,15 +792,16 @@ def test_fetch_ticker_option_chain_validates_rows_before_filtering(monkeypatch):
     monkeypatch.setattr(opx_chain.metrics, "get_runtime_config", config_factory)
     findings = []
 
-    result = fetch.fetch_ticker_option_chain("TEST", validation_findings=findings)
+    with pytest.raises(OptionChainDataIntegrityError) as captured:
+        fetch.fetch_ticker_option_chain("TEST", validation_findings=findings)
 
-    assert not result.empty
-    assert any(
-        finding.code == "missing_required_field"
-        and finding.field == "ask"
-        and finding.contract_symbol == "TESTC2"
-        for finding in findings
+    assert (
+        captured.value.summary.counts_by_code[
+            OptionChainIntegrityCode.REQUIRED_FIELD_INVALID
+        ]
+        == 1
     )
+    assert not findings
 
 
 def test_fetch_ticker_option_chain_rejects_provider_ticker_identity_mismatch(monkeypatch):
@@ -820,15 +826,19 @@ def test_fetch_ticker_option_chain_rejects_provider_ticker_identity_mismatch(mon
     monkeypatch.setattr(fetch, "get_data_provider", WrongTickerProvider)
     monkeypatch.setattr(fetch, "get_runtime_config", make_runtime_config)
 
-    result = fetch.fetch_ticker_option_chain("TEST")
+    with pytest.raises(OptionChainDataIntegrityError) as captured:
+        fetch.fetch_ticker_option_chain("TEST")
 
-    assert result.empty
-    assert result.attrs["fetch_status"] == "error"
-    assert "requested ticker TEST" in result.attrs["fetch_error_summary"]
+    assert (
+        captured.value.summary.counts_by_code[
+            OptionChainIntegrityCode.CONTRACT_IDENTITY_MISMATCH
+        ]
+        >= 1
+    )
 
 
-def test_fetch_ticker_option_chain_can_disable_validation(monkeypatch):
-    """Disabling validation should skip row-level findings entirely."""
+def test_fetch_ticker_option_chain_cannot_disable_integrity_gate(monkeypatch):
+    """Optional diagnostics do not disable fatal provider integrity checks."""
     class InvalidBeforeFilterProvider(StubProvider):
         """Provider variant with one invalid quote that would fail validation if enabled."""
 
@@ -851,9 +861,9 @@ def test_fetch_ticker_option_chain_can_disable_validation(monkeypatch):
     monkeypatch.setattr(opx_chain.metrics, "get_runtime_config", config_factory)
     findings = []
 
-    result = fetch.fetch_ticker_option_chain("TEST", validation_findings=findings)
+    with pytest.raises(OptionChainDataIntegrityError):
+        fetch.fetch_ticker_option_chain("TEST", validation_findings=findings)
 
-    assert not result.empty
     assert not findings
 
 
@@ -941,7 +951,7 @@ class TodayExpirationProvider(StubProvider):
         assert expiration_date == "2026-03-20"
         calls = make_vendor_frame([
             {
-                "contract_symbol": "TODAY_CALL",
+                "contract_symbol": "TEST260320C00100000",
                 "option_quote_time": "2026-03-20T13:40:00Z",
                 "bid": 1.0,
                 "ask": 1.2,
@@ -986,7 +996,7 @@ def test_today_expiration_kept_for_portfolio_stock(monkeypatch):
     result = fetch.fetch_ticker_option_chain("TEST", position_set=position_set)
 
     assert not result.empty
-    assert "TODAY_CALL" in result["contract_symbol"].values
+    assert "TEST260320C00100000" in result["contract_symbol"].values
 
 
 def test_today_expiration_kept_for_portfolio_option(monkeypatch):
@@ -1010,7 +1020,7 @@ def test_today_expiration_kept_for_portfolio_option(monkeypatch):
     result = fetch.fetch_ticker_option_chain("TEST", position_set=position_set)
 
     assert not result.empty
-    assert "TODAY_CALL" in result["contract_symbol"].values
+    assert "TEST260320C00100000" in result["contract_symbol"].values
 
 
 def test_position_option_survives_filters(monkeypatch):
@@ -1018,7 +1028,7 @@ def test_position_option_survives_filters(monkeypatch):
     monkeypatch.setattr(fetch, "get_data_provider", StubProvider)
     _patch_config_20260320(monkeypatch)
 
-    # TESTC2 has bid=0 and strike=140 (outside 30% band) — normally filtered;
+    # The 140 call has bid=0 and is outside the 30% band — normally filtered;
     # it should survive because it matches a position key.
     position_set = PositionSet(
         stock_tickers=frozenset(),
@@ -1030,7 +1040,7 @@ def test_position_option_survives_filters(monkeypatch):
     )
     result = fetch.fetch_ticker_option_chain("TEST", position_set=position_set)
 
-    assert "TESTC2" in result["contract_symbol"].values
+    assert "TEST260417C00140000" in result["contract_symbol"].values
 
 
 def test_append_underlying_snapshot_fields_is_stale_underlying_price_stays_nullable_boolean():

@@ -35,6 +35,28 @@ _COMPACT_OSI_RE = re.compile(
 _IDENTITY_FIELDS = frozenset(
     {"underlying_symbol", "contract_symbol", "option_type", "expiration_date", "strike"}
 )
+_RAW_SYMBOL_FIELDS = ("contract_symbol", "contractSymbol", "optionSymbol")
+_RAW_REQUIRED_NUMERIC_FIELDS = ("strike", "bid", "ask")
+_RAW_OPTIONAL_NUMERIC_FIELDS = (
+    "last_trade_price",
+    "lastPrice",
+    "last",
+    "open_interest",
+    "openInterest",
+    "volume",
+    "implied_volatility",
+    "impliedVolatility",
+    "iv",
+    "change",
+    "percent_change",
+    "percentChange",
+    "delta",
+    "gamma",
+    "theta",
+    "vega",
+)
+_RAW_TIMESTAMP_FIELDS = ("option_quote_time", "lastTradeDate", "updated")
+_RAW_BOOLEAN_FIELDS = ("is_in_the_money", "inTheMoney")
 
 
 def _missing(value: object) -> bool:
@@ -74,6 +96,173 @@ def _finding(
         expected=_safe_text(expected),
         actual=_safe_text(actual),
     )
+
+
+def _raw_finding(
+    code: OptionChainIntegrityCode,
+    *,
+    row_index: int | None = None,
+    ticker: str | None = None,
+    contract_symbol: object | None = None,
+    field: str | None = None,
+    expected: object | None = None,
+    actual: object | None = None,
+) -> OptionChainIntegrityFinding:
+    """Build one bounded provider-response finding before canonical mapping."""
+    return OptionChainIntegrityFinding(
+        severity=OptionChainIntegritySeverity.FATAL,
+        boundary=OptionChainIntegrityBoundary.PROVIDER_RESPONSE,
+        code=code,
+        row_index=row_index,
+        ticker=ticker,
+        contract_symbol=_safe_text(contract_symbol),
+        field=field,
+        expected=_safe_text(expected),
+        actual=_safe_text(actual),
+    )
+
+
+def _raw_contract_symbol(row: pd.Series) -> tuple[str | None, object | None]:
+    for field in _RAW_SYMBOL_FIELDS:
+        if field in row.index:
+            return field, row.get(field)
+    return None, None
+
+
+def validate_option_chain_provider_response(
+    calls: object,
+    puts: object,
+    *,
+    ticker: str,
+    provider: str,
+) -> OptionChainIntegritySummary:
+    """Validate aligned raw provider frames before lossy canonical coercion."""
+    findings: list[OptionChainIntegrityFinding] = []
+    frames: list[pd.DataFrame] = []
+    row_offset = 0
+    raw_symbols: list[tuple[int, str]] = []
+    for side, raw_frame in ((OPTION_TYPE_CALL, calls), (OPTION_TYPE_PUT, puts)):
+        if not isinstance(raw_frame, pd.DataFrame):
+            findings.append(
+                _raw_finding(
+                    OptionChainIntegrityCode.RESPONSE_SHAPE_INVALID,
+                    ticker=ticker,
+                    field=side,
+                    expected="pandas DataFrame",
+                    actual=type(raw_frame).__name__,
+                )
+            )
+            continue
+        frame = raw_frame.reset_index(drop=True)
+        frames.append(frame)
+        for local_index, row in frame.iterrows():
+            row_index = row_offset + int(local_index)
+            symbol_field, symbol = _raw_contract_symbol(row)
+            if symbol_field is None or _missing(symbol):
+                findings.append(
+                    _raw_finding(
+                        OptionChainIntegrityCode.REQUIRED_IDENTITY_FIELD_MISSING,
+                        row_index=row_index,
+                        ticker=ticker,
+                        field="contract_symbol",
+                        expected="independent provider contract identifier",
+                        actual="missing",
+                    )
+                )
+            else:
+                raw_symbols.append((row_index, str(symbol).strip().upper()))
+
+            for field in _RAW_REQUIRED_NUMERIC_FIELDS:
+                if field not in frame.columns or _missing(row.get(field)):
+                    findings.append(
+                        _raw_finding(
+                            OptionChainIntegrityCode.REQUIRED_FIELD_INVALID,
+                            row_index=row_index,
+                            ticker=ticker,
+                            contract_symbol=symbol,
+                            field=field,
+                            expected="present finite number",
+                            actual="missing",
+                        )
+                    )
+
+            for field in (*_RAW_REQUIRED_NUMERIC_FIELDS, *_RAW_OPTIONAL_NUMERIC_FIELDS):
+                if field not in frame.columns or _missing(row.get(field)):
+                    continue
+                try:
+                    numeric = float(row.get(field))
+                except (TypeError, ValueError):
+                    numeric = float("nan")
+                if not np.isfinite(numeric):
+                    findings.append(
+                        _raw_finding(
+                            OptionChainIntegrityCode.FIELD_VALUE_INVALID,
+                            row_index=row_index,
+                            ticker=ticker,
+                            contract_symbol=symbol,
+                            field=field,
+                            expected="finite number",
+                            actual=row.get(field),
+                        )
+                    )
+
+            for field in _RAW_TIMESTAMP_FIELDS:
+                if field not in frame.columns or _missing(row.get(field)):
+                    continue
+                if pd.isna(pd.to_datetime(row.get(field), utc=True, errors="coerce")):
+                    findings.append(
+                        _raw_finding(
+                            OptionChainIntegrityCode.FIELD_VALUE_INVALID,
+                            row_index=row_index,
+                            ticker=ticker,
+                            contract_symbol=symbol,
+                            field=field,
+                            expected="timestamp",
+                            actual=row.get(field),
+                        )
+                    )
+
+            for field in _RAW_BOOLEAN_FIELDS:
+                if field not in frame.columns or _missing(row.get(field)):
+                    continue
+                if not isinstance(row.get(field), (bool, np.bool_)):
+                    findings.append(
+                        _raw_finding(
+                            OptionChainIntegrityCode.FIELD_VALUE_INVALID,
+                            row_index=row_index,
+                            ticker=ticker,
+                            contract_symbol=symbol,
+                            field=field,
+                            expected="boolean",
+                            actual=row.get(field),
+                        )
+                    )
+        row_offset += len(frame)
+
+    symbol_counts = Counter(symbol for _, symbol in raw_symbols)
+    for row_index, symbol in raw_symbols:
+        if symbol_counts[symbol] > 1:
+            findings.append(
+                _raw_finding(
+                    OptionChainIntegrityCode.DUPLICATE_CONTRACT_SYMBOL,
+                    row_index=row_index,
+                    ticker=ticker,
+                    contract_symbol=symbol,
+                    field="contract_symbol",
+                    expected="unique provider contract identifier",
+                    actual=symbol,
+                )
+            )
+
+    total_rows = sum(len(frame) for frame in frames)
+    summary = project_option_chain_integrity_summary(
+        findings,
+        total_rows=total_rows,
+        provider=provider,
+    )
+    if summary.status == "invalid":
+        raise OptionChainDataIntegrityError(summary)
+    return summary
 
 
 def _parse_compact_osi(contract_symbol: object) -> tuple[str, str, Decimal, object]:

@@ -8,9 +8,17 @@ import pickle
 import numpy as np
 import pandas as pd
 
+from opx_chain._integrity_validation import (
+    validate_option_chain_frame,
+    validate_option_chain_provider_response,
+)
 from opx_chain.config import get_runtime_config
 from opx_chain.error_summary import compact_exception_summary
 from opx_chain.json_utils import dumps_strict_json, loads_strict_json, to_python_scalar
+from opx_chain.integrity import (
+    OptionChainDataIntegrityError,
+    OptionChainIntegrityBoundary,
+)
 from opx_chain.metrics import (
     add_expected_move_by_expiration,
     add_iv_state_level,
@@ -318,20 +326,6 @@ def fetch_ticker_price_context(  # pylint: disable=too-many-arguments
     return context
 
 
-def _require_requested_ticker_identity(frame: pd.DataFrame, ticker: str) -> None:
-    """Reject provider-normalized option rows for an unexpected underlying."""
-    if frame.empty or "underlying_symbol" not in frame.columns:
-        return
-    requested = str(ticker).strip().upper()
-    symbols = frame["underlying_symbol"].dropna().astype(str).str.strip().str.upper()
-    mismatches = sorted(symbol for symbol in set(symbols) if symbol and symbol != requested)
-    if mismatches:
-        sample = ", ".join(mismatches[:3])
-        raise ValueError(
-            f"provider returned underlying_symbol {sample} for requested ticker {requested}"
-        )
-
-
 def _normalize_requested_ticker(value) -> str:
     if not isinstance(value, str):
         raise ValueError("ticker must be a non-empty string")
@@ -459,6 +453,12 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-arguments,too-many-po
             if chain is None:
                 chain = provider.load_option_chain(ticker, expiration_date)
                 _cache_put_chain(cache, chain_key, chain, config.provider_chain_ttl, logger=logger)
+            validate_option_chain_provider_response(
+                chain.calls,
+                chain.puts,
+                ticker=ticker,
+                provider=provider.name,
+            )
             expiration_raw_count = len(chain.calls) + len(chain.puts)
             raw_contract_count += expiration_raw_count
             raw_expiration_count += 1
@@ -507,24 +507,7 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-arguments,too-many-po
                     option_type=option_type,
                     ticker=ticker,
                 )
-                _require_requested_ticker_identity(vendor_normalized, ticker)
-                vendor_normalized = append_ticker_event_fields(
-                    vendor_normalized, events, config.today
-                )
-                normalized = enrich_option_frame(
-                    df=vendor_normalized,
-                    underlying_price=underlying_price,
-                    fetched_at=fetched_at,
-                )
-                normalized = append_underlying_snapshot_fields(
-                    normalized,
-                    snapshot,
-                    fetched_at,
-                    config.stale_quote_seconds,
-                )
-                if config.enable_validation and validation_findings is not None:
-                    validation_findings.extend(validate_option_rows(normalized))
-                all_normalized_rows.append(normalized)
+                all_normalized_rows.append(vendor_normalized)
 
         if not all_normalized_rows:
             _emit_fetch_info(
@@ -553,13 +536,39 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-arguments,too-many-po
                 "skipped",
             )
 
-        # Pre-filter cross-row enrichment on the full unfiltered chain.
+        # Validate every complete normalized row before enrichment or filtering.
         all_normalized = pd.concat(all_normalized_rows, ignore_index=True)
         pre_filter_count = len(all_normalized)
         _emit_fetch_info(
             f"{ticker}: normalize  rows={pre_filter_count}",
             logger=logger,
         )
+        validate_option_chain_frame(
+            all_normalized,
+            boundary=OptionChainIntegrityBoundary.PRE_FILTER,
+            requested_tickers=(ticker,),
+            provider=provider.name,
+        )
+
+        # Pre-filter cross-row enrichment on the full unfiltered chain.
+        all_normalized = append_ticker_event_fields(
+            all_normalized,
+            events,
+            config.today,
+        )
+        all_normalized = enrich_option_frame(
+            df=all_normalized,
+            underlying_price=underlying_price,
+            fetched_at=fetched_at,
+        )
+        all_normalized = append_underlying_snapshot_fields(
+            all_normalized,
+            snapshot,
+            fetched_at,
+            config.stale_quote_seconds,
+        )
+        if config.enable_validation and validation_findings is not None:
+            validation_findings.extend(validate_option_rows(all_normalized))
         all_normalized = add_iv_state_level(all_normalized)
         all_normalized = add_iv_state_term(all_normalized)
         all_normalized = add_listed_strike_increment(all_normalized)
@@ -639,7 +648,11 @@ def fetch_ticker_option_chain(  # pylint: disable=too-many-arguments,too-many-po
             )
         return combined
 
-    except (ProviderAuthenticationError, ProviderQuotaError) as exc:
+    except (
+        OptionChainDataIntegrityError,
+        ProviderAuthenticationError,
+        ProviderQuotaError,
+    ) as exc:
         print(f"{ticker} error: {exc}")
         if logger:
             logger.exception(

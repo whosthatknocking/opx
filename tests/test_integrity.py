@@ -11,6 +11,7 @@ from opx_chain._integrity_validation import (
     collect_option_chain_frame_findings,
     project_option_chain_integrity_summary,
     validate_option_chain_frame,
+    validate_option_chain_provider_response,
 )
 from opx_chain.integrity import (
     OPTION_CHAIN_DATASET_FACTS_SCHEMA_VERSION,
@@ -227,3 +228,45 @@ def test_schema_compatibility_error_rejects_bool_versions_and_keeps_attributes()
     assert error.supported_versions == (1, 2)
     with pytest.raises(ValueError):
         _ = OptionChainSchemaCompatibilityError("dataset", True, (1,))
+
+
+def test_provider_response_rejects_malformed_present_optional_numeric():
+    calls = _frame().copy()
+    calls.loc[0, "implied_volatility"] = "not-a-number"
+
+    with pytest.raises(OptionChainDataIntegrityError) as captured:
+        validate_option_chain_provider_response(
+            calls,
+            pd.DataFrame(),
+            ticker="SYNTH",
+            provider="synthetic-provider",
+        )
+
+    assert (
+        captured.value.summary.counts_by_code[
+            OptionChainIntegrityCode.FIELD_VALUE_INVALID
+        ]
+        == 1
+    )
+    assert captured.value.summary.samples[0].boundary is (
+        OptionChainIntegrityBoundary.PROVIDER_RESPONSE
+    )
+
+
+def test_provider_response_rejects_duplicate_independent_identifiers():
+    calls = pd.concat((_frame(), _frame()), ignore_index=True)
+
+    with pytest.raises(OptionChainDataIntegrityError) as captured:
+        validate_option_chain_provider_response(
+            calls,
+            pd.DataFrame(),
+            ticker="SYNTH",
+            provider="synthetic-provider",
+        )
+
+    assert (
+        captured.value.summary.counts_by_code[
+            OptionChainIntegrityCode.DUPLICATE_CONTRACT_SYMBOL
+        ]
+        == 2
+    )

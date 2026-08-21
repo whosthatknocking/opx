@@ -10,8 +10,13 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 from conftest import make_option_chain_frame, make_runtime_config
+from opx_chain._integrity_validation import validate_option_chain_frame
 from opx_chain.config_coercion import ConfigError
 from opx_chain.fetcher import acquire_fetcher_lock, release_fetcher_lock
+from opx_chain.integrity import (
+    OptionChainDataIntegrityError,
+    OptionChainIntegrityBoundary,
+)
 from opx_chain.providers.base import ProviderQuotaError
 from opx_chain.runlog import logger_name
 from opx_chain.storage.memory import MemoryBackend
@@ -94,6 +99,59 @@ def test_fetcher_calls_write_dataset_when_storage_enabled(tmp_path: Path):
     assert result == 0
     datasets = backend.list_datasets()
     assert len(datasets) == 1
+
+
+def test_run_fetch_returns_the_exact_published_dataset_handle(tmp_path: Path):
+    """Programmatic fetch success returns the handle written by that attempt."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True)
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        for fetcher_patch in patches:
+            stack.enter_context(fetcher_patch)
+        handle = fetcher.run_fetch()
+
+    assert handle is not None
+    assert handle.dataset_id == backend.list_datasets()[0].dataset_id
+
+
+def test_integrity_failure_is_recorded_and_never_published(tmp_path: Path):
+    """Fatal integrity summaries survive isolation as failed-run diagnostics."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True)
+    patches = _fetcher_patches(tmp_path, config, backend)
+    invalid = make_option_chain_frame(rows=1, ticker="TEST", expiration="2026-06-20")
+    invalid.loc[0, "option_type"] = "put"
+    with pytest.raises(OptionChainDataIntegrityError) as captured:
+        validate_option_chain_frame(
+            invalid,
+            boundary=OptionChainIntegrityBoundary.PRE_FILTER,
+        )
+
+    with ExitStack() as stack:
+        for fetcher_patch in patches:
+            stack.enter_context(fetcher_patch)
+        stack.enter_context(
+            patch.object(
+                fetcher,
+                "fetch_ticker_option_chain",
+                side_effect=captured.value,
+            )
+        )
+        with pytest.raises(OptionChainDataIntegrityError):
+            fetcher.run_fetch()
+
+    assert not backend.list_datasets()
+    run = next(iter(backend._runs.values()))  # pylint: disable=protected-access
+    assert run.status == "failed"
+    records = backend._validations[run.run_id]  # pylint: disable=protected-access
+    assert records[0].severity == "error"
+    assert records[0].code == "CONTRACT_IDENTITY_MISMATCH"
 
 
 def test_fetcher_records_fetch_row_counts_from_dataframe_attrs(tmp_path: Path):

@@ -26,6 +26,12 @@ from opx_chain.config_coercion import ConfigError, coerce_path
 from opx_chain.error_summary import compact_exception_summary
 from opx_chain.export import prepare_export_frame, write_options_csv
 from opx_chain.fetch import fetch_ticker_option_chain, fetch_ticker_price_context
+from opx_chain.integrity import (
+    OptionChainDataIntegrityError,
+    OptionChainIntegrityCode,
+    OptionChainIntegritySummary,
+    OptionChainSchemaCompatibilityError,
+)
 from opx_chain.iv_history_backfill import run_iv_history_backfill
 from opx_chain.json_utils import dumps_strict_json
 from opx_chain.locks import acquire_nonblocking_file_lock, release_file_lock
@@ -45,6 +51,7 @@ from opx_chain.storage.atomic import atomic_file_write
 from opx_chain.storage.factory import get_data_dir, get_storage_backend
 from opx_chain.storage.models import (
     ArtifactWrite,
+    DatasetHandle,
     DatasetWrite,
     RunContext,
     RunSummary,
@@ -461,6 +468,36 @@ def _record_validation_findings(storage, run_id: str, findings: list[ValidationF
         ))
 
 
+def _record_integrity_summary(
+    storage,
+    run_id: str,
+    summary: OptionChainIntegritySummary,
+) -> None:
+    """Persist the canonical bounded integrity projection as grouped diagnostics."""
+    samples_by_code = {}
+    for sample in summary.samples:
+        samples_by_code.setdefault(sample.code, sample)
+    for code, count in sorted(summary.counts_by_code.items(), key=lambda item: item[0].value):
+        sample = samples_by_code.get(code)
+        storage.record_validation(
+            ValidationRecord(
+                run_id=run_id,
+                severity=(
+                    "warning"
+                    if code is OptionChainIntegrityCode.OPTIONAL_FIELD_DEGRADED
+                    else "error"
+                ),
+                code=code.value,
+                count=count,
+                sample=(
+                    dumps_strict_json(sample.to_dict(), sort_keys=True)
+                    if sample is not None
+                    else None
+                ),
+            )
+        )
+
+
 def _dataset_tickers(frame: pd.DataFrame) -> tuple[str, ...]:
     """Return normalized ticker symbols present in a just-written dataset."""
     if not isinstance(frame, pd.DataFrame) or frame.empty:
@@ -594,13 +631,14 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
     price_context_only: bool = False,
     skip_events: bool = False,
     progress_callback: TickerFetchProgressCallback | None = None,
-) -> None:
+) -> DatasetHandle | None:
     """Execute the fetch pipeline. Lock must already be held by caller. Raises on failure."""
     logger = None
     log_path = None
     storage = None
     run_id = None
     dataset_record = None
+    dataset_handle = None
     iv_history_summary = None
     try:
         storage = get_storage_backend(config)
@@ -663,13 +701,13 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
                 print(f"Storage: {type(storage).__name__} (reachable)")
             print()
             print("Dry-run complete.")
-            return
+            return None
 
         if price_context_only:
             output_path = _run_price_context_fetch(config, effective_tickers, logger)
             print()
             print(f"Saved price context: {output_path}")
-            return
+            return None
 
         if storage is not None:
             run_id = storage.create_run(RunContext(
@@ -820,6 +858,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
                 format=config.storage_dataset_format,
             ))
             storage.finalize_run(run_id, RunSummary(status="complete"))
+            dataset_handle = storage.get_dataset(dataset_record.dataset_id)
             iv_history_summary = _ingest_iv_history_for_dataset(
                 dataset_record,
                 export_df,
@@ -863,6 +902,23 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
             write_csv,
             run_id,
         )
+        return dataset_handle
+    except (OptionChainDataIntegrityError, OptionChainSchemaCompatibilityError) as exc:
+        print(f"\nFatal error: {exc}")
+        if logger:
+            logger.exception("run_finished integrity_failure error: %s", exc)
+        if storage is not None and run_id is not None:
+            if isinstance(exc, OptionChainDataIntegrityError):
+                try:
+                    _record_integrity_summary(storage, run_id, exc.summary)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    pass
+            _delete_prepublication_artifacts(storage, run_id, dataset_record)
+            try:
+                storage.fail_run(run_id, str(exc))
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+        raise
     except KeyboardInterrupt:
         print("\nInterrupted.")
         if logger:
@@ -896,7 +952,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     price_context_only: bool = False,
     skip_events: bool = False,
     progress_callback: TickerFetchProgressCallback | None = None,
-) -> None:
+) -> DatasetHandle | None:
     """Trigger a fresh option-chain fetch and write the result to storage.
 
     This is the programmatic entry point for downstream consumers (e.g.
@@ -952,7 +1008,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
         try:
             set_runtime_config_override(config)
             with _SigtermAsKeyboardInterrupt():
-                _do_fetch_with_lock_held(
+                return _do_fetch_with_lock_held(
                     config,
                     positions_path,
                     cli_override=None,
@@ -963,7 +1019,6 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
                 )
         finally:
             set_runtime_config_override(previous_override)
-        return
 
     lock_path = _fetcher_lock_path(config)
     lock_handle = acquire_fetcher_lock(lock_path)
@@ -972,7 +1027,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     try:
         set_runtime_config_override(config)
         with _SigtermAsKeyboardInterrupt():
-            _do_fetch_with_lock_held(
+            return _do_fetch_with_lock_held(
                 config,
                 positions_path,
                 cli_override=None,
