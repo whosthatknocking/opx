@@ -7,6 +7,12 @@ from datetime import datetime
 
 import pandas as pd
 
+from opx_chain.integrity import (
+    OptionChainDatasetFacts,
+    OptionChainDatasetFactsStatus,
+    OptionChainIntegrityStatus,
+    OptionChainIntegritySummary,
+)
 from opx_chain.version import __version__ as DEFAULT_SCRIPT_VERSION
 
 UNKNOWN_SCRIPT_VERSION = "unknown"
@@ -45,6 +51,14 @@ class DatasetRecord:
     location: str
     content_hash: str
     script_version: str = DEFAULT_SCRIPT_VERSION
+    integrity_status: OptionChainIntegrityStatus = OptionChainIntegrityStatus.UNKNOWN
+    integrity_schema_version: int | None = None
+    integrity_validator_version: int | None = None
+    integrity_checked_at: datetime | None = None
+    integrity_content_hash: str | None = None
+    integrity_summary: OptionChainIntegritySummary | None = None
+    dataset_facts_status: OptionChainDatasetFactsStatus = OptionChainDatasetFactsStatus.UNKNOWN
+    dataset_facts: OptionChainDatasetFacts | None = None
 
 
 @dataclass
@@ -61,6 +75,14 @@ class DatasetHandle:
     content_hash: str
     created_at: datetime
     script_version: str = DEFAULT_SCRIPT_VERSION
+    integrity_status: OptionChainIntegrityStatus = OptionChainIntegrityStatus.UNKNOWN
+    integrity_schema_version: int | None = None
+    integrity_validator_version: int | None = None
+    integrity_checked_at: datetime | None = None
+    integrity_content_hash: str | None = None
+    integrity_summary: OptionChainIntegritySummary | None = None
+    dataset_facts_status: OptionChainDatasetFactsStatus = OptionChainDatasetFactsStatus.UNKNOWN
+    dataset_facts: OptionChainDatasetFacts | None = None
 
 
 def record_to_handle(record: DatasetRecord) -> DatasetHandle:
@@ -76,6 +98,14 @@ def record_to_handle(record: DatasetRecord) -> DatasetHandle:
         content_hash=record.content_hash,
         created_at=record.created_at,
         script_version=record.script_version,
+        integrity_status=record.integrity_status,
+        integrity_schema_version=record.integrity_schema_version,
+        integrity_validator_version=record.integrity_validator_version,
+        integrity_checked_at=record.integrity_checked_at,
+        integrity_content_hash=record.integrity_content_hash,
+        integrity_summary=record.integrity_summary,
+        dataset_facts_status=record.dataset_facts_status,
+        dataset_facts=record.dataset_facts,
     )
 
 

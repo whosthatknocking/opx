@@ -18,6 +18,8 @@ class DatasetSerializer(Protocol):  # pylint: disable=too-few-public-methods
 
     def serialize_bytes(self, df: pd.DataFrame) -> bytes: ...  # pylint: disable=missing-function-docstring
 
+    def deserialize_bytes(self, content: bytes) -> pd.DataFrame: ...  # pylint: disable=missing-function-docstring
+
     def serialize(self, df: pd.DataFrame, path: str) -> int: ...  # pylint: disable=missing-function-docstring
 
 
@@ -35,6 +37,10 @@ class CsvSerializer:  # pylint: disable=too-few-public-methods
         content = self.serialize_bytes(df)
         atomic_write_bytes(Path(path), content)
         return len(content)
+
+    def deserialize_bytes(self, content: bytes) -> pd.DataFrame:
+        """Read one caller-owned DataFrame from CSV bytes."""
+        return pd.read_csv(BytesIO(content))
 
 
 class ParquetSerializer:  # pylint: disable=too-few-public-methods
@@ -56,6 +62,10 @@ class ParquetSerializer:  # pylint: disable=too-few-public-methods
         content = self.serialize_bytes(df)
         atomic_write_bytes(Path(path), content)
         return len(content)
+
+    def deserialize_bytes(self, content: bytes) -> pd.DataFrame:
+        """Read one caller-owned DataFrame from Parquet bytes."""
+        return pd.read_parquet(BytesIO(content), engine="pyarrow")
 
 
 _SERIALIZERS: dict[str, DatasetSerializer] = {
