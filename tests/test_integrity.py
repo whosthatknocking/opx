@@ -9,6 +9,7 @@ import pytest
 
 from opx_chain._integrity_validation import (
     collect_option_chain_frame_findings,
+    provider_payload_to_frame,
     project_option_chain_integrity_summary,
     validate_option_chain_frame,
     validate_option_chain_provider_response,
@@ -269,4 +270,20 @@ def test_provider_response_rejects_duplicate_independent_identifiers():
             OptionChainIntegrityCode.DUPLICATE_CONTRACT_SYMBOL
         ]
         == 2
+    )
+
+
+def test_provider_payload_alignment_raises_typed_shape_error():
+    with pytest.raises(OptionChainDataIntegrityError) as captured:
+        provider_payload_to_frame(
+            {"optionSymbol": ["ONE", "TWO"], "strike": [100]},
+            ticker="SYNTH",
+            provider="synthetic-provider",
+        )
+
+    assert captured.value.summary.counts_by_code == {
+        OptionChainIntegrityCode.RESPONSE_SHAPE_INVALID: 1
+    }
+    assert captured.value.summary.samples[0].boundary is (
+        OptionChainIntegrityBoundary.PROVIDER_RESPONSE
     )

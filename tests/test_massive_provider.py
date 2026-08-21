@@ -13,6 +13,7 @@ from conftest import make_runtime_config
 from opx_chain import fetch
 from opx_chain.greeks import compute_greeks
 from opx_chain.config import reset_runtime_config, set_runtime_config_override
+from opx_chain.integrity import OptionChainDataIntegrityError, OptionChainIntegrityCode
 from opx_chain.providers.base import ProviderAuthenticationError, ProviderQuotaError
 from opx_chain.providers.massive import (
     CALLER_USER_AGENT, DEFAULT_SNAPSHOT_PAGE_LIMIT, MassiveProvider,
@@ -252,6 +253,41 @@ def test_massive_provider_parses_official_client_model_objects(monkeypatch):
     assert normalized.iloc[0]["implied_volatility"] == 0.31
     assert str(normalized.iloc[0]["option_quote_time"]) == "2024-03-20 13:40:00+00:00"
     assert chain.calls.iloc[0]["open_interest"] == 450
+
+
+@pytest.mark.parametrize(
+    ("field_path", "invalid_value"),
+    [
+        (("implied_volatility",), "malformed-iv"),
+        (("details", "contract_type"), "straddle"),
+    ],
+)
+def test_massive_provider_rejects_present_malformed_raw_values(
+    monkeypatch,
+    field_path,
+    invalid_value,
+):
+    """Adapter construction must preserve malformed values for the hard gate."""
+    payload = copy.deepcopy(list(make_snapshot_results()))
+    target = payload[0]
+    for field in field_path[:-1]:
+        target = target[field]
+    target[field_path[-1]] = invalid_value
+    monkeypatch.setattr(
+        MassiveProvider,
+        "_snapshot_results",
+        lambda self, ticker: tuple(payload),
+    )
+
+    with pytest.raises(OptionChainDataIntegrityError) as captured:
+        MassiveProvider().load_option_chain("TSLA", TEST_EXPIRATION)
+
+    assert (
+        captured.value.summary.counts_by_code[
+            OptionChainIntegrityCode.FIELD_VALUE_INVALID
+        ]
+        >= 1
+    )
 
 
 def test_massive_provider_underlying_price_falls_back_to_value(monkeypatch):

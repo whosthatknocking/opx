@@ -20,6 +20,10 @@ from marketdata.sdk_error import MarketDataClientErrorResult
 from scipy.optimize import brentq
 from scipy.stats import norm
 
+from opx_chain._integrity_validation import (
+    provider_payload_to_frame,
+    validate_option_chain_provider_response,
+)
 from opx_chain.config import (
     SCRIPT_VERSION,
     get_provider_credentials,
@@ -576,7 +580,7 @@ class MarketDataProvider(DataProvider):
             raise ProviderQuotaError(f"Market Data {context} failed: {detail}")
         raise RuntimeError(f"Market Data {context} failed: {message or f'HTTP {status_code}'}")
 
-    def _chain_frame(
+    def _chain_frame(  # pylint: disable=too-many-locals
         self,
         ticker: str,
         mode: Mode | None,
@@ -612,7 +616,29 @@ class MarketDataProvider(DataProvider):
             }
             if not payload:
                 return pd.DataFrame()
-            frame = pd.DataFrame(payload)
+            frame = provider_payload_to_frame(
+                payload,
+                ticker=ticker_key,
+                provider=self.name,
+            )
+            raw_sides = frame.get("side", pd.Series(None, index=frame.index))
+            normalized_sides = raw_sides.astype("string").str.strip().str.lower()
+            call_mask = normalized_sides.isin((OPTION_TYPE_CALL, "c"))
+            put_mask = normalized_sides.isin((OPTION_TYPE_PUT, "p"))
+            invalid_side_rows = frame.loc[~(call_mask | put_mask)]
+            if not invalid_side_rows.empty:
+                validate_option_chain_provider_response(
+                    invalid_side_rows,
+                    pd.DataFrame(),
+                    ticker=ticker_key,
+                    provider=self.name,
+                )
+            validate_option_chain_provider_response(
+                frame.loc[call_mask],
+                frame.loc[put_mask],
+                ticker=ticker_key,
+                provider=self.name,
+            )
             if "expiration" in frame.columns:
                 frame["expiration_date"] = _normalize_marketdata_expiration_series(
                     frame["expiration"]

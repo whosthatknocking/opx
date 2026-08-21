@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from decimal import Decimal
 import re
@@ -57,6 +58,7 @@ _RAW_OPTIONAL_NUMERIC_FIELDS = (
 )
 _RAW_TIMESTAMP_FIELDS = ("option_quote_time", "lastTradeDate", "updated")
 _RAW_BOOLEAN_FIELDS = ("is_in_the_money", "inTheMoney")
+_RAW_OPTION_TYPE_FIELDS = ("option_type", "side", "contract_type")
 
 
 def _missing(value: object) -> bool:
@@ -129,7 +131,34 @@ def _raw_contract_symbol(row: pd.Series) -> tuple[str | None, object | None]:
     return None, None
 
 
-def validate_option_chain_provider_response(
+def provider_payload_to_frame(
+    payload: object,
+    *,
+    ticker: str,
+    provider: str,
+) -> pd.DataFrame:
+    """Align one mapping-of-columns payload or raise a typed shape failure."""
+    try:
+        if not isinstance(payload, Mapping):
+            raise TypeError(f"expected mapping, got {type(payload).__name__}")
+        return pd.DataFrame(dict(payload))
+    except (TypeError, ValueError) as exc:
+        finding = _raw_finding(
+            OptionChainIntegrityCode.RESPONSE_SHAPE_INVALID,
+            ticker=ticker,
+            field="response",
+            expected="aligned tabular column arrays",
+            actual=str(exc),
+        )
+        summary = project_option_chain_integrity_summary(
+            (finding,),
+            total_rows=0,
+            provider=provider,
+        )
+        raise OptionChainDataIntegrityError(summary) from exc
+
+
+def validate_option_chain_provider_response(  # pylint: disable=too-many-statements
     calls: object,
     puts: object,
     *,
@@ -235,6 +264,54 @@ def validate_option_chain_provider_response(
                             field=field,
                             expected="boolean",
                             actual=row.get(field),
+                        )
+                    )
+
+            for field in _RAW_OPTION_TYPE_FIELDS:
+                if field not in frame.columns:
+                    continue
+                if _missing(row.get(field)):
+                    findings.append(
+                        _raw_finding(
+                            OptionChainIntegrityCode.REQUIRED_IDENTITY_FIELD_MISSING,
+                            row_index=row_index,
+                            ticker=ticker,
+                            contract_symbol=symbol,
+                            field=field,
+                            expected="call or put",
+                            actual="missing",
+                        )
+                    )
+                    continue
+                raw_side = str(row.get(field)).strip().lower()
+                normalized_side = {
+                    "c": OPTION_TYPE_CALL,
+                    OPTION_TYPE_CALL: OPTION_TYPE_CALL,
+                    "p": OPTION_TYPE_PUT,
+                    OPTION_TYPE_PUT: OPTION_TYPE_PUT,
+                }.get(raw_side)
+                if normalized_side is None:
+                    findings.append(
+                        _raw_finding(
+                            OptionChainIntegrityCode.FIELD_VALUE_INVALID,
+                            row_index=row_index,
+                            ticker=ticker,
+                            contract_symbol=symbol,
+                            field=field,
+                            expected="call or put",
+                            actual=row.get(field),
+                        )
+                    )
+                elif normalized_side != side:
+                    findings.append(
+                        _raw_finding(
+                            OptionChainIntegrityCode.CONTRACT_IDENTITY_MISMATCH,
+                            row_index=row_index,
+                            ticker=ticker,
+                            contract_symbol=symbol,
+                            field=field,
+                            expected=side,
+                            actual=normalized_side,
                         )
                     )
         row_offset += len(frame)

@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from massive import RESTClient
 
+from opx_chain._integrity_validation import validate_option_chain_provider_response
 from opx_chain.config import (
     DEFAULT_MASSIVE_SNAPSHOT_PAGE_LIMIT,
     SCRIPT_VERSION,
@@ -344,9 +345,8 @@ class MassiveProvider(DataProvider):  # pylint: disable=too-many-instance-attrib
         for result in self._snapshot_results(ticker):
             if _get_field(result, "details", "expiration_date") != expiration_date:
                 continue
-            option_type = _normalize_contract_type(_get_field(result, "details", "contract_type"))
-            if option_type is None:
-                continue
+            raw_option_type = _get_field(result, "details", "contract_type")
+            option_type = _normalize_contract_type(raw_option_type)
             row = {
                 "contract_symbol": _normalize_contract_symbol(
                     _coalesce(
@@ -358,7 +358,7 @@ class MassiveProvider(DataProvider):  # pylint: disable=too-many-instance-attrib
                     _get_field(result, "underlying_asset", "ticker"),
                     ticker.upper(),
                 ),
-                "option_type": option_type,
+                "option_type": option_type or raw_option_type,
                 "strike": _get_field(result, "details", "strike_price"),
                 "expiration_date": expiration_date,
                 "contract_size": _coalesce(
@@ -385,7 +385,7 @@ class MassiveProvider(DataProvider):  # pylint: disable=too-many-instance-attrib
                 ),
                 "volume": _get_field(result, "day", "volume"),
                 "open_interest": _get_field(result, "open_interest"),
-                "implied_volatility": coerce_float(_get_field(result, "implied_volatility")),
+                "implied_volatility": _get_field(result, "implied_volatility"),
                 "change": _get_field(result, "day", "change"),
                 "percent_change": _get_field(result, "day", "change_percent"),
                 "is_in_the_money": _compute_is_in_the_money(result, option_type),
@@ -403,6 +403,22 @@ class MassiveProvider(DataProvider):  # pylint: disable=too-many-instance-attrib
 
         calls = frame[frame["option_type"] == OPTION_TYPE_CALL].copy()
         puts = frame[frame["option_type"] == OPTION_TYPE_PUT].copy()
+        invalid_side_rows = frame.loc[~frame["option_type"].isin(
+            (OPTION_TYPE_CALL, OPTION_TYPE_PUT)
+        )]
+        if not invalid_side_rows.empty:
+            validate_option_chain_provider_response(
+                invalid_side_rows,
+                pd.DataFrame(),
+                ticker=ticker,
+                provider=self.name,
+            )
+        validate_option_chain_provider_response(
+            calls,
+            puts,
+            ticker=ticker,
+            provider=self.name,
+        )
         return OptionChainFrames(calls=calls, puts=puts)
 
     def normalize_option_frame(  # pylint: disable=too-many-arguments,too-many-positional-arguments
