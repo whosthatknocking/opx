@@ -118,6 +118,30 @@ def test_run_fetch_returns_the_exact_published_dataset_handle(tmp_path: Path):
     assert handle.dataset_id == backend.list_datasets()[0].dataset_id
 
 
+def test_compatibility_csv_failure_does_not_retract_published_handle(tmp_path: Path):
+    """A post-publication compatibility-copy error remains operational only."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True, storage_also_write_csv=True)
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        for fetcher_patch in patches:
+            stack.enter_context(fetcher_patch)
+        stack.enter_context(
+            patch.object(
+                fetcher,
+                "_write_validated_csv_artifacts",
+                side_effect=OSError("compatibility disk unavailable"),
+            )
+        )
+        handle = fetcher.run_fetch()
+
+    assert handle is not None
+    assert backend.get_dataset(handle.dataset_id).dataset_id == handle.dataset_id
+
+
 def test_integrity_failure_is_recorded_and_never_published(tmp_path: Path):
     """Fatal integrity summaries survive isolation as failed-run diagnostics."""
     from opx_chain import fetcher  # pylint: disable=import-outside-toplevel

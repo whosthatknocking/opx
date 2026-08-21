@@ -24,7 +24,10 @@ from opx_chain.config import (
 )
 from opx_chain.config_coercion import ConfigError, coerce_path
 from opx_chain.error_summary import compact_exception_summary
-from opx_chain.export import prepare_export_frame, write_options_csv
+from opx_chain.export import (  # pylint: disable=unused-import
+    prepare_export_frame,
+    write_options_csv,
+)
 from opx_chain.fetch import fetch_ticker_option_chain, fetch_ticker_price_context
 from opx_chain.integrity import (
     OptionChainDataIntegrityError,
@@ -47,8 +50,9 @@ from opx_chain.positions import (
 )
 from opx_chain.providers import get_data_provider
 from opx_chain.runlog import create_run_logger, get_logger, log_run_started
-from opx_chain.storage.atomic import atomic_file_write
+from opx_chain.storage.atomic import atomic_file_write, atomic_write_bytes
 from opx_chain.storage.factory import get_data_dir, get_storage_backend
+from opx_chain.storage.integrity import prepare_option_chain_dataset
 from opx_chain.storage.models import (
     ArtifactWrite,
     DatasetHandle,
@@ -622,6 +626,29 @@ def _run_log_reference(run_id: str, log_path: Path) -> bytes:
     return dumps_strict_json(payload, sort_keys=True, indent=2).encode()
 
 
+def _write_validated_csv_artifacts(
+    export_df: pd.DataFrame,
+    *,
+    provider: str,
+    output_path: Path,
+    latest_path: Path,
+    publication_id: str,
+) -> int:
+    """Validate exact CSV bytes before atomically replacing either artifact."""
+    prepared = prepare_option_chain_dataset(
+        DatasetWrite(
+            data=export_df,
+            provider=provider,
+            schema_version=SCHEMA_VERSION,
+            format="csv",
+        ),
+        dataset_id=publication_id,
+    )
+    atomic_write_bytes(output_path, prepared.content)
+    atomic_write_bytes(latest_path, prepared.content)
+    return len(prepared.content)
+
+
 def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-branches,too-many-locals,too-many-statements
     config,
     positions_path: Path | None,
@@ -823,20 +850,25 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
 
         runs_dir = _runs_dir(config)
         write_csv = storage is None or config.storage_also_write_csv
+        csv_written = False
         timestamp = format_utc_compact(datetime.now(tz=timezone.utc))
         if storage is not None and run_id is not None:
             csv_output_dir = runs_dir / run_id / "output"
         else:
             csv_output_dir = runs_dir
         output_path = csv_output_dir / f"options_engine_output_{timestamp}.csv"
-        if write_csv:
-            export_df = write_options_csv([combined], output_path=output_path)
-            file_size_bytes = output_path.stat().st_size
-            latest_path = runs_dir / "options_engine_output_latest.csv"
-            atomic_file_write(latest_path, lambda tmp_path: shutil.copy2(output_path, tmp_path))
-        else:
-            export_df = prepare_export_frame([combined])
-            file_size_bytes = 0
+        latest_path = runs_dir / "options_engine_output_latest.csv"
+        export_df = prepare_export_frame([combined])
+        file_size_bytes = 0
+        if storage is None:
+            file_size_bytes = _write_validated_csv_artifacts(
+                export_df,
+                provider=config.data_provider,
+                output_path=output_path,
+                latest_path=latest_path,
+                publication_id=f"csv-only-{timestamp}",
+            )
+            csv_written = True
 
         if storage is not None and run_id is not None:
             if resolved_positions_path.exists():
@@ -859,6 +891,23 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
             ))
             storage.finalize_run(run_id, RunSummary(status="complete"))
             dataset_handle = storage.get_dataset(dataset_record.dataset_id)
+            if write_csv:
+                try:
+                    file_size_bytes = _write_validated_csv_artifacts(
+                        export_df,
+                        provider=config.data_provider,
+                        output_path=output_path,
+                        latest_path=latest_path,
+                        publication_id=f"compatibility-{dataset_record.dataset_id}",
+                    )
+                    csv_written = True
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.warning(
+                        "compatibility_csv_write_failed dataset_id=%s error=%s",
+                        dataset_record.dataset_id,
+                        compact_exception_summary(exc),
+                        exc_info=True,
+                    )
             iv_history_summary = _ingest_iv_history_for_dataset(
                 dataset_record,
                 export_df,
@@ -868,7 +917,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
             )
 
         print()
-        if write_csv:
+        if csv_written:
             print(f"Saved: {output_path}")
         if price_context_path is not None:
             print(f"Price context: {price_context_path}")
@@ -886,7 +935,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
         if iv_history_summary is not None:
             print(f"IV history: {iv_history_summary}")
 
-        if write_csv:
+        if csv_written:
             file_size = format_file_size(file_size_bytes)
             summary = f"rows={row_count}  size={file_size}  dropped={filtered_out_rows}"
         else:
@@ -899,7 +948,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
             len(ticker_frames),
             row_count,
             file_size_bytes,
-            write_csv,
+            csv_written,
             run_id,
         )
         return dataset_handle

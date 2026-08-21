@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from conftest import BoundaryTickDateTime, make_runtime_config
+from conftest import BoundaryTickDateTime, make_option_chain_frame, make_runtime_config
 from opx_chain.price_context import PRICE_CONTEXT_SCHEMA_VERSION
 from opx_chain.positions import EMPTY_POSITION_SET
 from opx_chain.storage.memory import MemoryBackend
@@ -160,20 +160,12 @@ def test_enabled_price_context_option_run_writes_independent_json(
     )
     provider = StubProvider()
     price_fetch = PriceContextFetchStub()
-    option_frame = pd.DataFrame(
-        [
-            {
-                "underlying_symbol": "AAA",
-                "contract_symbol": "AAA260417C00100000",
-                "data_source": "stub",
-            }
-        ]
+    option_frame = make_option_chain_frame(
+        rows=1,
+        ticker="AAA",
+        provider="stub",
+        expiration="2026-04-17",
     )
-
-    def stub_write_options_csv(_ticker_frames, output_path):
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("underlying_symbol\nAAA\n", encoding="utf-8")
-        return option_frame
 
     with (
         patch.object(fetcher, "FETCHER_LOCK_PATH", tmp_path / "fetcher.lock"),
@@ -191,7 +183,6 @@ def test_enabled_price_context_option_run_writes_independent_json(
         patch.object(fetcher, "get_data_provider", return_value=provider),
         patch.object(fetcher, "fetch_ticker_price_context", side_effect=price_fetch),
         patch.object(fetcher, "fetch_ticker_option_chain", return_value=option_frame),
-        patch.object(fetcher, "write_options_csv", side_effect=stub_write_options_csv),
     ):
         result = fetcher.main([])
 

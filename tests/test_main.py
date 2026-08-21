@@ -156,8 +156,19 @@ def test_main_prints_rows_written_after_saved(monkeypatch, capsys, tmp_path: Pat
     )
 
     frames = {
-        "AAA": pd.DataFrame([{"x": 1}, {"x": 2}]),
-        "BBB": pd.DataFrame([{"x": 3}]),
+        "AAA": pd.DataFrame([
+            make_export_row(),
+            make_export_row(
+                contract_symbol="AAA260417C00110000",
+                strike=110.0,
+            ),
+        ]),
+        "BBB": pd.DataFrame([
+            make_export_row(
+                underlying_symbol="BBB",
+                contract_symbol="BBB260417C00100000",
+            )
+        ]),
     }
     monkeypatch.setattr(
         main,
@@ -168,25 +179,20 @@ def test_main_prints_rows_written_after_saved(monkeypatch, capsys, tmp_path: Pat
         ),
     )
 
-    written = {}
-
-    def stub_write_options_csv(_ticker_frames, output_path):
-        written["rows"] = sum(len(frame) for frame in _ticker_frames)
-        written["path"] = output_path
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("x" * 2048, encoding="utf-8")
-
-    monkeypatch.setattr(main, "write_options_csv", stub_write_options_csv)
-
     exit_code = main.main()
 
     stdout = capsys.readouterr().out
+    written_path = next(
+        path
+        for path in (tmp_path / "output").glob("options_engine_output_*.csv")
+        if path.name != "options_engine_output_latest.csv"
+    )
     assert exit_code == 0
     assert "Config:" in stdout
     assert "provider: yfinance" in stdout
-    assert f"Saved: {written['path']}" in stdout
-    assert "rows=3  size=2.0 KB" in stdout
-    assert stdout.index(f"Saved: {written['path']}") < stdout.index("rows=3  size=2.0 KB")
+    assert f"Saved: {written_path}" in stdout
+    assert "rows=3  size=" in stdout
+    assert stdout.index(f"Saved: {written_path}") < stdout.index("rows=3  size=")
 
 
 def test_main_uses_storage_dir_for_side_csv_and_lock(monkeypatch, tmp_path: Path):
@@ -217,20 +223,49 @@ def test_main_uses_storage_dir_for_side_csv_and_lock(monkeypatch, tmp_path: Path
         ),
     )
 
-    written = {}
-
-    def stub_write_options_csv(_ticker_frames, output_path):
-        written["path"] = output_path
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("ok", encoding="utf-8")
-
-    monkeypatch.setattr(main, "write_options_csv", stub_write_options_csv)
-
     assert main.main() == 0
 
-    assert written["path"].parent == custom_data_dir / "runs"
+    written_path = next(
+        path
+        for path in (custom_data_dir / "runs").glob("options_engine_output_*.csv")
+        if path.name != "options_engine_output_latest.csv"
+    )
+    assert written_path.parent == custom_data_dir / "runs"
     assert (custom_data_dir / "runs" / "options_engine_output_latest.csv").exists()
     assert (custom_data_dir / "fetcher.lock").exists()
+
+
+def test_storage_disabled_integrity_failure_preserves_previous_latest(
+    monkeypatch,
+    tmp_path: Path,
+):
+    """CSV-only publication fails closed before replacing the latest artifact."""
+    runs_dir = tmp_path / "output"
+    runs_dir.mkdir()
+    latest = runs_dir / "options_engine_output_latest.csv"
+    latest.write_text("previous", encoding="utf-8")
+    monkeypatch.setattr(main, "FETCHER_LOCK_PATH", tmp_path / "fetcher.lock")
+    monkeypatch.setattr(main, "RUNS_DIR", runs_dir)
+    monkeypatch.setattr(
+        main,
+        "get_runtime_config",
+        lambda: make_runtime_config(tickers=("AAA",), storage_enabled=False),
+    )
+    monkeypatch.setattr(
+        main,
+        "create_run_logger",
+        lambda: (StubLogger(), Path("/tmp/opx-run.log")),
+    )
+    invalid = make_export_row(option_type="put")
+    monkeypatch.setattr(
+        main,
+        "fetch_ticker_option_chain",
+        lambda *args, **kwargs: pd.DataFrame([invalid]),
+    )
+
+    assert main.main() == 1
+    assert latest.read_text(encoding="utf-8") == "previous"
+    assert list(runs_dir.glob("options_engine_output_20*.csv")) == []
 
 
 def test_main_recovers_stale_running_runs_before_count(monkeypatch, capsys, tmp_path: Path):
@@ -389,18 +424,11 @@ def test_main_uses_utc_timestamp_for_side_csv_filename(monkeypatch, tmp_path: Pa
         ),
     )
 
-    written = {}
-
-    def stub_write_options_csv(_ticker_frames, output_path):
-        written["path"] = output_path
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text("ok", encoding="utf-8")
-
-    monkeypatch.setattr(main, "write_options_csv", stub_write_options_csv)
-
     assert main.main() == 0
 
-    assert written["path"].name == "options_engine_output_20260427_170000.csv"
+    assert (
+        tmp_path / "output" / "options_engine_output_20260427_170000.csv"
+    ).exists()
 
 
 def test_main_prints_config_fallbacks(monkeypatch, capsys, tmp_path: Path):
