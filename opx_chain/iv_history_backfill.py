@@ -32,12 +32,10 @@ from opx_chain.iv_history import (
 from opx_chain.locks import acquire_nonblocking_file_lock, release_file_lock
 from opx_chain.paths import get_data_dir
 from opx_chain.providers import get_data_provider
-from opx_chain.storage._disk import retained_path_under_roots
 from opx_chain.storage.factory import get_storage_backend
 from opx_chain.storage.models import DatasetHandle, DatasetRecord
 from opx_chain.tickers import is_valid_ticker
 from opx_chain.timestamps import format_utc_compact, utc_now
-from opx_chain.utils import read_dataset_file
 
 _IV_HISTORY_COLUMNS = (
     "underlying_symbol",
@@ -289,28 +287,14 @@ def _listed_datasets(
     return sorted(deduped.values(), key=lambda record: record.created_at, reverse=True)
 
 
-def _storage_dataset_roots(storage) -> tuple[Path, ...]:
-    """Return known storage-managed dataset roots for retained-artifact reads."""
-    runs_dir = getattr(storage, "_runs_dir", None)
-    if runs_dir is None:
-        return ()
-    return (Path(runs_dir),)
-
-
 def _read_chain_dataset(
+    storage,
     record: DatasetRecord | DatasetHandle,
-    *,
-    allowed_roots: tuple[Path, ...] = (),
 ) -> pd.DataFrame:
-    if allowed_roots:
-        path = retained_path_under_roots(record.location, allowed_roots)
-        if path is None:
-            raise ValueError(
-                f"dataset location is outside managed storage roots: {record.dataset_id}"
-            )
-    else:
-        path = Path(record.location)
-    return read_dataset_file(path, columns=_IV_HISTORY_COLUMNS)
+    """Load one exact validated storage snapshot and select IV-history columns."""
+    validated = storage.load_validated_option_chain_dataset(record.dataset_id)
+    columns = [column for column in _IV_HISTORY_COLUMNS if column in validated.frame.columns]
+    return validated.frame.loc[:, columns].copy()
 
 
 def _observed_at_for_dataset(
@@ -348,18 +332,18 @@ def _sync_is_replay_complete(sync) -> bool:
 
 def _sync_has_observations(
     *,
+    storage,
     sync,
     record: DatasetRecord | DatasetHandle,
     tickers: tuple[str, ...],
     iv_store: IVHistoryStore,
-    allowed_roots: tuple[Path, ...] = (),
 ) -> bool:
     """Return True when retained sync metadata matches stored observations."""
     if not _sync_is_replay_complete(sync) or sync.observation_date is None:
         return False
     try:
         chain = _filter_frame_tickers(
-            _read_chain_dataset(record, allowed_roots=allowed_roots),
+            _read_chain_dataset(storage, record),
             tickers,
         )
     except Exception:  # pylint: disable=broad-exception-caught
@@ -627,7 +611,6 @@ def run_iv_history_backfill(
         storage_backend = storage or get_storage_backend(base_config)
         if storage_backend is None:
             raise RuntimeError("opx-chain storage is disabled or unavailable")
-        dataset_roots = _storage_dataset_roots(storage_backend)
         records = _listed_datasets(
             storage_backend,
             providers=resolved_providers,
@@ -641,11 +624,11 @@ def run_iv_history_backfill(
                 sync is not None
                 and not resolved_refresh
                 and _sync_has_observations(
+                    storage=storage_backend,
                     sync=sync,
                     record=record,
                     tickers=resolved_tickers,
                     iv_store=iv_store,
-                    allowed_roots=dataset_roots,
                 )
             ):
                 rows.append(
@@ -663,7 +646,7 @@ def run_iv_history_backfill(
                 continue
             try:
                 chain = _filter_frame_tickers(
-                    _read_chain_dataset(record, allowed_roots=dataset_roots),
+                    _read_chain_dataset(storage_backend, record),
                     resolved_tickers,
                 )
                 if chain.empty and sync is not None and _sync_is_replay_complete(sync):

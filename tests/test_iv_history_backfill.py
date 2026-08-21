@@ -5,6 +5,7 @@
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -65,6 +66,18 @@ class FakeStorage:
             if record.dataset_id == dataset_id:
                 return record
         raise KeyError(dataset_id)
+
+    def load_validated_option_chain_dataset(self, dataset_id: str):
+        """Return a fresh frame for the selected fake retained record."""
+        record = self.get_dataset(dataset_id)
+        location = Path(record.location).resolve()
+        if self._runs_dir is not None and not location.is_relative_to(
+            Path(self._runs_dir).resolve()
+        ):
+            raise ValueError(
+                f"dataset location is outside managed storage roots: {dataset_id}"
+            )
+        return SimpleNamespace(frame=pd.read_csv(record.location))
 
 
 class HistoricalProvider:
