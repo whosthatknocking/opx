@@ -230,10 +230,14 @@ def _append_identity_findings(
             )
 
         if "contract_size" in frame.columns and not _missing(row.get("contract_size")):
-            try:
-                standard_contract = float(row.get("contract_size")) == 100.0
-            except (TypeError, ValueError):
-                standard_contract = False
+            contract_size = row.get("contract_size")
+            if isinstance(contract_size, str) and contract_size.strip().upper() == "REGULAR":
+                standard_contract = True
+            else:
+                try:
+                    standard_contract = float(contract_size) == 100.0
+                except (TypeError, ValueError):
+                    standard_contract = False
             if not standard_contract:
                 findings.append(
                     _finding(

@@ -1,4 +1,5 @@
 """Filesystem-based StorageBackend implementation."""
+# pylint: disable=duplicate-code
 
 from __future__ import annotations
 
@@ -9,6 +10,13 @@ from datetime import datetime, timezone
 from heapq import nsmallest
 from pathlib import Path
 
+from opx_chain.integrity import (
+    OptionChainDatasetFactsStatus,
+    OptionChainIntegrityStatus,
+    ValidatedOptionChainDataset,
+    evaluate_option_chain_dataset_facts_status,
+    evaluate_option_chain_integrity_status,
+)
 from opx_chain.json_utils import dumps_strict_json, loads_strict_json
 from opx_chain.timestamps import datetime_to_iso, iso_to_datetime, utc_now
 from opx_chain.storage.models import (
@@ -32,7 +40,14 @@ from opx_chain.storage._disk import (
     retained_path_under_roots,
     resolve_child_path,
     write_artifact_bytes,
-    write_dataset_artifact,
+)
+from opx_chain.storage.integrity import (
+    prepare_option_chain_dataset,
+    record_integrity_from_mapping,
+    record_integrity_to_dict,
+    record_with_validated_metadata,
+    validate_stored_option_chain_snapshot,
+    validated_dataset_from_outcome,
 )
 from opx_chain.storage.serializers import get_serializer
 from opx_chain.storage.validation import (
@@ -190,6 +205,12 @@ class FilesystemBackend:
         except ValueError:
             return False
 
+    def _run_is_complete(self, run_id: str) -> bool:
+        try:
+            return self._read_run(run_id).get("status") == "complete"
+        except (OSError, TypeError, ValueError):
+            return False
+
     def _require_run(self, run_id: str) -> tuple[str, dict]:
         """Return validated run metadata when the run sidecar exists."""
         run_id = validate_run_id(run_id)
@@ -257,6 +278,7 @@ class FilesystemBackend:
             "location": record.location,
             "content_hash": record.content_hash,
             "script_version": record.script_version,
+            **record_integrity_to_dict(record),
         }
 
     @staticmethod
@@ -272,6 +294,7 @@ class FilesystemBackend:
             location=data["location"],
             content_hash=data["content_hash"],
             script_version=data.get("script_version", UNKNOWN_SCRIPT_VERSION),
+            **record_integrity_from_mapping(data),
         )
 
     def _scan_dataset_records(self) -> list[DatasetRecord]:
@@ -485,41 +508,46 @@ class FilesystemBackend:
             self._write_run(record.run_id, data)
 
     def write_dataset(self, run_id: str, dataset: DatasetWrite) -> DatasetRecord:
-        """Serialize the DataFrame, compute its hash, and write metadata."""
-        run_id, _ = self._require_run(run_id)
-        dataset = validate_dataset_write(dataset)
-        output_dir = self._run_output_dir(run_id)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        serializer = get_serializer(dataset.format)
-        record = None
-        artifact_path = None
-        try:
-            dataset_id, artifact_path, content_hash = write_dataset_artifact(
-                dataset.data, output_dir, dataset.format, serializer
-            )
-            record = DatasetRecord(
-                dataset_id=dataset_id,
-                run_id=run_id,
-                created_at=utc_now(),
-                provider=dataset.provider,
-                schema_version=dataset.schema_version,
-                row_count=len(dataset.data),
-                format=dataset.format,
-                location=str(artifact_path),
-                content_hash=content_hash,
-                script_version=dataset.script_version,
-            )
-            self._write_meta(record)
-            with self._run_sidecar_lock:
+        """Validate exact serialized bytes and stage a non-discoverable dataset."""
+        with self._run_sidecar_lock:
+            run_id, _ = self._require_run(run_id)
+            dataset = validate_dataset_write(dataset)
+            dataset_id = str(uuid.uuid4())
+            prepared = prepare_option_chain_dataset(dataset, dataset_id=dataset_id)
+            output_dir = self._run_output_dir(run_id)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = (output_dir / f"{dataset_id}.{dataset.format}").resolve()
+            record = None
+            try:
+                atomic_write_bytes(artifact_path, prepared.content)
+                record = DatasetRecord(
+                    dataset_id=dataset_id,
+                    run_id=run_id,
+                    created_at=utc_now(),
+                    provider=dataset.provider,
+                    schema_version=dataset.schema_version,
+                    row_count=len(prepared.frame),
+                    format=dataset.format,
+                    location=str(artifact_path),
+                    content_hash=prepared.content_hash,
+                    script_version=dataset.script_version,
+                )
+                record = record_with_validated_metadata(
+                    record,
+                    summary=prepared.integrity,
+                    facts=prepared.dataset_facts,
+                )
+                self._write_meta(record)
                 data = self._read_run(run_id)
                 data["dataset_id"] = dataset_id
                 self._write_run(run_id, data)
-            self._append_dataset_index(record)
-            self._prune_datasets()
-            return record
-        except Exception:  # pylint: disable=broad-exception-caught
-            self._rollback_dataset_write(record, artifact_path)
-            raise
+                self._append_dataset_index(record)
+                if data.get("status") == "complete":
+                    self._prune_datasets()
+                return record
+            except Exception:  # pylint: disable=broad-exception-caught
+                self._rollback_dataset_write(record, artifact_path)
+                raise
 
     def write_artifact(self, run_id: str, artifact: ArtifactWrite) -> ArtifactRecord:
         """Write artifact bytes to disk and return an ArtifactRecord."""
@@ -551,6 +579,8 @@ class FilesystemBackend:
         since: datetime | None = None,
         until: datetime | None = None,
         ticker: str | None = None,
+        integrity_status: OptionChainIntegrityStatus | None = None,
+        dataset_facts_status: OptionChainDatasetFactsStatus | None = None,
     ) -> list[DatasetRecord]:
         """Return dataset records from meta files, newest first."""
         filters = validate_dataset_list_filters(
@@ -559,6 +589,8 @@ class FilesystemBackend:
             since=since,
             until=until,
             ticker=ticker,
+            integrity_status=integrity_status,
+            dataset_facts_status=dataset_facts_status,
         )
         if filters.ticker == INVALID_TICKER_FILTER:
             return []
@@ -566,19 +598,29 @@ class FilesystemBackend:
             return []
         results = []
         for record in self._dataset_records():
-            if not self._run_sidecar_exists(record.run_id):
+            if not self._run_is_complete(record.run_id):
                 continue
             if filters.provider is not None and record.provider != filters.provider:
                 continue
             if filters.since is not None and record.created_at < filters.since:
-                break
-            if filters.since is None and len(results) >= filters.limit:
                 break
             if filters.until is not None and record.created_at > filters.until:
                 continue
             if filters.ticker is not None and not self._run_has_ticker(
                 record.run_id,
                 filters.ticker,
+            ):
+                continue
+            if (
+                filters.integrity_status is not None
+                and evaluate_option_chain_integrity_status(record)
+                is not filters.integrity_status
+            ):
+                continue
+            if (
+                filters.dataset_facts_status is not None
+                and evaluate_option_chain_dataset_facts_status(record)
+                is not filters.dataset_facts_status
             ):
                 continue
             results.append(record)
@@ -589,7 +631,29 @@ class FilesystemBackend:
     def get_dataset(self, dataset_id: str) -> DatasetHandle:
         """Return a DatasetHandle by loading the dataset's meta file."""
         dataset_id = validate_dataset_id(dataset_id)
-        return record_to_handle(self._find_dataset_record(dataset_id))
+        record = self._find_dataset_record(dataset_id)
+        if not self._run_is_complete(record.run_id):
+            raise KeyError(f"dataset not found: {dataset_id}")
+        return record_to_handle(record)
+
+    def load_validated_option_chain_dataset(
+        self,
+        dataset_id: str,
+    ) -> ValidatedOptionChainDataset:
+        """Validate one stable file-byte snapshot and persist its metadata transition."""
+        dataset_id = validate_dataset_id(dataset_id)
+        with self._run_sidecar_lock:
+            record = self._find_dataset_record(dataset_id)
+            if not self._run_is_complete(record.run_id):
+                raise KeyError(f"dataset not found: {dataset_id}")
+            artifact_path = retained_path_under_roots(record.location, (self._runs_dir,))
+            if artifact_path is None:
+                raise ValueError(f"dataset location escapes storage root: {dataset_id}")
+            content = artifact_path.read_bytes()
+            outcome = validate_stored_option_chain_snapshot(record, content)
+            self._write_meta(outcome.record)
+            self._append_dataset_index(outcome.record)
+            return validated_dataset_from_outcome(outcome)
 
     def finalize_run(self, run_id: str, summary: RunSummary) -> None:
         """Update the run sidecar with a completion status."""
@@ -602,6 +666,8 @@ class FilesystemBackend:
             data["finished_at"] = datetime_to_iso(utc_now())
             data["error_summary"] = summary.error_summary
             self._write_run(run_id, data)
+            if summary.status == "complete":
+                self._prune_datasets()
 
     def fail_run(self, run_id: str, error: str) -> None:
         """Update the run sidecar with a failed status and error message."""

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
-from conftest import make_runtime_config
+from conftest import make_option_chain_frame, make_runtime_config
 from opx_chain.config_coercion import ConfigError
 from opx_chain.fetcher import acquire_fetcher_lock, release_fetcher_lock
 from opx_chain.providers.base import ProviderQuotaError
@@ -23,20 +23,32 @@ from opx_chain.validate import ValidationFinding
 # ---------------------------------------------------------------------------
 
 def _make_ticker_df(ticker: str = "TSLA") -> pd.DataFrame:
-    return pd.DataFrame({
-        "underlying_symbol": [ticker] * 2,
-        "strike": [100.0, 110.0],
-        "expiration_date": ["2026-06-20", "2026-06-20"],
-        "passes_primary_screen": [True, True],
-    })
+    frame = make_option_chain_frame(
+        rows=2,
+        ticker=ticker,
+        expiration="2026-06-20",
+    )
+    frame["passes_primary_screen"] = True
+    return frame
 
 
 def _fetcher_patches(tmp_path: Path, config, backend, ticker_df=None, validation_findings=None):
     """Return a list of patch context managers for a minimal fetcher run."""
     from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
 
+    ticker_fetch_patch = None
     if ticker_df is None:
-        ticker_df = _make_ticker_df()
+        ticker_fetch_patch = patch.object(
+            fetcher,
+            "fetch_ticker_option_chain",
+            side_effect=lambda ticker, *args, **kwargs: _make_ticker_df(ticker),
+        )
+    else:
+        ticker_fetch_patch = patch.object(
+            fetcher,
+            "fetch_ticker_option_chain",
+            return_value=ticker_df,
+        )
     if validation_findings is None:
         validation_findings = []
 
@@ -56,7 +68,7 @@ def _fetcher_patches(tmp_path: Path, config, backend, ticker_df=None, validation
         patch.object(fetcher, "load_positions", return_value=MagicMock(
             stock_tickers=set(), option_keys=set(), empty=True
         )),
-        patch.object(fetcher, "fetch_ticker_option_chain", return_value=ticker_df),
+        ticker_fetch_patch,
         patch.object(fetcher, "validate_export_frame", return_value=validation_findings),
         patch.object(fetcher, "get_storage_backend", return_value=backend),
     ]
@@ -208,13 +220,15 @@ def test_fetcher_ingests_iv_history_after_dataset_publication(tmp_path: Path):
 
     backend = MemoryBackend()
     config = make_runtime_config(storage_enabled=True, tickers=("AAA",))
-    ticker_df = pd.DataFrame({
-        "underlying_symbol": ["AAA", "BBB"],
-        "strike": [100.0, 110.0],
-        "expiration_date": ["2026-06-20", "2026-06-20"],
-        "passes_primary_screen": [True, True],
-        "implied_volatility": [0.25, 0.30],
-    })
+    ticker_df = pd.concat(
+        (
+            make_option_chain_frame(rows=1, ticker="AAA", expiration="2026-06-20"),
+            make_option_chain_frame(rows=1, ticker="BBB", expiration="2026-06-20"),
+        ),
+        ignore_index=True,
+    )
+    ticker_df["passes_primary_screen"] = True
+    ticker_df["implied_volatility"] = [0.25, 0.30]
     patches = _fetcher_patches(tmp_path, config, backend, ticker_df=ticker_df)
     backfill_result = SimpleNamespace(rows=(
         SimpleNamespace(status="INGESTED", source_rows=2, stored_rows=7),

@@ -9,6 +9,7 @@ from typing import Any
 
 import pandas as pd
 
+from opx_chain.integrity import OptionChainDatasetFactsStatus, OptionChainIntegrityStatus
 from opx_chain.storage._disk import validate_path_component
 from opx_chain.storage.models import (
     ArtifactWrite,
@@ -37,6 +38,8 @@ class DatasetListFilters:
     since: datetime | None
     until: datetime | None
     ticker: str | None
+    integrity_status: OptionChainIntegrityStatus | None
+    dataset_facts_status: OptionChainDatasetFactsStatus | None
 
 
 def validate_list_limit(value: Any) -> int:
@@ -147,13 +150,15 @@ def validate_ticker_filter(value: Any) -> str | None:
     return normalized
 
 
-def validate_dataset_list_filters(
+def validate_dataset_list_filters(  # pylint: disable=too-many-arguments
     *,
     limit: Any,
     provider: Any,
     since: Any,
     until: Any,
     ticker: Any,
+    integrity_status: Any = None,
+    dataset_facts_status: Any = None,
 ) -> DatasetListFilters:
     """Validate all list_datasets query inputs with one shared boundary path."""
     return DatasetListFilters(
@@ -162,6 +167,16 @@ def validate_dataset_list_filters(
         since=validate_optional_datetime_filter(since, name="since"),
         until=validate_optional_datetime_filter(until, name="until"),
         ticker=validate_ticker_filter(ticker),
+        integrity_status=(
+            None
+            if integrity_status is None
+            else OptionChainIntegrityStatus(integrity_status)
+        ),
+        dataset_facts_status=(
+            None
+            if dataset_facts_status is None
+            else OptionChainDatasetFactsStatus(dataset_facts_status)
+        ),
     )
 
 

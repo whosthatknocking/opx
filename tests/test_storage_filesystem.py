@@ -14,7 +14,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from conftest import make_runtime_config
+from conftest import make_option_chain_frame, make_runtime_config
+from opx_chain import SCHEMA_VERSION
 import opx_chain.storage.filesystem as filesystem_mod
 from opx_chain.storage.base import StorageBackend
 from opx_chain.storage.factory import get_storage_backend
@@ -56,16 +57,20 @@ def _make_context(**kwargs) -> RunContext:
 
 
 def _make_dataframe(rows: int = 3) -> pd.DataFrame:
-    return pd.DataFrame(
-        {"underlying_symbol": ["TSLA"] * rows, "strike": [100.0, 110.0, 120.0][:rows]}
-    )
+    return make_option_chain_frame(rows=rows)
 
 
 def _write(backend: FilesystemBackend, run_id: str, rows: int = 3, provider: str = "yfinance"):
-    return backend.write_dataset(
+    record = backend.write_dataset(
         run_id,
-        DatasetWrite(data=_make_dataframe(rows), provider=provider, schema_version=1),
+        DatasetWrite(
+            data=make_option_chain_frame(rows=rows, provider=provider),
+            provider=provider,
+            schema_version=SCHEMA_VERSION,
+        ),
     )
+    backend.finalize_run(run_id, RunSummary(status="complete"))
+    return record
 
 
 def _meta_path(record: DatasetRecord) -> Path:
@@ -421,7 +426,12 @@ def test_write_dataset_returns_correct_record(tmp_path: Path):
     run_id = backend.create_run(_make_context())
     df = _make_dataframe()
     record = backend.write_dataset(
-        run_id, DatasetWrite(data=df, provider="yfinance", schema_version=1)
+        run_id,
+        DatasetWrite(
+            data=df,
+            provider="yfinance",
+            schema_version=SCHEMA_VERSION,
+        ),
     )
 
     assert isinstance(record, DatasetRecord)
@@ -479,7 +489,7 @@ def test_write_dataset_removes_artifact_when_meta_write_fails(monkeypatch, tmp_p
 
 
 def test_write_dataset_rolls_back_late_publish_failure(monkeypatch, tmp_path: Path):
-    """Rollback must clear metadata and run references after later publish failures."""
+    """A retention failure after visibility must not erase a validated dataset."""
     backend = _make_backend(tmp_path)
     run_id = backend.create_run(_make_context())
 
@@ -492,10 +502,10 @@ def test_write_dataset_rolls_back_late_publish_failure(monkeypatch, tmp_path: Pa
         _write(backend, run_id)
 
     output_dir = tmp_path / "runs" / run_id / "output"
-    assert not list(output_dir.glob("*.csv"))
-    assert not list(output_dir.glob("*.meta.json"))
-    assert backend.get_run(run_id).dataset_id is None
-    assert not backend.list_datasets()
+    assert len(list(output_dir.glob("*.csv"))) == 1
+    assert len(list(output_dir.glob("*.meta.json"))) == 1
+    assert backend.get_run(run_id).dataset_id is not None
+    assert len(backend.list_datasets()) == 1
 
 
 def test_get_dataset_returns_handle(tmp_path: Path):
@@ -1095,7 +1105,7 @@ def test_write_dataset_parquet_creates_parquet_file(tmp_path: Path):
         DatasetWrite(
             data=_make_dataframe(),
             provider="yfinance",
-            schema_version=1,
+            schema_version=SCHEMA_VERSION,
             format="parquet",
         ),
     )
@@ -1113,7 +1123,12 @@ def test_write_dataset_parquet_is_readable(tmp_path: Path):
     df = _make_dataframe()
     record = backend.write_dataset(
         run_id,
-        DatasetWrite(data=df, provider="yfinance", schema_version=1, format="parquet"),
+        DatasetWrite(
+            data=df,
+            provider="yfinance",
+            schema_version=SCHEMA_VERSION,
+            format="parquet",
+        ),
     )
 
     result = pd.read_parquet(record.location)
@@ -1127,7 +1142,12 @@ def test_write_dataset_uses_payload_format_over_backend_default(tmp_path: Path):
     run_id = backend.create_run(_make_context())
     record = backend.write_dataset(
         run_id,
-        DatasetWrite(data=_make_dataframe(), provider="yfinance", schema_version=1, format="csv"),
+        DatasetWrite(
+            data=_make_dataframe(),
+            provider="yfinance",
+            schema_version=SCHEMA_VERSION,
+            format="csv",
+        ),
     )
 
     assert record.format == "csv"

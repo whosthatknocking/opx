@@ -6,12 +6,19 @@ import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 
-import pandas as pd
 import pytest
+from conftest import make_option_chain_frame
 
+from opx_chain import SCHEMA_VERSION
 from opx_chain.storage._disk import write_artifact_bytes
 from opx_chain.storage.filesystem import FilesystemBackend
-from opx_chain.storage.models import ArtifactWrite, DatasetRecord, DatasetWrite, RunContext
+from opx_chain.storage.models import (
+    ArtifactWrite,
+    DatasetRecord,
+    DatasetWrite,
+    RunContext,
+    RunSummary,
+)
 from opx_chain.storage.sqlite_indexed import SqliteIndexedBackend
 
 
@@ -41,14 +48,16 @@ def _sqlite_backend(tmp_path: Path):
 
 
 def _write_dataset(backend, run_id: str) -> DatasetRecord:
-    return backend.write_dataset(
+    record = backend.write_dataset(
         run_id,
         DatasetWrite(
-            data=pd.DataFrame({"underlying_symbol": ["TSLA"], "strike": [100.0]}),
+            data=make_option_chain_frame(rows=1),
             provider="yfinance",
-            schema_version=1,
+            schema_version=SCHEMA_VERSION,
         ),
     )
+    backend.finalize_run(run_id, RunSummary(status="complete"))
+    return record
 
 
 def _tamper_artifact_location(

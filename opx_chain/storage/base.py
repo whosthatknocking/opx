@@ -5,6 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
+from opx_chain.integrity import (
+    OptionChainDatasetFactsStatus,
+    OptionChainIntegrityStatus,
+    ValidatedOptionChainDataset,
+)
 from opx_chain.storage.models import (
     ArtifactRecord,
     ArtifactWrite,
@@ -37,8 +42,14 @@ class StorageBackend(Protocol):  # pylint: disable=too-few-public-methods
         since: datetime | None = None,
         until: datetime | None = None,
         ticker: str | None = None,
+        integrity_status: OptionChainIntegrityStatus | None = None,
+        dataset_facts_status: OptionChainDatasetFactsStatus | None = None,
     ) -> list[DatasetRecord]: ...
     def get_dataset(self, dataset_id: str) -> DatasetHandle: ...  # pylint: disable=missing-function-docstring
+    def load_validated_option_chain_dataset(  # pylint: disable=missing-function-docstring
+        self,
+        dataset_id: str,
+    ) -> ValidatedOptionChainDataset: ...
     def get_run(self, run_id: str) -> RunRecord: ...  # pylint: disable=missing-function-docstring
     def get_ticker_results(self, run_id: str) -> list[TickerRunRecord]: ...  # pylint: disable=missing-function-docstring
     def finalize_run(self, run_id: str, summary: RunSummary) -> None: ...  # pylint: disable=missing-function-docstring

@@ -11,7 +11,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from conftest import make_runtime_config
+from conftest import make_option_chain_frame, make_runtime_config
+from opx_chain import SCHEMA_VERSION
 from opx_chain.storage.base import StorageBackend
 from opx_chain.storage.factory import get_storage_backend
 from opx_chain.storage.models import (
@@ -54,16 +55,20 @@ def _make_context(**kwargs) -> RunContext:
 
 
 def _make_dataframe(rows: int = 3) -> pd.DataFrame:
-    return pd.DataFrame(
-        {"underlying_symbol": ["TSLA"] * rows, "strike": [100.0, 110.0, 120.0][:rows]}
-    )
+    return make_option_chain_frame(rows=rows)
 
 
 def _write(backend: SqliteIndexedBackend, run_id: str, rows: int = 3, provider: str = "yfinance"):
-    return backend.write_dataset(
+    record = backend.write_dataset(
         run_id,
-        DatasetWrite(data=_make_dataframe(rows), provider=provider, schema_version=1),
+        DatasetWrite(
+            data=make_option_chain_frame(rows=rows, provider=provider),
+            provider=provider,
+            schema_version=SCHEMA_VERSION,
+        ),
     )
+    backend.finalize_run(run_id, RunSummary(status="complete"))
+    return record
 
 
 def _record_ticker(backend: SqliteIndexedBackend, run_id: str, ticker: str) -> None:
@@ -499,24 +504,35 @@ def test_write_dataset_removes_artifact_when_index_write_fails(
     tmp_path: Path,
     monkeypatch,
 ):
-    """A failed dataset DB transaction must not leave an unindexed output file."""
+    """A failed visibility transaction keeps the validated row non-discoverable."""
     backend = _make_backend(tmp_path)
     run_id = backend.create_run(_make_context())
+
+    original_prune = backend._prune_datasets  # pylint: disable=protected-access
 
     def fail_prune(_conn):
         raise sqlite3.OperationalError("index write failed")
 
     monkeypatch.setattr(backend, "_prune_datasets", fail_prune)
 
+    record = backend.write_dataset(
+        run_id,
+        DatasetWrite(
+            data=_make_dataframe(),
+            provider="yfinance",
+            schema_version=SCHEMA_VERSION,
+        ),
+    )
     with pytest.raises(sqlite3.OperationalError, match="index write failed"):
-        backend.write_dataset(
-            run_id,
-            DatasetWrite(data=_make_dataframe(), provider="yfinance", schema_version=1),
-        )
+        backend.finalize_run(run_id, RunSummary(status="complete"))
 
-    assert not list((tmp_path / "runs" / run_id / "output").glob("*.csv"))
-    assert backend.get_run(run_id).dataset_id is None
+    assert Path(record.location).exists()
+    assert backend.get_run(run_id).status == "running"
     assert not backend.list_datasets()
+
+    monkeypatch.setattr(backend, "_prune_datasets", original_prune)
+    backend.finalize_run(run_id, RunSummary(status="complete"))
+    assert backend.get_dataset(record.dataset_id).dataset_id == record.dataset_id
 
 
 def test_write_dataset_returns_correct_record(tmp_path: Path):
@@ -525,7 +541,12 @@ def test_write_dataset_returns_correct_record(tmp_path: Path):
     run_id = backend.create_run(_make_context())
     df = _make_dataframe()
     record = backend.write_dataset(
-        run_id, DatasetWrite(data=df, provider="yfinance", schema_version=1)
+        run_id,
+        DatasetWrite(
+            data=df,
+            provider="yfinance",
+            schema_version=SCHEMA_VERSION,
+        ),
     )
 
     assert isinstance(record, DatasetRecord)
@@ -834,7 +855,12 @@ def test_write_dataset_uses_payload_format_over_backend_default(tmp_path: Path):
     run_id = backend.create_run(_make_context())
     record = backend.write_dataset(
         run_id,
-        DatasetWrite(data=_make_dataframe(), provider="yfinance", schema_version=1, format="csv"),
+        DatasetWrite(
+            data=_make_dataframe(),
+            provider="yfinance",
+            schema_version=SCHEMA_VERSION,
+            format="csv",
+        ),
     )
 
     assert record.format == "csv"

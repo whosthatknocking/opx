@@ -1,11 +1,26 @@
 """In-memory storage backend for testing."""
+# pylint: disable=duplicate-code
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+import threading
 
+from opx_chain.integrity import (
+    OptionChainDatasetFactsStatus,
+    OptionChainIntegrityStatus,
+    ValidatedOptionChainDataset,
+    evaluate_option_chain_dataset_facts_status,
+    evaluate_option_chain_integrity_status,
+)
 from opx_chain.storage._disk import content_hash_for_bytes
+from opx_chain.storage.integrity import (
+    prepare_option_chain_dataset,
+    record_with_validated_metadata,
+    validate_stored_option_chain_snapshot,
+    validated_dataset_from_outcome,
+)
 from opx_chain.storage.models import (
     ArtifactRecord,
     ArtifactWrite,
@@ -20,7 +35,6 @@ from opx_chain.storage.models import (
     ValidationRecord,
     record_to_handle,
 )
-from opx_chain.storage.serializers import get_serializer
 from opx_chain.storage.validation import (
     INVALID_TICKER_FILTER,
     validate_dataset_list_filters,
@@ -37,7 +51,7 @@ from opx_chain.storage.validation import (
 )
 
 
-class MemoryBackend:
+class MemoryBackend:  # pylint: disable=too-many-instance-attributes
     """StorageBackend backed entirely by in-memory dicts.
 
     Writes no files. Used in tests that exercise the storage-enabled
@@ -53,6 +67,7 @@ class MemoryBackend:
         self._validations: dict[str, list[ValidationRecord]] = {}
         self._artifacts: dict[str, list[ArtifactRecord]] = {}
         self._dataset_bytes: dict[str, bytes] = {}
+        self._dataset_lock = threading.RLock()
 
     def _prune_datasets(self) -> None:
         """Drop oldest dataset records and bytes beyond the retention limit."""
@@ -127,31 +142,35 @@ class MemoryBackend:
         self._validations.setdefault(record.run_id, []).append(record)
 
     def write_dataset(self, run_id: str, dataset: DatasetWrite) -> DatasetRecord:
-        """Serialize the DataFrame in memory and record the dataset."""
-        run_id = self._require_run(run_id)
-        dataset = validate_dataset_write(dataset)
-        dataset_id = str(uuid.uuid4())
-        serializer = get_serializer(dataset.format)
-        content = serializer.serialize_bytes(dataset.data)
-        content_hash = content_hash_for_bytes(content)
-        record = DatasetRecord(
-            dataset_id=dataset_id,
-            run_id=run_id,
-            created_at=datetime.now(tz=timezone.utc),
-            provider=dataset.provider,
-            schema_version=dataset.schema_version,
-            row_count=len(dataset.data),
-            format=dataset.format,
-            location=f"memory://datasets/{dataset_id}.{dataset.format}",
-            content_hash=content_hash,
-            script_version=dataset.script_version,
-        )
-        self._datasets.append(record)
-        self._dataset_bytes[dataset_id] = content
-        if run_id in self._runs:
+        """Validate exact serialized bytes and stage a non-discoverable dataset."""
+        with self._dataset_lock:
+            run_id = self._require_run(run_id)
+            dataset = validate_dataset_write(dataset)
+            dataset_id = str(uuid.uuid4())
+            prepared = prepare_option_chain_dataset(dataset, dataset_id=dataset_id)
+            record = DatasetRecord(
+                dataset_id=dataset_id,
+                run_id=run_id,
+                created_at=datetime.now(tz=timezone.utc),
+                provider=dataset.provider,
+                schema_version=dataset.schema_version,
+                row_count=len(prepared.frame),
+                format=dataset.format,
+                location=f"memory://datasets/{dataset_id}.{dataset.format}",
+                content_hash=prepared.content_hash,
+                script_version=dataset.script_version,
+            )
+            record = record_with_validated_metadata(
+                record,
+                summary=prepared.integrity,
+                facts=prepared.dataset_facts,
+            )
+            self._datasets.append(record)
+            self._dataset_bytes[dataset_id] = bytes(prepared.content)
             self._runs[run_id].dataset_id = dataset_id
-        self._prune_datasets()
-        return record
+            if self._runs[run_id].status == "complete":
+                self._prune_datasets()
+            return record
 
     def write_artifact(self, run_id: str, artifact: ArtifactWrite) -> ArtifactRecord:
         """Store artifact bytes in memory and return an ArtifactRecord."""
@@ -181,20 +200,50 @@ class MemoryBackend:
         since: datetime | None = None,
         until: datetime | None = None,
         ticker: str | None = None,
+        integrity_status: OptionChainIntegrityStatus | None = None,
+        dataset_facts_status: OptionChainDatasetFactsStatus | None = None,
     ) -> list[DatasetRecord]:
         """Return datasets in reverse chronological order, newest first."""
         filters = validate_dataset_list_filters(
-            limit=limit, provider=provider, since=since, until=until, ticker=ticker
+            limit=limit,
+            provider=provider,
+            since=since,
+            until=until,
+            ticker=ticker,
+            integrity_status=integrity_status,
+            dataset_facts_status=dataset_facts_status,
         )
         if filters.ticker == INVALID_TICKER_FILTER:
             return []
-        results = list(reversed(self._datasets))
+        with self._dataset_lock:
+            results = [
+                record
+                for record in self._datasets
+                if (
+                    (run := self._runs.get(record.run_id)) is not None
+                    and run.status == "complete"
+                )
+            ]
         if filters.provider is not None:
             results = [r for r in results if r.provider == filters.provider]
         if filters.since is not None:
             results = [r for r in results if r.created_at >= filters.since]
         if filters.until is not None:
             results = [r for r in results if r.created_at <= filters.until]
+        if filters.integrity_status is not None:
+            results = [
+                record
+                for record in results
+                if evaluate_option_chain_integrity_status(record)
+                is filters.integrity_status
+            ]
+        if filters.dataset_facts_status is not None:
+            results = [
+                record
+                for record in results
+                if evaluate_option_chain_dataset_facts_status(record)
+                is filters.dataset_facts_status
+            ]
         if filters.ticker is not None:
             expected = filters.ticker
             results = [
@@ -208,14 +257,38 @@ class MemoryBackend:
                     for row in self._ticker_results.get(record.run_id, [])
                 )
             ]
+        results.sort(key=lambda item: (item.created_at, item.dataset_id), reverse=True)
         return results[:filters.limit]
 
     def get_dataset(self, dataset_id: str) -> DatasetHandle:
         """Return a DatasetHandle for the given dataset_id."""
         dataset_id = validate_dataset_id(dataset_id)
-        for record in self._datasets:
-            if record.dataset_id == dataset_id:
-                return record_to_handle(record)
+        with self._dataset_lock:
+            for record in self._datasets:
+                run = self._runs.get(record.run_id)
+                if (
+                    record.dataset_id == dataset_id
+                    and run is not None
+                    and run.status == "complete"
+                ):
+                    return record_to_handle(record)
+        raise KeyError(f"dataset not found: {dataset_id}")
+
+    def load_validated_option_chain_dataset(
+        self,
+        dataset_id: str,
+    ) -> ValidatedOptionChainDataset:
+        """Validate one copied in-memory byte snapshot and return its fresh frame."""
+        dataset_id = validate_dataset_id(dataset_id)
+        with self._dataset_lock:
+            for index, record in enumerate(self._datasets):
+                run = self._runs.get(record.run_id)
+                if record.dataset_id != dataset_id or run is None or run.status != "complete":
+                    continue
+                content = bytes(self._dataset_bytes[dataset_id])
+                outcome = validate_stored_option_chain_snapshot(record, content)
+                self._datasets[index] = outcome.record
+                return validated_dataset_from_outcome(outcome)
         raise KeyError(f"dataset not found: {dataset_id}")
 
     def get_run(self, run_id: str) -> RunRecord:
@@ -230,14 +303,17 @@ class MemoryBackend:
 
     def finalize_run(self, run_id: str, summary: RunSummary) -> None:
         """Mark run as complete or interrupted with the given summary."""
-        run_id = self._require_run(run_id)
-        summary = validate_run_summary(summary)
-        run = self._runs[run_id]
-        if run.status != "running":
-            return
-        run.status = summary.status
-        run.finished_at = datetime.now(tz=timezone.utc)
-        run.error_summary = summary.error_summary
+        with self._dataset_lock:
+            run_id = self._require_run(run_id)
+            summary = validate_run_summary(summary)
+            run = self._runs[run_id]
+            if run.status != "running":
+                return
+            run.status = summary.status
+            run.finished_at = datetime.now(tz=timezone.utc)
+            run.error_summary = summary.error_summary
+            if summary.status == "complete":
+                self._prune_datasets()
 
     def fail_run(self, run_id: str, error: str) -> None:
         """Mark run as failed with the given error message."""

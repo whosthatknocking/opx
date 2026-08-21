@@ -9,8 +9,41 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import pytest  # pylint: disable=wrong-import-position
+import pandas as pd  # pylint: disable=wrong-import-position
 
 from opx_chain.config import RuntimeConfig, reset_runtime_config  # pylint: disable=wrong-import-position
+from opx_chain.option_types import OPTION_TYPE_CALL  # pylint: disable=wrong-import-position
+
+
+def make_option_chain_frame(
+    *,
+    rows: int = 3,
+    ticker: str = "TSLA",
+    provider: str = "yfinance",
+    expiration: str = "2026-08-21",
+) -> pd.DataFrame:
+    """Return a small canonical standard-option frame for storage tests."""
+    root = ticker.upper().replace(".", "").replace("-", "")
+    expiration_code = datetime.strptime(expiration, "%Y-%m-%d").strftime("%y%m%d")
+    values = []
+    for index in range(rows):
+        strike = 100.0 + (index * 10.0)
+        values.append(
+            {
+                "data_source": provider,
+                "underlying_symbol": ticker,
+                "contract_symbol": f"{root}{expiration_code}C{int(strike * 1000):08d}",
+                "option_type": OPTION_TYPE_CALL,
+                "expiration_date": expiration,
+                "strike": strike,
+                "underlying_price": 125.0,
+                "underlying_price_time": "2026-08-21T15:30:00Z",
+                "bid": 3.0 + index,
+                "ask": 3.2 + index,
+                "contract_size": 100,
+            }
+        )
+    return pd.DataFrame(values)
 
 
 class BoundaryTickDateTime(datetime):

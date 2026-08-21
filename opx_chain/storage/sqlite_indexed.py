@@ -1,5 +1,5 @@
 """SQLite-indexed StorageBackend implementation."""
-# pylint: disable=duplicate-code
+# pylint: disable=duplicate-code,too-many-lines
 
 from __future__ import annotations
 
@@ -15,6 +15,13 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from opx_chain.integrity import (
+    OptionChainDatasetFactsStatus,
+    OptionChainIntegrityStatus,
+    ValidatedOptionChainDataset,
+    evaluate_option_chain_dataset_facts_status,
+    evaluate_option_chain_integrity_status,
+)
 from opx_chain.timestamps import datetime_to_iso, iso_to_datetime, utc_now
 from opx_chain.storage.models import (
     ArtifactRecord,
@@ -37,7 +44,14 @@ from opx_chain.storage._disk import (
     retained_path_under_roots,
     resolve_child_path,
     write_artifact_bytes,
-    write_dataset_artifact,
+)
+from opx_chain.storage.integrity import (
+    prepare_option_chain_dataset,
+    record_integrity_from_mapping,
+    record_integrity_to_dict,
+    record_with_validated_metadata,
+    validate_stored_option_chain_snapshot,
+    validated_dataset_from_outcome,
 )
 from opx_chain.storage.serializers import get_serializer
 from opx_chain.storage.validation import (
@@ -111,6 +125,14 @@ CREATE TABLE IF NOT EXISTS datasets (
     format          TEXT NOT NULL,
     location        TEXT NOT NULL,
     content_hash    TEXT NOT NULL
+    ,integrity_status TEXT NOT NULL DEFAULT 'unknown'
+    ,integrity_schema_version INTEGER
+    ,integrity_validator_version INTEGER
+    ,integrity_checked_at TEXT
+    ,integrity_content_hash TEXT
+    ,integrity_summary TEXT
+    ,dataset_facts_status TEXT NOT NULL DEFAULT 'unknown'
+    ,dataset_facts TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ticker_results (
@@ -150,7 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_provider_status_started
     ON runs(provider, status, started_at);
 """
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 _SCHEMA_MIGRATIONS: dict[int, str] = {
     2: "ALTER TABLE runs ADD COLUMN tickers TEXT NOT NULL DEFAULT '[]';",
     3: """
@@ -165,6 +187,16 @@ _SCHEMA_MIGRATIONS: dict[int, str] = {
        ALTER TABLE datasets ADD COLUMN created_at_sort_key INTEGER;
        CREATE INDEX IF NOT EXISTS idx_datasets_created_at_sort_key
            ON datasets(created_at_sort_key DESC, dataset_id DESC);
+       """,
+    6: """
+       ALTER TABLE datasets ADD COLUMN integrity_status TEXT NOT NULL DEFAULT 'unknown';
+       ALTER TABLE datasets ADD COLUMN integrity_schema_version INTEGER;
+       ALTER TABLE datasets ADD COLUMN integrity_validator_version INTEGER;
+       ALTER TABLE datasets ADD COLUMN integrity_checked_at TEXT;
+       ALTER TABLE datasets ADD COLUMN integrity_content_hash TEXT;
+       ALTER TABLE datasets ADD COLUMN integrity_summary TEXT;
+       ALTER TABLE datasets ADD COLUMN dataset_facts_status TEXT NOT NULL DEFAULT 'unknown';
+       ALTER TABLE datasets ADD COLUMN dataset_facts TEXT;
        """,
 }
 
@@ -487,9 +519,11 @@ class SqliteIndexedBackend:
             return []
         self._backfill_dataset_sort_keys(conn)
         rows = conn.execute(
-            "SELECT dataset_id, run_id, location, created_at, created_at_sort_key "
-            "FROM datasets "
-            "ORDER BY created_at_sort_key DESC, dataset_id DESC "
+            "SELECT d.dataset_id, d.run_id, d.location, d.created_at, "
+            "d.created_at_sort_key "
+            "FROM datasets d JOIN runs r ON r.run_id = d.run_id "
+            "WHERE r.status = 'complete' "
+            "ORDER BY d.created_at_sort_key DESC, d.dataset_id DESC "
             "LIMIT -1 OFFSET ?",
             (self._max_runs_retained,),
         ).fetchall()
@@ -590,10 +624,10 @@ class SqliteIndexedBackend:
             run_id = self._require_run_id(conn, run_id)
         output_dir = resolve_child_path(self._runs_dir, run_id) / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
-        serializer = get_serializer(dataset.format)
-        dataset_id, artifact_path, content_hash = write_dataset_artifact(
-            dataset.data, output_dir, dataset.format, serializer
-        )
+        dataset_id = str(uuid.uuid4())
+        prepared = prepare_option_chain_dataset(dataset, dataset_id=dataset_id)
+        artifact_path = (output_dir / f"{dataset_id}.{dataset.format}").resolve()
+        atomic_write_bytes(artifact_path, prepared.content)
         now = utc_now()
         record = DatasetRecord(
             dataset_id=dataset_id,
@@ -602,18 +636,28 @@ class SqliteIndexedBackend:
             provider=dataset.provider,
             script_version=dataset.script_version,
             schema_version=dataset.schema_version,
-            row_count=len(dataset.data),
+            row_count=len(prepared.frame),
             format=dataset.format,
             location=str(artifact_path),
-            content_hash=content_hash,
+            content_hash=prepared.content_hash,
         )
+        record = record_with_validated_metadata(
+            record,
+            summary=prepared.integrity,
+            facts=prepared.dataset_facts,
+        )
+        integrity_fields = record_integrity_to_dict(record)
         try:
             with self._open_connection() as conn:
                 conn.execute(
                     """INSERT INTO datasets
                        (dataset_id, run_id, created_at, created_at_sort_key, provider,
-                        script_version, schema_version, row_count, format, location, content_hash)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        script_version, schema_version, row_count, format, location, content_hash,
+                        integrity_status, integrity_schema_version,
+                        integrity_validator_version, integrity_checked_at,
+                        integrity_content_hash, integrity_summary,
+                        dataset_facts_status, dataset_facts)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         dataset_id,
                         run_id,
@@ -622,17 +666,33 @@ class SqliteIndexedBackend:
                         dataset.provider,
                         dataset.script_version,
                         dataset.schema_version,
-                        len(dataset.data),
+                        len(prepared.frame),
                         dataset.format,
                         str(artifact_path),
-                        content_hash,
+                        prepared.content_hash,
+                        integrity_fields["integrity_status"],
+                        integrity_fields["integrity_schema_version"],
+                        integrity_fields["integrity_validator_version"],
+                        integrity_fields["integrity_checked_at"],
+                        integrity_fields["integrity_content_hash"],
+                        json.dumps(integrity_fields["integrity_summary"], sort_keys=True),
+                        integrity_fields["dataset_facts_status"],
+                        json.dumps(integrity_fields["dataset_facts"], sort_keys=True),
                     ),
                 )
                 conn.execute(
                     "UPDATE runs SET dataset_id = ? WHERE run_id = ?",
                     (dataset_id, run_id),
                 )
-                pending_deletes = self._prune_datasets(conn)
+                run_status = conn.execute(
+                    "SELECT status FROM runs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()["status"]
+                pending_deletes = (
+                    self._prune_datasets(conn)
+                    if run_status == "complete"
+                    else []
+                )
                 conn.commit()
         except Exception:
             _unlink_orphaned_file(artifact_path)
@@ -692,13 +752,15 @@ class SqliteIndexedBackend:
             content_hash=content_hash,
         )
 
-    def list_datasets(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    def list_datasets(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches
         self,
         limit: int = 50,
         provider: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         ticker: str | None = None,
+        integrity_status: OptionChainIntegrityStatus | None = None,
+        dataset_facts_status: OptionChainDatasetFactsStatus | None = None,
     ) -> list[DatasetRecord]:
         """Return dataset records from SQLite, newest first."""
         filters = validate_dataset_list_filters(
@@ -707,16 +769,18 @@ class SqliteIndexedBackend:
             since=since,
             until=until,
             ticker=ticker,
+            integrity_status=integrity_status,
+            dataset_facts_status=dataset_facts_status,
         )
         if filters.limit == 0 or filters.ticker == INVALID_TICKER_FILTER:
             return []
 
         sql = (
             "SELECT d.*, r.tickers AS run_tickers "
-            "FROM datasets d LEFT JOIN runs r ON r.run_id = d.run_id"
+            "FROM datasets d JOIN runs r ON r.run_id = d.run_id"
         )
         params: list = []
-        conditions: list[str] = []
+        conditions: list[str] = ["r.status = 'complete'"]
         if filters.provider is not None:
             conditions.append("d.provider = ?")
             params.append(filters.provider)
@@ -729,9 +793,6 @@ class SqliteIndexedBackend:
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
         sql += " ORDER BY d.created_at_sort_key DESC, d.dataset_id DESC"
-        if filters.ticker is None:
-            sql += " LIMIT ?"
-            params.append(filters.limit)
         with self._open_connection() as conn:
             self._backfill_dataset_sort_keys_for_listing(conn)
             rows = conn.execute(sql, params).fetchall()
@@ -751,6 +812,18 @@ class SqliteIndexedBackend:
                     continue
                 if filters.until is not None and record.created_at > filters.until:
                     continue
+                if (
+                    filters.integrity_status is not None
+                    and evaluate_option_chain_integrity_status(record)
+                    is not filters.integrity_status
+                ):
+                    continue
+                if (
+                    filters.dataset_facts_status is not None
+                    and evaluate_option_chain_dataset_facts_status(record)
+                    is not filters.dataset_facts_status
+                ):
+                    continue
                 records.append(record)
                 if len(records) >= filters.limit:
                     break
@@ -761,7 +834,9 @@ class SqliteIndexedBackend:
         dataset_id = validate_dataset_id(dataset_id)
         with self._open_connection() as conn:
             row = conn.execute(
-                "SELECT * FROM datasets WHERE dataset_id = ?", (dataset_id,)
+                "SELECT d.* FROM datasets d JOIN runs r ON r.run_id = d.run_id "
+                "WHERE d.dataset_id = ? AND r.status = 'complete'",
+                (dataset_id,),
             ).fetchone()
         if row is None:
             raise KeyError(f"dataset not found: {dataset_id}")
@@ -770,6 +845,48 @@ class SqliteIndexedBackend:
         except ValueError as exc:
             raise ValueError(f"dataset metadata corrupt: {dataset_id}") from exc
         return record_to_handle(record)
+
+    def load_validated_option_chain_dataset(
+        self,
+        dataset_id: str,
+    ) -> ValidatedOptionChainDataset:
+        """Validate one stable file-byte snapshot and persist its metadata transition."""
+        dataset_id = validate_dataset_id(dataset_id)
+        outcome = None
+        with self._open_connection() as conn:
+            row = conn.execute(
+                "SELECT d.* FROM datasets d JOIN runs r ON r.run_id = d.run_id "
+                "WHERE d.dataset_id = ? AND r.status = 'complete'",
+                (dataset_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"dataset not found: {dataset_id}")
+            record = self._row_to_record(row)
+            artifact_path = retained_path_under_roots(record.location, (self._runs_dir,))
+            if artifact_path is None:
+                raise ValueError(f"dataset location escapes storage root: {dataset_id}")
+            content = artifact_path.read_bytes()
+            outcome = validate_stored_option_chain_snapshot(record, content)
+            fields = record_integrity_to_dict(outcome.record)
+            conn.execute(
+                "UPDATE datasets SET integrity_status = ?, integrity_schema_version = ?, "
+                "integrity_validator_version = ?, integrity_checked_at = ?, "
+                "integrity_content_hash = ?, integrity_summary = ?, "
+                "dataset_facts_status = ?, dataset_facts = ? WHERE dataset_id = ?",
+                (
+                    fields["integrity_status"],
+                    fields["integrity_schema_version"],
+                    fields["integrity_validator_version"],
+                    fields["integrity_checked_at"],
+                    fields["integrity_content_hash"],
+                    json.dumps(fields["integrity_summary"], sort_keys=True),
+                    fields["dataset_facts_status"],
+                    json.dumps(fields["dataset_facts"], sort_keys=True),
+                    dataset_id,
+                ),
+            )
+            conn.commit()
+        return validated_dataset_from_outcome(outcome)
 
     def finalize_run(self, run_id: str, summary: RunSummary) -> None:
         """Update the run row with a completion status."""
@@ -781,7 +898,9 @@ class SqliteIndexedBackend:
                 "WHERE run_id = ? AND status = 'running'",
                 (summary.status, datetime_to_iso(utc_now()), summary.error_summary, run_id),
             )
+            pending_deletes = self._prune_datasets(conn) if summary.status == "complete" else []
             conn.commit()
+        self._delete_deferred_paths(pending_deletes)
 
     def fail_run(self, run_id: str, error: str) -> None:
         """Update the run row with a failed status and error message."""
@@ -898,6 +1017,14 @@ class SqliteIndexedBackend:
 
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> DatasetRecord:
+        metadata = dict(row)
+        for field in ("integrity_summary", "dataset_facts"):
+            raw_value = metadata.get(field)
+            if isinstance(raw_value, str):
+                try:
+                    metadata[field] = json.loads(raw_value)
+                except (TypeError, json.JSONDecodeError):
+                    metadata[field] = None
         return DatasetRecord(
             dataset_id=row["dataset_id"],
             run_id=row["run_id"],
@@ -909,6 +1036,7 @@ class SqliteIndexedBackend:
             format=row["format"],
             location=row["location"],
             content_hash=row["content_hash"],
+            **record_integrity_from_mapping(metadata),
         )
 
     @staticmethod

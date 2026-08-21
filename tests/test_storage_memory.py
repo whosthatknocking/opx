@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import pytest
 
+from conftest import make_option_chain_frame
 from opx_chain import SCHEMA_VERSION
 from opx_chain.storage.base import StorageBackend
 from opx_chain.storage._disk import content_hash_for_bytes
@@ -35,16 +36,20 @@ def _make_context(**kwargs):
 
 
 def _make_dataframe(rows=3):
-    return pd.DataFrame(
-        {"underlying_symbol": ["TSLA"] * rows, "strike": [100.0, 110.0, 120.0][:rows]}
-    )
+    return make_option_chain_frame(rows=rows)
 
 
 def _write(backend, run_id, rows=3, provider="yfinance"):
-    return backend.write_dataset(
+    record = backend.write_dataset(
         run_id,
-        DatasetWrite(data=_make_dataframe(rows), provider=provider, schema_version=1),
+        DatasetWrite(
+            data=make_option_chain_frame(rows=rows, provider=provider),
+            provider=provider,
+            schema_version=SCHEMA_VERSION,
+        ),
     )
+    backend.finalize_run(run_id, RunSummary(status="complete"))
+    return record
 
 
 def _record_ticker(backend, run_id, ticker):
@@ -444,7 +449,12 @@ def test_write_dataset_parquet_stores_matching_bytes():
     df = _make_dataframe()
     record = backend.write_dataset(
         run_id,
-        DatasetWrite(data=df, provider="yfinance", schema_version=1, format="parquet"),
+        DatasetWrite(
+            data=df,
+            provider="yfinance",
+            schema_version=SCHEMA_VERSION,
+            format="parquet",
+        ),
     )
 
     content = backend._dataset_bytes[record.dataset_id]  # pylint: disable=protected-access
@@ -457,11 +467,11 @@ def test_write_dataset_parquet_stores_matching_bytes():
 
 
 def test_write_dataset_uses_shared_serializer_bytes_path():
-    """MemoryBackend should use the shared serializer abstraction."""
+    """MemoryBackend should delegate exact-byte work to the shared gate."""
     source = inspect.getsource(MemoryBackend.write_dataset)
 
-    assert "get_serializer(dataset.format)" in source
-    assert "serialize_bytes(dataset.data)" in source
+    assert "prepare_option_chain_dataset" in source
+    assert "prepared.content" in source
     assert "to_csv" not in source
     assert "to_parquet" not in source
 
@@ -489,7 +499,11 @@ def test_content_hash_is_deterministic():
     run_id = backend.create_run(_make_context())
     df = _make_dataframe()
     def make_write():
-        return DatasetWrite(data=df.copy(), provider="yfinance", schema_version=1)
+        return DatasetWrite(
+            data=df.copy(),
+            provider="yfinance",
+            schema_version=SCHEMA_VERSION,
+        )
 
     r1 = backend.write_dataset(run_id, make_write())
     r2 = backend.write_dataset(run_id, make_write())
