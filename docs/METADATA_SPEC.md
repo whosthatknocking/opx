@@ -46,8 +46,9 @@ being processed in the current pipeline run.
 
 One record per successfully written canonical dataset. Created by
 `write_dataset` after the artifact file is written and its hash is
-computed. This is the central record that downstream consumers discover
-and reference.
+computed. This is the central metadata record that inspection surfaces and
+downstream consumers discover and reference. Metadata discovery is not proof
+that a dataset is safe for semantic use.
 
 | Field | Type | Nullable | Step | Purpose |
 |---|---|---|---|---|
@@ -59,27 +60,28 @@ and reference.
 | `schema_version` | `int` | NO | 1 | Value of `SCHEMA_VERSION` at write time; consumer validates this before reading the artifact to detect schema drift |
 | `row_count` | `int` | NO | 2 | Total rows in the artifact; used for basic sanity validation by the consumer |
 | `format` | `str` | NO | 2 | `csv` (default) / `parquet`; tells the consumer which reader to use |
-| `location` | `str` | NO | 2 | Absolute path to the artifact file; consumers must use this field — never construct or infer the path independently |
+| `location` | `str` | NO | 2 | Absolute path to the artifact file; raw inspection/export code must use this field rather than construct or infer a path independently |
 | `content_hash` | `str` | NO | 2 | SHA-256 of artifact bytes, computed after write completes; used by the downstream consumer for integrity verification and deduplication |
-| `integrity_status` | `OptionChainIntegrityStatus` | NO | integrity | Effective state: `valid`, `invalid`, or `unknown`; only `valid` is publishable |
+| `integrity_status` | `OptionChainIntegrityStatus` | NO | integrity | Effective state: `valid`, `invalid`, or `unknown`; only `valid` is eligible for semantic use |
 | `integrity_schema_version` | `int` | YES | integrity | Serialized integrity-summary schema version |
 | `integrity_validator_version` | `int` | YES | integrity | Validator semantic version used for the exact bytes |
 | `integrity_checked_at` | `datetime` | YES | integrity | UTC time the exact artifact bytes were validated |
 | `integrity_content_hash` | `str` | YES | integrity | Hash the integrity summary covers; must equal `content_hash` when valid |
 | `integrity_summary` | `OptionChainIntegritySummary` | YES | integrity | Bounded aggregate and sample findings for the exact bytes |
-| `dataset_facts_status` | `OptionChainDatasetFactsStatus` | NO | integrity | `available` or `unknown`; only `available` is publishable |
+| `dataset_facts_status` | `OptionChainDatasetFactsStatus` | NO | integrity | `available` or `unknown`; only `available` is eligible for semantic use |
 | `dataset_facts` | `OptionChainDatasetFacts` | YES | integrity | Versioned, content-bound neutral ticker/time/expiration projection |
 
-**All fields are required by the downstream consumer.** The pipeline
-reads every field from `DatasetRecord` when resolving a chain to consume.
-`schema_version` and `content_hash` are the two fields most critical for
-correctness — schema drift or a corrupt artifact are fatal errors in the
-pipeline.
+Current integrity and dataset-facts fields are required for semantic use, but
+the metadata model supplies backward-compatible `unknown`/null defaults when
+reading legacy records. Semantic consumers do not decide safety from individual
+fields or open `location` directly; they call
+`load_validated_option_chain_dataset(dataset_id)`, which validates the complete
+record and exact artifact bytes.
 
 Legacy metadata defaults the two status fields to `unknown` and leaves the
-versioned projections null. It remains readable for raw inspection but is not
-discoverable or loadable by semantic consumers until it is revalidated and
-republished.
+versioned projections null. Unfiltered metadata lookup can still return that
+record for history, diagnostics, and raw inspection, but the validated loader
+rejects it until it is revalidated and republished.
 
 ---
 
@@ -284,13 +286,13 @@ as a read-only consumer. These are the fields it depends on from day one:
 |---|---|---|
 | `dataset_id` | `DatasetRecord` / `DatasetHandle` | Stable reference stored in the pipeline's `runs` table to link every pipeline run to the exact chain it consumed |
 | `provider` | `DatasetRecord` / `DatasetHandle` | Provider provenance for a specific dataset id; downstream consumers should not need paginated `list_datasets()` scans to recover it |
-| `location` | `DatasetHandle` | Absolute path used to read the chain artifact; must never be constructed independently |
-| `schema_version` | `DatasetHandle` | Checked against `SCHEMA_VERSION` before reading; mismatch is a fatal error — the pipeline refuses to process a drifted schema |
+| `location` | `DatasetHandle` | Artifact path for raw inspection/export; semantic consumers do not open it directly |
+| `schema_version` | `DatasetHandle` | Provenance exposed for assessment; the validated loader rejects an unsupported schema before returning a frame |
 | `script_version` | `RunRecord`, `DatasetRecord`, `DatasetHandle` | Carries the opx-chain package version that produced the run/dataset so downstream provenance does not depend on grepping `opx_runs.log` |
-| `content_hash` | `DatasetHandle` | Stored in `runs.chain_content_hash`; used for integrity verification and to detect whether a reused chain has been tampered with |
+| `content_hash` | `DatasetHandle` | Stored in `runs.chain_content_hash`; the validated loader binds it to the exact bytes and downstream consumers retain it as provenance |
 | `created_at` | `DatasetHandle` | Used for chain freshness assessment against the staleness thresholds in STRATEGY.md DATA AUTHORITY |
-| `row_count` | `DatasetHandle` | Basic sanity check; a zero-row dataset is a fatal error at stage 3 |
-| `format` | `DatasetHandle` | Selects the correct reader (`pd.read_csv` vs `pd.read_parquet`) |
+| `row_count` | `DatasetHandle` | Declared row count checked by the validated loader and retained as provenance |
+| `format` | `DatasetHandle` | Declared serialization format dispatched and checked by the validated loader |
 | `positions_fingerprint` | `RunRecord` | Cross-checked against the pipeline's own positions fingerprint to detect chain/positions mismatch |
 
 **`SCHEMA_VERSION`** (from `opx_chain/__init__.py`) is the most critical

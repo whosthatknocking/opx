@@ -404,9 +404,11 @@ keys, and symbol/column identity agreement are fatal invariants. Findings use
 bounded provider-neutral codes and samples. Provider names and upstream error
 text may be recorded as provenance, but they do not alter the validation rules.
 
-With storage enabled, `write_dataset` only stages a checked artifact. The
-dataset becomes discoverable after its exact run is finalized `complete` with
-`integrity_status=valid` and `dataset_facts_status=available`. Semantic readers
+With storage enabled, `write_dataset` only stages a checked artifact. Its exact
+run can finalize `complete` only with `integrity_status=valid` and
+`dataset_facts_status=available`. Completed dataset metadata remains
+discoverable for history and diagnostics even if it later evaluates invalid or
+unknown; metadata lookup alone never authorizes semantic use. Semantic readers
 must call `load_validated_option_chain_dataset(dataset_id)` and use the returned
 exact handle, frame, summary, and facts together. Strategy thresholds and
 portfolio meaning remain consumer responsibilities.

@@ -556,11 +556,13 @@ late print/log/storage cleanup errors from demoting an already published
 successful run.
 
 `write_dataset` stages an exact immutable artifact and its validation metadata;
-it is not the publication point. `list_datasets` and `get_dataset` expose a
-dataset only when its owning run is `complete`, the run points to that exact
-dataset id, `integrity_status=valid`, and `dataset_facts_status=available`.
-`finalize_run` validates that state and performs the terminal publication
-transition. Run sidecars that are part of the successful fetch artifact set,
+it is not the publication point. `finalize_run` requires the exact staged
+dataset id, `integrity_status=valid`, and `dataset_facts_status=available`, then
+performs the terminal publication transition. After completion,
+`list_datasets` and `get_dataset` expose metadata for history and diagnostics
+even if a later integrity evaluation becomes invalid or unknown; optional list
+filters select current reusable candidates. Run sidecars that are part of the
+successful fetch artifact set,
 such as the positions snapshot and run-log reference, are written before the
 transition. If those artifact writes fail, `delete_run_artifacts` removes any
 earlier sidecar, run-log, or pre-publication output artifacts for that run,

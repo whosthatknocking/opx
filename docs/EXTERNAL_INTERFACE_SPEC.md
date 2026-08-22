@@ -662,11 +662,11 @@ backend directly.
 records: list[DatasetRecord] = backend.list_datasets(limit=1)
 ```
 
-Returns the most recent published dataset. Publication requires a `complete`
-owning run, exact run-to-dataset identity, effective `valid` integrity, and
-`available` dataset facts. Staged, failed, interrupted, invalid, unknown, and
-legacy-unvalidated datasets are excluded. Returns an empty list if no published
-datasets exist.
+Returns the most recent completed-run dataset metadata. Optional
+`integrity_status` and `dataset_facts_status` filters let callers select
+reusable candidates or retain invalid/unknown history for diagnostics. Staged,
+failed, and interrupted runs are excluded. An unfiltered result is not proof of
+semantic validity; §3.7 is the only semantic read boundary.
 
 The consumer should validate:
 - the list is non-empty (no datasets available → cannot proceed)
@@ -679,8 +679,10 @@ The consumer should validate:
 handle: DatasetHandle = backend.get_dataset(dataset_id)
 ```
 
-Returns a `DatasetHandle` for the given published `dataset_id`. This is an
-identity/provenance lookup, not a semantic read. Semantic consumers use §3.7.
+Returns a `DatasetHandle` for the given completed-run `dataset_id`. This is an
+identity/provenance lookup, not a semantic read, and it can describe a dataset
+whose effective integrity later became invalid or unknown. Semantic consumers
+use §3.7.
 
 ### 3.6 Retrieving a run record
 
@@ -800,9 +802,10 @@ consumers need these for dataset provenance, direct provider lookup by
 producer-version provenance without having to fetch the full `DatasetRecord` or
 scan a paginated dataset listing.
 
-`location` is an absolute path when the filesystem backend is active. Downstream
-consumers must not construct or infer artifact paths independently — always use the
-`location` field from the handle.
+`location` is an absolute path when the filesystem backend is active. Raw
+inspection/export consumers must not construct or infer artifact paths
+independently; semantic consumers call the validated loader instead of opening
+`location`.
 
 Effective status is evaluated from the versioned metadata rather than trusting
 the stored status label alone. `valid` requires matching supported versions,
