@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import warnings
 
 import pandas as pd
 import pytest
@@ -87,3 +88,26 @@ def test_csv_serializer_writes_without_temp_leftovers(tmp_path: Path):
     assert bytes_written == dest.stat().st_size
     assert "TSLA" in dest.read_text(encoding="utf-8")
     assert not _temp_files_for(dest)
+
+
+def test_csv_serializer_reparses_wide_nullable_boolean_without_dtype_warning():
+    """Canonical nullable booleans must not trigger chunk-inference warnings."""
+    row_count = 10_128
+    frame = pd.DataFrame(
+        {
+            "risk_model_inconsistent": pd.Series(
+                [pd.NA] * 6_000 + [False] * 3_000 + [True] * 1_128,
+                dtype="boolean",
+            ),
+            **{f"metric_{index}": [float(index)] * row_count for index in range(96)},
+        }
+    )
+    serializer = CsvSerializer()
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        reparsed = serializer.deserialize_bytes(serializer.serialize_bytes(frame))
+
+    assert not [item for item in caught if issubclass(item.category, pd.errors.DtypeWarning)]
+    assert reparsed["risk_model_inconsistent"].dropna().map(type).eq(bool).all()
+    assert reparsed["risk_model_inconsistent"].isna().sum() == 6_000

@@ -40,7 +40,7 @@ class CsvSerializer:  # pylint: disable=too-few-public-methods
 
     def deserialize_bytes(self, content: bytes) -> pd.DataFrame:
         """Read one caller-owned DataFrame from CSV bytes."""
-        return pd.read_csv(BytesIO(content))
+        return pd.read_csv(BytesIO(content), low_memory=False)
 
 
 class ParquetSerializer:  # pylint: disable=too-few-public-methods
