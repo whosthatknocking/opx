@@ -1,5 +1,5 @@
 """Provider-neutral row-scope publication and durable-load contract tests."""
-# pylint: disable=missing-function-docstring
+# pylint: disable=duplicate-code,missing-function-docstring
 
 from dataclasses import replace
 from pathlib import Path
