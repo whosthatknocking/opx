@@ -9,7 +9,11 @@ from typing import Any
 
 import pandas as pd
 
-from opx_chain.integrity import OptionChainDatasetFactsStatus, OptionChainIntegrityStatus
+from opx_chain.integrity import (
+    OptionChainDatasetFactsStatus,
+    OptionChainIntegrityStatus,
+    OptionChainRowScope,
+)
 from opx_chain.storage._disk import validate_path_component
 from opx_chain.storage.models import (
     ArtifactWrite,
@@ -313,6 +317,10 @@ def validate_dataset_write(dataset: DatasetWrite) -> DatasetWrite:
         raise ValueError("dataset must be a DatasetWrite")
     if not isinstance(dataset.data, pd.DataFrame):
         raise ValueError("DatasetWrite.data must be a DataFrame")
+    if dataset.row_scope is not None and not isinstance(dataset.row_scope, OptionChainRowScope):
+        raise ValueError("DatasetWrite.row_scope must be an OptionChainRowScope or None")
+    if dataset.row_scope is not None and dataset.row_scope.kept_row_count != len(dataset.data):
+        raise ValueError("DatasetWrite.row_scope kept_row_count must equal data row count")
     return DatasetWrite(
         data=dataset.data,
         provider=validate_required_text(dataset.provider, name="DatasetWrite.provider"),
@@ -325,6 +333,7 @@ def validate_dataset_write(dataset: DatasetWrite) -> DatasetWrite:
             dataset.script_version,
             name="DatasetWrite.script_version",
         ),
+        row_scope=dataset.row_scope,
     )
 
 

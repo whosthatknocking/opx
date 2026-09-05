@@ -19,6 +19,7 @@ from opx_chain.storage.integrity import (
     prepare_option_chain_dataset,
     record_with_validated_metadata,
     validate_stored_option_chain_snapshot,
+    validate_option_chain_row_scope,
     validated_dataset_from_outcome,
 )
 from opx_chain.storage.models import (
@@ -164,6 +165,7 @@ class MemoryBackend:  # pylint: disable=too-many-instance-attributes
                 record,
                 summary=prepared.integrity,
                 facts=prepared.dataset_facts,
+                row_scope=dataset.row_scope,
             )
             self._datasets.append(record)
             self._dataset_bytes[dataset_id] = bytes(prepared.content)
@@ -287,6 +289,11 @@ class MemoryBackend:  # pylint: disable=too-many-instance-attributes
                     continue
                 content = bytes(self._dataset_bytes[dataset_id])
                 outcome = validate_stored_option_chain_snapshot(record, content)
+                ticker_results = self._ticker_results.get(record.run_id, [])
+                validate_option_chain_row_scope(
+                    outcome.record,
+                    ticker_results=ticker_results if ticker_results else None,
+                )
                 self._datasets[index] = outcome.record
                 return validated_dataset_from_outcome(outcome)
         raise KeyError(f"dataset not found: {dataset_id}")

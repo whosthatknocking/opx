@@ -31,6 +31,7 @@ from opx_chain.json_utils import (
 from opx_chain.integrity import (
     evaluate_option_chain_dataset_facts_status,
     evaluate_option_chain_integrity_status,
+    evaluate_option_chain_row_scope_status,
 )
 from opx_chain.option_types import OPTION_TYPE_CALL, OPTION_TYPE_PUT
 from opx_chain.paths import get_runs_dir
@@ -234,6 +235,7 @@ def _dataset_integrity_metadata(dataset_path: Path) -> dict[str, str | None]:
         "dataset_id": None,
         "integrity_status": "unknown",
         "dataset_facts_status": "unknown",
+        "row_scope_status": "unknown",
     }
     if _DATA_DIR_OVERRIDE is not None or _CSV_MODE:
         return default
@@ -249,6 +251,7 @@ def _dataset_integrity_metadata(dataset_path: Path) -> dict[str, str | None]:
             "dataset_id": record.dataset_id,
             "integrity_status": evaluate_option_chain_integrity_status(record).value,
             "dataset_facts_status": evaluate_option_chain_dataset_facts_status(record).value,
+            "row_scope_status": evaluate_option_chain_row_scope_status(record).value,
         }
     return default
 
@@ -271,6 +274,14 @@ def _integrity_dataset_cards(dataset_path: Path) -> list[DatasetCard]:
             "description": (
                 "Availability of content-bound neutral facts in storage metadata; "
                 "unknown means they must not be treated as verified."
+            ),
+        },
+        {
+            "name": "Row Scope Status",
+            "value": str(metadata["row_scope_status"]),
+            "description": (
+                "Availability of provider-neutral acquisition/filter-scope metadata; "
+                "unknown means source completeness cannot be asserted."
             ),
         },
     ]

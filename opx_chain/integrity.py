@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 OPTION_CHAIN_INTEGRITY_SUMMARY_SCHEMA_VERSION = 1
 OPTION_CHAIN_INTEGRITY_VALIDATOR_VERSION = 1
 OPTION_CHAIN_DATASET_FACTS_SCHEMA_VERSION = 1
+OPTION_CHAIN_ROW_SCOPE_SCHEMA_VERSION = 1
 CONTRACT_STRIKE_TOLERANCE = Decimal("0.0005")
 
 _CONTRACT_STRIKE_QUANTUM = Decimal("0.001")
@@ -50,6 +51,17 @@ class OptionChainDatasetFactsStatus(_StringEnum):
 
     AVAILABLE = "available"
     UNKNOWN = "unknown"
+
+
+class OptionChainRowScopeStatus(_StringEnum):
+    """Effective or declared acquisition row-scope metadata state."""
+
+    AVAILABLE = "available"
+    UNKNOWN = "unknown"
+
+
+class OptionChainRowScopeIntegrityError(ValueError):
+    """Raised when current row-scope metadata contradicts its dataset/run."""
 
 
 class OptionChainIntegritySeverity(_StringEnum):
@@ -400,6 +412,88 @@ class OptionChainDatasetFacts:
 
 
 @dataclass(frozen=True)
+class OptionChainRowScope:
+    """Provider-neutral acquisition/filter scope for one published dataset."""
+
+    schema_version: int
+    post_download_filters_enabled: bool
+    max_expiration_weeks: int
+    normalized_row_count: int
+    kept_row_count: int
+    filtered_row_count: int
+    ticker_count: int
+
+    def __post_init__(self) -> None:
+        _require_positive_version(self.schema_version, field="schema_version")
+        if self.schema_version != OPTION_CHAIN_ROW_SCOPE_SCHEMA_VERSION:
+            raise ValueError(
+                "unsupported option-chain row-scope schema version: "
+                f"{self.schema_version}"
+            )
+        if not isinstance(self.post_download_filters_enabled, bool):
+            raise ValueError("post_download_filters_enabled must be a boolean")
+        if (
+            isinstance(self.max_expiration_weeks, bool)
+            or not isinstance(self.max_expiration_weeks, int)
+            or self.max_expiration_weeks < 0
+        ):
+            raise ValueError("max_expiration_weeks must be a nonnegative integer")
+        for field in (
+            "normalized_row_count",
+            "kept_row_count",
+            "filtered_row_count",
+            "ticker_count",
+        ):
+            value = getattr(self, field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field} must be a nonnegative integer")
+        if self.normalized_row_count != self.kept_row_count + self.filtered_row_count:
+            raise ValueError(
+                "normalized_row_count must equal kept_row_count + filtered_row_count"
+            )
+        if not self.post_download_filters_enabled and self.filtered_row_count != 0:
+            raise ValueError(
+                "filtered_row_count must be zero when post-download filters are disabled"
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        """Return the strict documented JSON-safe row-scope shape."""
+        return {
+            "row_scope_schema_version": self.schema_version,
+            "post_download_filters_enabled": self.post_download_filters_enabled,
+            "max_expiration_weeks": self.max_expiration_weeks,
+            "normalized_row_count": self.normalized_row_count,
+            "kept_row_count": self.kept_row_count,
+            "filtered_row_count": self.filtered_row_count,
+            "ticker_count": self.ticker_count,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, object]) -> "OptionChainRowScope":
+        """Parse one strict serialized row-scope object."""
+        expected = {
+            "row_scope_schema_version",
+            "post_download_filters_enabled",
+            "max_expiration_weeks",
+            "normalized_row_count",
+            "kept_row_count",
+            "filtered_row_count",
+            "ticker_count",
+        }
+        if set(value) != expected:
+            raise ValueError("option-chain row-scope fields are malformed")
+        return cls(
+            schema_version=value["row_scope_schema_version"],
+            post_download_filters_enabled=value["post_download_filters_enabled"],
+            max_expiration_weeks=value["max_expiration_weeks"],
+            normalized_row_count=value["normalized_row_count"],
+            kept_row_count=value["kept_row_count"],
+            filtered_row_count=value["filtered_row_count"],
+            ticker_count=value["ticker_count"],
+        )
+
+
+@dataclass(frozen=True)
 class ValidatedOptionChainDataset:
     """One exact checked dataset snapshot returned by storage."""
 
@@ -614,10 +708,31 @@ def evaluate_option_chain_dataset_facts_status(
     return OptionChainDatasetFactsStatus.UNKNOWN
 
 
+def evaluate_option_chain_row_scope_status(
+    record: "DatasetRecord",
+) -> OptionChainRowScopeStatus:
+    """Return effective row-scope state independently from dataset facts."""
+    declared = getattr(record, "row_scope_status", OptionChainRowScopeStatus.UNKNOWN)
+    row_scope = getattr(record, "row_scope", None)
+    try:
+        declared = OptionChainRowScopeStatus(declared)
+    except ValueError:
+        return OptionChainRowScopeStatus.UNKNOWN
+    if (
+        declared is OptionChainRowScopeStatus.AVAILABLE
+        and isinstance(row_scope, OptionChainRowScope)
+        and row_scope.schema_version == OPTION_CHAIN_ROW_SCOPE_SCHEMA_VERSION
+        and row_scope.kept_row_count == getattr(record, "row_count", None)
+    ):
+        return OptionChainRowScopeStatus.AVAILABLE
+    return OptionChainRowScopeStatus.UNKNOWN
+
+
 __all__ = [
     "OPTION_CHAIN_DATASET_FACTS_SCHEMA_VERSION",
     "OPTION_CHAIN_INTEGRITY_SUMMARY_SCHEMA_VERSION",
     "OPTION_CHAIN_INTEGRITY_VALIDATOR_VERSION",
+    "OPTION_CHAIN_ROW_SCOPE_SCHEMA_VERSION",
     "OptionChainDataIntegrityError",
     "OptionChainDatasetFacts",
     "OptionChainDatasetFactsStatus",
@@ -627,6 +742,9 @@ __all__ = [
     "OptionChainIntegritySeverity",
     "OptionChainIntegrityStatus",
     "OptionChainIntegritySummary",
+    "OptionChainRowScope",
+    "OptionChainRowScopeIntegrityError",
+    "OptionChainRowScopeStatus",
     "OptionChainSchemaCompatibilityError",
     "OptionChainTickerTimeBounds",
     "ValidatedOptionChainDataset",

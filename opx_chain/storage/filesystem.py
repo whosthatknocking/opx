@@ -47,6 +47,7 @@ from opx_chain.storage.integrity import (
     record_integrity_to_dict,
     record_with_validated_metadata,
     validate_stored_option_chain_snapshot,
+    validate_option_chain_row_scope,
     validated_dataset_from_outcome,
 )
 from opx_chain.storage.serializers import get_serializer
@@ -536,6 +537,7 @@ class FilesystemBackend:
                     record,
                     summary=prepared.integrity,
                     facts=prepared.dataset_facts,
+                    row_scope=dataset.row_scope,
                 )
                 self._write_meta(record)
                 data = self._read_run(run_id)
@@ -651,6 +653,11 @@ class FilesystemBackend:
                 raise ValueError(f"dataset location escapes storage root: {dataset_id}")
             content = artifact_path.read_bytes()
             outcome = validate_stored_option_chain_snapshot(record, content)
+            ticker_results = self.get_ticker_results(record.run_id)
+            validate_option_chain_row_scope(
+                outcome.record,
+                ticker_results=ticker_results if ticker_results else None,
+            )
             self._write_meta(outcome.record)
             self._append_dataset_index(outcome.record)
             return validated_dataset_from_outcome(outcome)

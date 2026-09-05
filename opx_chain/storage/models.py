@@ -12,6 +12,8 @@ from opx_chain.integrity import (
     OptionChainDatasetFactsStatus,
     OptionChainIntegrityStatus,
     OptionChainIntegritySummary,
+    OptionChainRowScope,
+    OptionChainRowScopeStatus,
 )
 from opx_chain.version import __version__ as DEFAULT_SCRIPT_VERSION
 
@@ -59,6 +61,8 @@ class DatasetRecord:
     integrity_summary: OptionChainIntegritySummary | None = None
     dataset_facts_status: OptionChainDatasetFactsStatus = OptionChainDatasetFactsStatus.UNKNOWN
     dataset_facts: OptionChainDatasetFacts | None = None
+    row_scope_status: OptionChainRowScopeStatus = OptionChainRowScopeStatus.UNKNOWN
+    row_scope: OptionChainRowScope | None = None
 
 
 @dataclass
@@ -83,6 +87,8 @@ class DatasetHandle:
     integrity_summary: OptionChainIntegritySummary | None = None
     dataset_facts_status: OptionChainDatasetFactsStatus = OptionChainDatasetFactsStatus.UNKNOWN
     dataset_facts: OptionChainDatasetFacts | None = None
+    row_scope_status: OptionChainRowScopeStatus = OptionChainRowScopeStatus.UNKNOWN
+    row_scope: OptionChainRowScope | None = None
 
 
 def record_to_handle(record: DatasetRecord) -> DatasetHandle:
@@ -106,6 +112,8 @@ def record_to_handle(record: DatasetRecord) -> DatasetHandle:
         integrity_summary=record.integrity_summary,
         dataset_facts_status=record.dataset_facts_status,
         dataset_facts=record.dataset_facts,
+        row_scope_status=record.row_scope_status,
+        row_scope=record.row_scope,
     )
 
 
@@ -185,6 +193,7 @@ class DatasetWrite:
     schema_version: int
     format: str = "csv"
     script_version: str = DEFAULT_SCRIPT_VERSION
+    row_scope: OptionChainRowScope | None = None
 
 
 @dataclass

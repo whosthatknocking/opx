@@ -32,6 +32,13 @@ PUBLIC_NAMES: dict[str, set[str]] = {
         "fetch_ticker_option_chain",
         "run_fetch",
     },
+    "opx_chain.integrity": {
+        "OPTION_CHAIN_ROW_SCOPE_SCHEMA_VERSION",
+        "OptionChainRowScope",
+        "OptionChainRowScopeIntegrityError",
+        "OptionChainRowScopeStatus",
+        "evaluate_option_chain_row_scope_status",
+    },
     "opx_chain.iv_history_backfill": {
         "IVHistoryRecoveryBusyError",
         "IVHistoryRecoveryResult",

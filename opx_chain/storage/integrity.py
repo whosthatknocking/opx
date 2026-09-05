@@ -26,15 +26,24 @@ from opx_chain.integrity import (
     OptionChainIntegritySeverity,
     OptionChainIntegrityStatus,
     OptionChainIntegritySummary,
+    OptionChainRowScope,
+    OptionChainRowScopeIntegrityError,
+    OptionChainRowScopeStatus,
     OptionChainSchemaCompatibilityError,
     ValidatedOptionChainDataset,
     canonical_option_contract_key,
     compute_option_chain_dataset_facts,
     evaluate_option_chain_dataset_facts_status,
     evaluate_option_chain_integrity_status,
+    evaluate_option_chain_row_scope_status,
 )
 from opx_chain.storage._disk import content_hash_for_bytes
-from opx_chain.storage.models import DatasetRecord, DatasetWrite, record_to_handle
+from opx_chain.storage.models import (
+    DatasetRecord,
+    DatasetWrite,
+    TickerRunRecord,
+    record_to_handle,
+)
 from opx_chain.storage.serializers import get_serializer
 from opx_chain.timestamps import datetime_to_iso, iso_to_datetime
 
@@ -197,12 +206,16 @@ def record_with_validated_metadata(
     *,
     summary: OptionChainIntegritySummary,
     facts: OptionChainDatasetFacts,
+    row_scope: OptionChainRowScope | None = None,
 ) -> DatasetRecord:
     """Return the complete current valid metadata replacement."""
     if summary.status != "valid" or summary.content_hash != record.content_hash:
         raise ValueError("valid metadata must bind to the immutable dataset hash")
     if facts.content_hash != record.content_hash:
         raise ValueError("dataset facts must bind to the immutable dataset hash")
+    effective_row_scope = row_scope if row_scope is not None else record.row_scope
+    if effective_row_scope is not None and effective_row_scope.kept_row_count != record.row_count:
+        raise ValueError("row-scope kept count must bind to the dataset row count")
     return replace(
         record,
         integrity_status=OptionChainIntegrityStatus.VALID,
@@ -213,7 +226,50 @@ def record_with_validated_metadata(
         integrity_summary=summary,
         dataset_facts_status=OptionChainDatasetFactsStatus.AVAILABLE,
         dataset_facts=facts,
+        row_scope_status=(
+            OptionChainRowScopeStatus.AVAILABLE
+            if effective_row_scope is not None
+            else OptionChainRowScopeStatus.UNKNOWN
+        ),
+        row_scope=effective_row_scope,
     )
+
+
+def validate_option_chain_row_scope(
+    record: DatasetRecord,
+    *,
+    ticker_results: list[TickerRunRecord] | None = None,
+) -> None:
+    """Fail when declared current row scope contradicts dataset/run evidence."""
+    declared = record.row_scope_status
+    scope = record.row_scope
+    if declared is OptionChainRowScopeStatus.UNKNOWN and scope is None:
+        return
+    if (
+        declared is not OptionChainRowScopeStatus.AVAILABLE
+        or not isinstance(scope, OptionChainRowScope)
+        or evaluate_option_chain_row_scope_status(record)
+        is not OptionChainRowScopeStatus.AVAILABLE
+    ):
+        raise OptionChainRowScopeIntegrityError(
+            "option-chain row-scope metadata contradicts the dataset record"
+        )
+    if ticker_results is None:
+        return
+    expected = {
+        "ticker_count": len(ticker_results),
+        "normalized_row_count": sum(item.normalized_row_count for item in ticker_results),
+        "kept_row_count": sum(item.kept_row_count for item in ticker_results),
+        "filtered_row_count": sum(item.filtered_row_count for item in ticker_results),
+    }
+    mismatches = [
+        field for field, value in expected.items() if getattr(scope, field) != value
+    ]
+    if mismatches:
+        raise OptionChainRowScopeIntegrityError(
+            "option-chain row-scope metadata contradicts per-ticker results: "
+            + ", ".join(mismatches)
+        )
 
 
 def record_with_invalid_metadata(
@@ -348,8 +404,10 @@ def validated_dataset_from_outcome(
 
 def record_integrity_to_dict(record: DatasetRecord) -> dict[str, object]:
     """Serialize the additive integrity/facts metadata fields losslessly."""
+    validate_option_chain_row_scope(record)
     integrity_status = evaluate_option_chain_integrity_status(record)
     facts_status = evaluate_option_chain_dataset_facts_status(record)
+    row_scope_status = record.row_scope_status
     return {
         "integrity_status": integrity_status.value,
         "integrity_schema_version": record.integrity_schema_version,
@@ -365,6 +423,12 @@ def record_integrity_to_dict(record: DatasetRecord) -> dict[str, object]:
         "dataset_facts": (
             record.dataset_facts.to_dict()
             if isinstance(record.dataset_facts, OptionChainDatasetFacts)
+            else None
+        ),
+        "row_scope_status": row_scope_status.value,
+        "row_scope": (
+            record.row_scope.to_dict()
+            if isinstance(record.row_scope, OptionChainRowScope)
             else None
         ),
     }
@@ -384,6 +448,15 @@ def record_integrity_from_mapping(data: Mapping[str, object]) -> dict[str, objec
         )
     except (TypeError, ValueError):
         facts_status = OptionChainDatasetFactsStatus.UNKNOWN
+    row_scope_declared = "row_scope_status" in data or "row_scope" in data
+    try:
+        row_scope_status = OptionChainRowScopeStatus(
+            data.get("row_scope_status", OptionChainRowScopeStatus.UNKNOWN.value)
+        )
+    except (TypeError, ValueError) as exc:
+        if row_scope_declared:
+            raise ValueError("option-chain row-scope status is malformed") from exc
+        row_scope_status = OptionChainRowScopeStatus.UNKNOWN
     try:
         summary_value = data.get("integrity_summary")
         summary = (
@@ -403,6 +476,22 @@ def record_integrity_from_mapping(data: Mapping[str, object]) -> dict[str, objec
     except (KeyError, TypeError, ValueError):
         facts = None
     try:
+        row_scope_value = data.get("row_scope")
+        row_scope = (
+            OptionChainRowScope.from_dict(row_scope_value)
+            if isinstance(row_scope_value, Mapping)
+            else None
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        if row_scope_declared:
+            raise ValueError("option-chain row-scope metadata is malformed") from exc
+        row_scope = None
+    if row_scope_declared:
+        if row_scope_status is OptionChainRowScopeStatus.AVAILABLE and row_scope is None:
+            raise ValueError("available option-chain row scope is missing")
+        if row_scope_status is OptionChainRowScopeStatus.UNKNOWN and row_scope is not None:
+            raise ValueError("unknown option-chain row scope must be null")
+    try:
         checked_at = iso_to_datetime(data.get("integrity_checked_at"))
     except (TypeError, ValueError):
         checked_at = None
@@ -415,4 +504,6 @@ def record_integrity_from_mapping(data: Mapping[str, object]) -> dict[str, objec
         "integrity_summary": summary,
         "dataset_facts_status": facts_status,
         "dataset_facts": facts,
+        "row_scope_status": row_scope_status,
+        "row_scope": row_scope,
     }

@@ -70,6 +70,8 @@ that a dataset is safe for semantic use.
 | `integrity_summary` | `OptionChainIntegritySummary` | YES | integrity | Bounded aggregate and sample findings for the exact bytes |
 | `dataset_facts_status` | `OptionChainDatasetFactsStatus` | NO | integrity | `available` or `unknown`; only `available` is eligible for semantic use |
 | `dataset_facts` | `OptionChainDatasetFacts` | YES | integrity | Versioned, content-bound neutral ticker/time/expiration projection |
+| `row_scope_status` | `OptionChainRowScopeStatus` | NO | publication | `available` or `unknown`; legacy absence is explicitly unknown |
+| `row_scope` | `OptionChainRowScope` | YES | publication | Versioned provider-neutral filter state, acquisition horizon, and conserved row/ticker totals |
 
 Current integrity and dataset-facts fields are required for semantic use, but
 the metadata model supplies backward-compatible `unknown`/null defaults when
@@ -112,6 +114,8 @@ public contract — these fields may not be removed or renamed without a
 | `integrity_summary` | `OptionChainIntegritySummary` | YES | `DatasetRecord.integrity_summary` |
 | `dataset_facts_status` | `OptionChainDatasetFactsStatus` | NO | `DatasetRecord.dataset_facts_status` |
 | `dataset_facts` | `OptionChainDatasetFacts` | YES | `DatasetRecord.dataset_facts` |
+| `row_scope_status` | `OptionChainRowScopeStatus` | NO | `DatasetRecord.row_scope_status` |
+| `row_scope` | `OptionChainRowScope` | YES | `DatasetRecord.row_scope` |
 
 `run_id`, `provider`, `content_hash`, and `created_at` are required additions to
 `DatasetHandle` (they were previously only on `DatasetRecord`). Downstream
@@ -233,7 +237,9 @@ CREATE TABLE datasets (
     integrity_content_hash      TEXT,
     integrity_summary_json      TEXT,
     dataset_facts_status        TEXT NOT NULL DEFAULT 'unknown',
-    dataset_facts_json          TEXT
+    dataset_facts_json          TEXT,
+    row_scope_status            TEXT NOT NULL DEFAULT 'unknown',
+    row_scope_json              TEXT
 );
 
 CREATE TABLE ticker_results (

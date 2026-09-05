@@ -51,6 +51,7 @@ from opx_chain.storage.integrity import (
     record_integrity_to_dict,
     record_with_validated_metadata,
     validate_stored_option_chain_snapshot,
+    validate_option_chain_row_scope,
     validated_dataset_from_outcome,
 )
 from opx_chain.storage.serializers import get_serializer
@@ -133,6 +134,8 @@ CREATE TABLE IF NOT EXISTS datasets (
     ,integrity_summary TEXT
     ,dataset_facts_status TEXT NOT NULL DEFAULT 'unknown'
     ,dataset_facts TEXT
+    ,row_scope_status TEXT NOT NULL DEFAULT 'unknown'
+    ,row_scope TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ticker_results (
@@ -172,7 +175,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_provider_status_started
     ON runs(provider, status, started_at);
 """
 
-_SCHEMA_VERSION = 6
+_SCHEMA_VERSION = 7
 _SCHEMA_MIGRATIONS: dict[int, str] = {
     2: "ALTER TABLE runs ADD COLUMN tickers TEXT NOT NULL DEFAULT '[]';",
     3: """
@@ -197,6 +200,10 @@ _SCHEMA_MIGRATIONS: dict[int, str] = {
        ALTER TABLE datasets ADD COLUMN integrity_summary TEXT;
        ALTER TABLE datasets ADD COLUMN dataset_facts_status TEXT NOT NULL DEFAULT 'unknown';
        ALTER TABLE datasets ADD COLUMN dataset_facts TEXT;
+       """,
+    7: """
+       ALTER TABLE datasets ADD COLUMN row_scope_status TEXT NOT NULL DEFAULT 'unknown';
+       ALTER TABLE datasets ADD COLUMN row_scope TEXT;
        """,
 }
 
@@ -645,6 +652,7 @@ class SqliteIndexedBackend:
             record,
             summary=prepared.integrity,
             facts=prepared.dataset_facts,
+            row_scope=dataset.row_scope,
         )
         integrity_fields = record_integrity_to_dict(record)
         try:
@@ -656,8 +664,9 @@ class SqliteIndexedBackend:
                         integrity_status, integrity_schema_version,
                         integrity_validator_version, integrity_checked_at,
                         integrity_content_hash, integrity_summary,
-                        dataset_facts_status, dataset_facts)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        dataset_facts_status, dataset_facts,
+                        row_scope_status, row_scope)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         dataset_id,
                         run_id,
@@ -678,6 +687,8 @@ class SqliteIndexedBackend:
                         json.dumps(integrity_fields["integrity_summary"], sort_keys=True),
                         integrity_fields["dataset_facts_status"],
                         json.dumps(integrity_fields["dataset_facts"], sort_keys=True),
+                        integrity_fields["row_scope_status"],
+                        json.dumps(integrity_fields["row_scope"], sort_keys=True),
                     ),
                 )
                 conn.execute(
@@ -867,12 +878,18 @@ class SqliteIndexedBackend:
                 raise ValueError(f"dataset location escapes storage root: {dataset_id}")
             content = artifact_path.read_bytes()
             outcome = validate_stored_option_chain_snapshot(record, content)
+            ticker_results = self.get_ticker_results(record.run_id)
+            validate_option_chain_row_scope(
+                outcome.record,
+                ticker_results=ticker_results if ticker_results else None,
+            )
             fields = record_integrity_to_dict(outcome.record)
             conn.execute(
                 "UPDATE datasets SET integrity_status = ?, integrity_schema_version = ?, "
                 "integrity_validator_version = ?, integrity_checked_at = ?, "
                 "integrity_content_hash = ?, integrity_summary = ?, "
-                "dataset_facts_status = ?, dataset_facts = ? WHERE dataset_id = ?",
+                "dataset_facts_status = ?, dataset_facts = ?, "
+                "row_scope_status = ?, row_scope = ? WHERE dataset_id = ?",
                 (
                     fields["integrity_status"],
                     fields["integrity_schema_version"],
@@ -882,6 +899,8 @@ class SqliteIndexedBackend:
                     json.dumps(fields["integrity_summary"], sort_keys=True),
                     fields["dataset_facts_status"],
                     json.dumps(fields["dataset_facts"], sort_keys=True),
+                    fields["row_scope_status"],
+                    json.dumps(fields["row_scope"], sort_keys=True),
                     dataset_id,
                 ),
             )
@@ -1018,7 +1037,7 @@ class SqliteIndexedBackend:
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> DatasetRecord:
         metadata = dict(row)
-        for field in ("integrity_summary", "dataset_facts"):
+        for field in ("integrity_summary", "dataset_facts", "row_scope"):
             raw_value = metadata.get(field)
             if isinstance(raw_value, str):
                 try:

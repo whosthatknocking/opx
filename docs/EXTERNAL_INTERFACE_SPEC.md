@@ -319,6 +319,7 @@ from opx_chain.integrity import (
     OPTION_CHAIN_DATASET_FACTS_SCHEMA_VERSION,
     OPTION_CHAIN_INTEGRITY_SUMMARY_SCHEMA_VERSION,
     OPTION_CHAIN_INTEGRITY_VALIDATOR_VERSION,
+    OPTION_CHAIN_ROW_SCOPE_SCHEMA_VERSION,
     OptionChainDataIntegrityError,
     OptionChainDatasetFacts,
     OptionChainDatasetFactsStatus,
@@ -328,12 +329,16 @@ from opx_chain.integrity import (
     OptionChainIntegritySeverity,
     OptionChainIntegrityStatus,
     OptionChainIntegritySummary,
+    OptionChainRowScope,
+    OptionChainRowScopeIntegrityError,
+    OptionChainRowScopeStatus,
     OptionChainSchemaCompatibilityError,
     OptionChainTickerTimeBounds,
     ValidatedOptionChainDataset,
     canonical_option_contract_key,
     evaluate_option_chain_dataset_facts_status,
     evaluate_option_chain_integrity_status,
+    evaluate_option_chain_row_scope_status,
 )
 from opx_chain.positions import (
     OptionPositionKey,
@@ -565,6 +570,7 @@ run_fetch(
     max_expiration_weeks=34,
     stale_quote_seconds=86_400,
     data_provider="marketdata",
+    enable_filters=False,
 )
 run_fetch(dry_run=True)
 run_fetch(price_context_only=True)
@@ -581,6 +587,12 @@ subprocess. For normal option-chain fetches, it acquires the same exclusive
 lock, runs the full fetch pipeline, and writes the result to storage. The
 caller blocks until the fetch completes. Dry runs do not acquire the fetcher
 lock and are not a lock-availability or concurrency preflight.
+
+**`enable_filters` (optional `bool`)** — overrides generic post-download
+filtering for this run only. `None` preserves configuration. `False` retains
+all normalized rows that pass enrichment and validation, matching the CLI
+`--disable-filters` path. The resolved value participates in the run config
+fingerprint and is recorded in dataset row-scope metadata.
 
 **`positions_path` (optional `Path`)** — overrides the default positions file, identical
 in semantics to the `--positions` CLI flag. When absent, the configured default is used.
@@ -793,6 +805,8 @@ class DatasetHandle:
     integrity_summary: OptionChainIntegritySummary | None
     dataset_facts_status: OptionChainDatasetFactsStatus
     dataset_facts: OptionChainDatasetFacts | None
+    row_scope_status: OptionChainRowScopeStatus
+    row_scope: OptionChainRowScope | None
 ```
 
 **Change from STORAGE_SPEC §6:** `run_id`, `provider`, `content_hash`,
@@ -812,6 +826,14 @@ the stored status label alone. `valid` requires matching supported versions,
 matching content hashes, and a valid summary. `available` facts require their
 supported schema and the exact dataset content hash. Missing or stale metadata
 evaluates to `unknown`.
+
+`row_scope_status=available` proves the provider-neutral acquisition/filter
+scope stored with the same dataset publication. Its strict version-1 object
+records whether generic filters ran, the configured expiration horizon (`0`
+means unbounded), and conserved normalized/kept/filtered/per-ticker totals.
+Legacy records without this object remain `unknown`/null. Current malformed or
+contradictory scope raises `OptionChainRowScopeIntegrityError` at the validated
+load boundary.
 
 ### 4.1 Integrity summary and dataset facts
 

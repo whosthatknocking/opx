@@ -30,9 +30,11 @@ from opx_chain.export import (  # pylint: disable=unused-import
 )
 from opx_chain.fetch import fetch_ticker_option_chain, fetch_ticker_price_context
 from opx_chain.integrity import (
+    OPTION_CHAIN_ROW_SCOPE_SCHEMA_VERSION,
     OptionChainDataIntegrityError,
     OptionChainIntegrityCode,
     OptionChainIntegritySummary,
+    OptionChainRowScope,
     OptionChainSchemaCompatibilityError,
 )
 from opx_chain.iv_history_backfill import run_iv_history_backfill
@@ -773,6 +775,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
             price_context_path = _run_price_context_fetch(config, effective_tickers, logger)
 
         ticker_frames = []
+        ticker_results: list[TickerFetchResult] = []
         validation_findings = []
         filtered_row_counts = []
         total_tickers = len(effective_tickers)
@@ -793,35 +796,37 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
             )
             if not ticker_df.empty:
                 ticker_frames.append(ticker_df)
+            kept = len(ticker_df)
+            attrs = getattr(ticker_df, "attrs", {})
+            filtered_this = int(
+                attrs.get(
+                    "filtered_row_count",
+                    sum(filtered_row_counts[counts_before:]),
+                )
+            )
+            normalized_count = int(attrs.get("normalized_row_count", kept + filtered_this))
+            raw_count = int(attrs.get("raw_row_count", normalized_count))
+            exp_count = (
+                int(ticker_df["expiration_date"].nunique())
+                if kept and "expiration_date" in ticker_df.columns else 0
+            )
+            fetch_status = attrs.get(
+                "fetch_status",
+                "ok" if not ticker_df.empty else "skipped",
+            )
+            ticker_result = TickerFetchResult(
+                ticker=ticker,
+                raw_row_count=raw_count,
+                normalized_row_count=normalized_count,
+                kept_row_count=kept,
+                filtered_row_count=filtered_this,
+                expiration_count=exp_count,
+                status=str(fetch_status),
+                error_summary=attrs.get("fetch_error_summary"),
+            )
+            ticker_results.append(ticker_result)
             if storage is not None and run_id is not None:
-                kept = len(ticker_df)
-                attrs = getattr(ticker_df, "attrs", {})
-                filtered_this = int(
-                    attrs.get(
-                        "filtered_row_count",
-                        sum(filtered_row_counts[counts_before:]),
-                    )
-                )
-                normalized_count = int(attrs.get("normalized_row_count", kept + filtered_this))
-                raw_count = int(attrs.get("raw_row_count", normalized_count))
-                exp_count = (
-                    int(ticker_df["expiration_date"].nunique())
-                    if kept and "expiration_date" in ticker_df.columns else 0
-                )
-                fetch_status = attrs.get(
-                    "fetch_status",
-                    "ok" if not ticker_df.empty else "skipped",
-                )
-                storage.record_ticker_result(run_id, TickerFetchResult(
-                    ticker=ticker,
-                    raw_row_count=raw_count,
-                    normalized_row_count=normalized_count,
-                    kept_row_count=kept,
-                    filtered_row_count=filtered_this,
-                    expiration_count=exp_count,
-                    status=str(fetch_status),
-                    error_summary=attrs.get("fetch_error_summary"),
-                ))
+                storage.record_ticker_result(run_id, ticker_result)
             _emit_ticker_fetch_progress(
                 progress_callback,
                 TickerFetchProgress(ticker, ticker_index, total_tickers, "completed"),
@@ -871,6 +876,27 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
             csv_written = True
 
         if storage is not None and run_id is not None:
+            resolved_expiration_weeks = config.max_expiration_weeks
+            if (
+                isinstance(resolved_expiration_weeks, bool)
+                or not isinstance(resolved_expiration_weeks, int)
+                or resolved_expiration_weeks < 0
+            ):
+                raise ConfigError(
+                    "Config field 'settings.max_expiration_weeks' must be a nonnegative "
+                    "integer for durable option-chain publication."
+                )
+            row_scope = OptionChainRowScope(
+                schema_version=OPTION_CHAIN_ROW_SCOPE_SCHEMA_VERSION,
+                post_download_filters_enabled=config.enable_filters,
+                max_expiration_weeks=resolved_expiration_weeks,
+                normalized_row_count=sum(
+                    item.normalized_row_count for item in ticker_results
+                ),
+                kept_row_count=sum(item.kept_row_count for item in ticker_results),
+                filtered_row_count=sum(item.filtered_row_count for item in ticker_results),
+                ticker_count=len(ticker_results),
+            )
             if resolved_positions_path.exists():
                 storage.write_artifact(run_id, ArtifactWrite(
                     artifact_type="sidecar",
@@ -888,6 +914,7 @@ def _do_fetch_with_lock_held(  # pylint: disable=too-many-arguments,too-many-bra
                 provider=config.data_provider,
                 schema_version=SCHEMA_VERSION,
                 format=config.storage_dataset_format,
+                row_scope=row_scope,
             ))
             storage.finalize_run(run_id, RunSummary(status="complete"))
             dataset_handle = storage.get_dataset(dataset_record.dataset_id)
@@ -995,6 +1022,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     positions_path: Path | str | None = None,
     tickers: tuple[str, ...] | None = None,
     max_expiration_weeks: int | None = None,
+    enable_filters: bool | None = None,
     stale_quote_seconds: int | None = None,
     data_provider: str | None = None,
     dry_run: bool = False,
@@ -1011,6 +1039,7 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
     positions_path: override the default positions.csv location.
     tickers: override the ticker list from config for this run only.
     max_expiration_weeks: override the expiration window from config for this run only.
+    enable_filters: override generic post-download filtering for this run only.
     stale_quote_seconds: override the staleness threshold from config for this run only.
     data_provider: override settings.data_provider for this run only.
     dry_run: validate config, positions, and storage without API calls or writes.
@@ -1040,6 +1069,14 @@ def run_fetch(  # pylint: disable=too-many-arguments,too-many-positional-argumen
         config = replace(config, tickers=_coerce_run_fetch_tickers(tickers))
     if max_expiration_weeks is not None:
         config = _with_max_expiration_weeks(config, max_expiration_weeks)
+    if enable_filters is not None:
+        config = replace(
+            config,
+            enable_filters=_coerce_run_fetch_bool(
+                enable_filters,
+                field_name="run_fetch.enable_filters",
+            ),
+        )
     if stale_quote_seconds is not None:
         config = replace(
             config,

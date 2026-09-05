@@ -55,3 +55,4 @@ def test_viewer_remains_a_raw_disclosure_surface() -> None:
     assert "read_dataset_file" in viewer
     assert "integrity_status" in viewer
     assert "dataset_facts_status" in viewer
+    assert "row_scope_status" in viewer

@@ -1280,6 +1280,40 @@ def test_run_fetch_max_expiration_override_updates_derived_date(tmp_path: Path):
     assert active_config.max_expiration == "2026-04-17"
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_run_fetch_filter_override_is_scoped_and_persisted(tmp_path: Path, enabled: bool):
+    """The programmatic filter override must drive config and durable row scope."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True, enable_filters=not enabled)
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in patches]
+        handle = fetcher.run_fetch(enable_filters=enabled)
+
+    active_config = mocks[6].call_args_list[0][0][0]
+    assert active_config.enable_filters is enabled
+    assert handle.row_scope.post_download_filters_enabled is enabled
+
+
+def test_run_fetch_filter_override_rejects_false_like_strings(tmp_path: Path):
+    """Programmatic filter overrides accept only actual booleans."""
+    from opx_chain import fetcher  # pylint: disable=import-outside-toplevel
+
+    backend = MemoryBackend()
+    config = make_runtime_config(storage_enabled=True)
+    patches = _fetcher_patches(tmp_path, config, backend)
+
+    with ExitStack() as stack:
+        mocks = [stack.enter_context(p) for p in patches]
+        with pytest.raises(ConfigError, match="run_fetch.enable_filters"):
+            fetcher.run_fetch(enable_filters="false")
+
+    mocks[3].assert_not_called()
+
+
 def test_run_fetch_max_expiration_override_can_disable_filter(tmp_path: Path):
     """run_fetch(max_expiration_weeks=0) should disable the max-expiration filter."""
     from opx_chain import fetcher  # pylint: disable=import-outside-toplevel

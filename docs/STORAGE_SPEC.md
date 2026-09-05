@@ -432,6 +432,8 @@ class DatasetHandle:
     format: str
     content_hash: str   # SHA-256 of artifact bytes; for integrity checks
     created_at: datetime  # UTC timestamp; for freshness assessment
+    row_scope_status: OptionChainRowScopeStatus
+    row_scope: OptionChainRowScope | None
 ```
 
 ## 8. Storage Port Shape
@@ -567,6 +569,14 @@ such as the positions snapshot and run-log reference, are written before the
 transition. If those artifact writes fail, `delete_run_artifacts` removes any
 earlier sidecar, run-log, or pre-publication output artifacts for that run,
 then `fail_run` records the failure and no dataset is discoverable.
+
+The fetch coordinator also supplies one strict `OptionChainRowScope` in the
+same `DatasetWrite`. Backends persist it atomically beside the dataset record
+and mirror it onto every handle. It records the resolved generic-filter flag,
+expiration-window setting (`0` means unbounded), and count-conserving totals
+from the completed ticker results. Legacy absence loads as `unknown`/null;
+contradictory current metadata fails validated load rather than degrading to
+unknown.
 
 All semantic readers use
 `load_validated_option_chain_dataset(dataset_id)`. The loader resolves the
